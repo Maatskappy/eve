@@ -9,7 +9,8 @@ import {
   directoryError,
   gitRefError,
   renderSelfModificationConfig,
-  repositoryPartError,
+  repositoryNameError,
+  repositoryOwnerError,
   SELF_MODIFICATION_CONFIG_PATH,
   type SelfModificationSetupOperations,
   type SelfModificationSetupValues,
@@ -20,30 +21,13 @@ import {
   type LegacySelfModificationScaffold,
 } from "#self-modification/migration.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
-import { ensurePackageDependencies } from "#setup/scaffold/index.js";
-import { DEFAULT_CONNECT_PACKAGE_VERSION } from "#setup/scaffold/version-tokens.js";
 
 import { describeIntegrationSetupEnvironment } from "../shared/environment.js";
-import { installScaffoldDependencies } from "../shared/scaffold.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
   type SetupPrepareContext,
 } from "../types.js";
-
-export interface SelfModificationApplyDependencies {
-  ensurePackageDependencies: typeof ensurePackageDependencies;
-  installScaffoldDependencies: typeof installScaffoldDependencies;
-}
-
-const defaultApplyDependencies: SelfModificationApplyDependencies = {
-  ensurePackageDependencies,
-  installScaffoldDependencies,
-};
-
-const SELF_MODIFICATION_PRODUCTION_DEPENDENCIES = {
-  "@vercel/connect": DEFAULT_CONNECT_PACKAGE_VERSION,
-};
 
 type SelfModificationSetupPlan = (
   | { readonly kind: "authored" }
@@ -55,6 +39,8 @@ type SelfModificationSetupPlan = (
       readonly values: SelfModificationSetupValues;
     }
 ) & { readonly legacyScaffold?: LegacySelfModificationScaffold };
+
+const AUTHORIZATION_WARNING = `The generated configuration uses \`authorize: () => true\`, so any caller that can reach the deployed agent can ask it to open draft pull requests. Setting a custom \`authorize\` policy that checks the caller's principal and channel is recommended before deploying.`;
 
 function validationResult(error: string | undefined): string | null {
   return error ?? null;
@@ -127,10 +113,9 @@ export async function prepareSelfModificationSetup(
   );
   if (mode === "local") return withLegacyScaffold({ kind: "local" }, legacyScaffold);
 
-  const [project, detected, channelNames] = await Promise.all([
+  const [project, detected] = await Promise.all([
     context.resolveVercelProject("self-modification"),
     operations.detectGitRepository(),
-    operations.detectChannelNames(),
   ]);
   const owner = await context.asker.ask(
     text({
@@ -138,7 +123,7 @@ export async function prepareSelfModificationSetup(
       message: "GitHub repository owner",
       detected: detected.owner,
       required: true,
-      validate: (value) => validationResult(repositoryPartError(value)),
+      validate: (value) => validationResult(repositoryOwnerError(value)),
     }),
   );
   const repo = await context.asker.ask(
@@ -147,7 +132,7 @@ export async function prepareSelfModificationSetup(
       message: "GitHub repository name",
       detected: detected.repo,
       required: true,
-      validate: (value) => validationResult(repositoryPartError(value)),
+      validate: (value) => validationResult(repositoryNameError(value)),
     }),
   );
   const directory = await context.asker.ask(
@@ -170,20 +155,22 @@ export async function prepareSelfModificationSetup(
   );
   const name = connectorName(owner, repo);
   const values = {
-    branch,
-    channelNames,
+    baseBranch: branch,
     connector: `github/${name}`,
     directory,
-    repository: `github.com/${owner}/${repo}`,
+    repository: `${owner}/${repo}`,
   };
   context.presenter.note(
     renderSelfModificationConfig(values),
     `Generated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}`,
   );
   context.presenter.note(
-    "Vercel Connect will issue short-lived GitHub App credentials restricted to this repository. Install the managed GitHub App and select only this repository. Review, merge, and deployment remain separate operator boundaries.",
+    "Install the managed GitHub App for only this repository. Repository rules must require review and prevent the connector from bypassing protected branches. Review, merge, and production deployment remain separate operator boundaries.",
     "Security summary",
   );
+  context.presenter.note(AUTHORIZATION_WARNING, "Custom authorization recommended", {
+    tone: "warning",
+  });
   const confirmed = await context.asker.ask(
     confirm({
       key: "self-modification-confirm",
@@ -206,7 +193,6 @@ export async function applySelfModificationSetup(
     undefined,
     context.projectRoot,
   ),
-  deps: SelfModificationApplyDependencies = defaultApplyDependencies,
 ) {
   if (plan.legacyScaffold !== undefined) {
     await removeLegacySelfModificationScaffold(context.appRoot, plan.legacyScaffold);
@@ -223,28 +209,19 @@ export async function applySelfModificationSetup(
 
   const connector = await operations.findOrCreateConnector(plan.connectorName, plan.project);
   await operations.attachConnector(connector, plan.project);
-  const packageJsonUpdated = await deps.ensurePackageDependencies({
-    dependencies: SELF_MODIFICATION_PRODUCTION_DEPENDENCIES,
-    projectRoot: context.appRoot,
-  });
-  await deps.installScaffoldDependencies({
-    changed: packageJsonUpdated.length > 0,
-    log: context.presenter.log,
-    projectPath: context.appRoot,
-    signal: context.signal,
-  });
   await operations.writeConfig(renderSelfModificationConfig({ ...plan.values, connector }));
   context.presenter.log.success(`Updated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}.`);
   context.presenter.nextSteps([
-    "Install the managed GitHub App for the configured repository, then deploy or redeploy.",
-    `After deployment, try self-modification by running \`eve dev <deployment-url>\` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update \`${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}\`.`,
+    `Replace the allow-all \`authorize\` policy in ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH} with a custom policy for trusted callers (recommended).`,
+    "Install the managed GitHub App for only the configured repository, then deploy or redeploy.",
+    "After deployment, request an implementation through the agent's configured channel. It creates source proposals; production setup and deployment remain operator work.",
   ]);
   return {
     deploymentRequired: true as const,
     facts: [
       { label: "Repository", value: plan.values.repository },
       { label: "Application directory", value: plan.values.directory },
-      { label: "Target branch", value: plan.values.branch },
+      { label: "Target branch", value: plan.values.baseBranch },
       { label: "Credential", value: connector },
     ],
   };

@@ -271,9 +271,9 @@ export const SELF_MODIFICATION_SETUP = defineSetupIntegration({
   apply: applySelfModificationSetup,
 });
 
-export const SELF_MODIFICATION_PRODUCTION_SETUP = defineSetupIntegration({
-  kind: "self-modification-production",
-  label: "Self-modification production",
+export const SELF_MODIFICATION_DEPLOYED_SETUP = defineSetupIntegration({
+  kind: "self-modification-remote",
+  label: "Self-modification deployed",
   hint: "Configure deployed draft pull requests",
   describeEnvironment,
   prepare: prepareSelfModificationSetup,

@@ -1299,7 +1299,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("sends, but does not store, a continuation when history ends on an assistant message", async () => {
+  it("sends, but does not store, a continuation for Anthropic when history ends on an assistant message", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Done", role: "assistant" }] },
@@ -1312,7 +1312,14 @@ describe("createToolLoopHarness", () => {
       { content: "Working on it", role: "assistant" as const },
     ];
 
-    const runStep = createToolLoopHarness(createTestConfig());
+    const runStep = createToolLoopHarness(
+      createTestConfig(undefined, {
+        resolveModel: vi.fn().mockResolvedValue({
+          modelId: "claude-sonnet-4-5",
+          provider: "anthropic.messages",
+        } as LanguageModel),
+      }),
+    );
     const result = await runStep(createTestSession({ history }));
 
     const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {

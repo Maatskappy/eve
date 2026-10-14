@@ -79,16 +79,16 @@ export function modelInstructions(input: {
 }
 
 /**
- * The call's messages as sent: a retry's note trails them, and a prompt that would
- * end on an assistant message gets a continuation, since providers without
- * assistant prefill (e.g. Anthropic) reject it. Neither is stored in history.
+ * The call's messages as sent: a retry's note trails them, and for a provider that rejects a
+ * prompt ending on an assistant message, a continuation does. Neither is stored in history.
  */
 export function withTrailingUserNote(
   messages: readonly ModelMessage[],
-  note?: string,
+  note: string | undefined,
+  profile: Pick<ModelProfile, "rejectsAssistantFinalPrompt">,
 ): ModelMessage[] {
   if (note) return [...messages, createFrameworkUserMessage("execution.retry", note)];
-  if (messages.at(-1)?.role === "assistant") {
+  if (profile.rejectsAssistantFinalPrompt && messages.at(-1)?.role === "assistant") {
     return [
       ...messages,
       createFrameworkUserMessage("execution.continuation", COMPACTION_RESUMPTION_MESSAGE),

@@ -25,6 +25,8 @@ export default {
     },
   ],
   copyDeclarations: createDeclarationCopier({
+    discoverExtraFiles: (distEntries) =>
+      distEntries.filter((entry) => /^types-.*\.d\.ts$/u.test(entry)),
     files: [
       { source: "index.d.ts", output: "index.d.ts" },
       { source: "api.d.ts", output: "api.d.ts" },

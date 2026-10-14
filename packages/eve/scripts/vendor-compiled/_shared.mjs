@@ -44,7 +44,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
+import { dirname, isAbsolute, join, parse, posix, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
@@ -193,7 +193,33 @@ export function createDeclarationCopier({
         }),
       );
     }
+
+    await assertRelativeDeclarationImportsExist(destinationRoot, packageInfo.packageJson.name);
   };
+}
+
+// Upstream .d.ts files import hashed chunks (e.g. `./types-<hash>.js`) that are only
+// copied when listed or discovered; a missing one ships broken types (#1500).
+const RELATIVE_DECLARATION_IMPORT =
+  /^\s*(?:import|export)\b[^;]*?\bfrom\s+["'](\.{1,2}\/[^"']+)\.js["']/gmu;
+
+async function assertRelativeDeclarationImportsExist(destinationRoot, packageName) {
+  const entries = await readdir(destinationRoot, { recursive: true });
+  const declarations = new Set(
+    entries.filter((entry) => entry.endsWith(".d.ts")).map((entry) => entry.split(sep).join("/")),
+  );
+  for (const declaration of declarations) {
+    const sourceText = await readFile(join(destinationRoot, declaration), "utf8");
+    for (const [, specifier] of sourceText.matchAll(RELATIVE_DECLARATION_IMPORT)) {
+      const target = posix.join(posix.dirname(declaration), `${specifier}.d.ts`);
+      if (!declarations.has(target)) {
+        throw new Error(
+          `Vendor: ${packageName}'s ${declaration} imports "${specifier}.js", but ${target} was not copied. ` +
+            "List it in copyDeclarations' files or add a discoverExtraFiles hook.",
+        );
+      }
+    }
+  }
 }
 
 function mergeExternalDeclarationImports(sources) {

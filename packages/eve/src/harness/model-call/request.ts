@@ -6,9 +6,12 @@ import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
 import { taskSystemMessages } from "#execution/tasks/model-step.js";
-import { COMPACTION_RESUMPTION_MESSAGE } from "#harness/compaction/prompt.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
-import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
+import {
+  CONTINUATION_MESSAGE,
+  createFrameworkUserMessage,
+  type HarnessModelMessage,
+} from "#harness/messages.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
@@ -91,7 +94,7 @@ export function withTrailingUserNote(
   if (profile.rejectsAssistantFinalPrompt && messages.at(-1)?.role === "assistant") {
     return [
       ...messages,
-      createFrameworkUserMessage("execution.continuation", COMPACTION_RESUMPTION_MESSAGE),
+      createFrameworkUserMessage("execution.continuation", CONTINUATION_MESSAGE),
     ];
   }
   return [...messages];

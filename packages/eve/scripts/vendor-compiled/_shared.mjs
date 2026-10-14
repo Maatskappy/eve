@@ -44,7 +44,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, parse, posix, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
@@ -99,15 +99,14 @@ export async function loadDeclaration(relativePath) {
  * the script refuses to silently fall back so the next version bump can't
  * sneak a new dependency past us.
  *
- * `files` can override the default `dist/index.d.ts` copy. Use it for
- * packages whose entrypoint declaration imports sibling declaration files,
- * or for multi-entry packages that need their upstream declaration tree.
+ * `files` can override the default `dist/index.d.ts` copy, e.g. for
+ * multi-entry packages. Sibling declarations the copied files import by
+ * relative path are added automatically.
  * `declarationRoot` changes the package-relative source directory when
  * declarations live outside `dist`.
  *
- * `discoverExtraFiles` is consulted for chunk files the upstream `.d.ts`
- * references by relative path (e.g. chat's `./jsx-runtime-<hash>.d.ts`).
- * Each returned filename is co-copied verbatim into the destination.
+ * `discoverExtraFiles` returns other upstream files (e.g. scripts) to
+ * co-copy verbatim into the destination.
  */
 export function createDeclarationCopier({
   declarationRoot = "dist",
@@ -131,6 +130,7 @@ export function createDeclarationCopier({
         sourceText: await readFile(join(distDir, file.source), "utf8"),
       })),
     );
+    await addImportedDeclarations(declarations, distDir, packageInfo.packageJson.name);
     const externals = mergeExternalDeclarationImports(
       declarations.map((declaration) => declaration.sourceText),
     );
@@ -193,31 +193,32 @@ export function createDeclarationCopier({
         }),
       );
     }
-
-    await assertRelativeDeclarationImportsExist(destinationRoot, packageInfo.packageJson.name);
   };
 }
 
-// Upstream .d.ts files import hashed chunks (e.g. `./types-<hash>.js`) that are only
-// copied when listed or discovered; a missing one ships broken types (#1500).
 const RELATIVE_DECLARATION_IMPORT =
   /^\s*(?:import|export)\b[^;]*?\bfrom\s+["'](\.{1,2}\/[^"']+)\.js["']/gmu;
 
-async function assertRelativeDeclarationImportsExist(destinationRoot, packageName) {
-  const entries = await readdir(destinationRoot, { recursive: true });
-  const declarations = new Set(
-    entries.filter((entry) => entry.endsWith(".d.ts")).map((entry) => entry.split(sep).join("/")),
-  );
-  for (const declaration of declarations) {
-    const sourceText = await readFile(join(destinationRoot, declaration), "utf8");
-    for (const [, specifier] of sourceText.matchAll(RELATIVE_DECLARATION_IMPORT)) {
-      const target = posix.join(posix.dirname(declaration), `${specifier}.d.ts`);
-      if (!declarations.has(target)) {
+/**
+ * Adds the sibling declarations the copied ones import, transitively, so they get
+ * the same rewrites. Upstream builds split types into hashed chunks such as
+ * `./types-<hash>.js`, whose names change between releases (#1500).
+ */
+async function addImportedDeclarations(declarations, distDir, packageName) {
+  const outputs = new Set(declarations.map((declaration) => declaration.output));
+  for (let index = 0; index < declarations.length; index += 1) {
+    const importer = declarations[index];
+    for (const [, specifier] of importer.sourceText.matchAll(RELATIVE_DECLARATION_IMPORT)) {
+      const output = posix.join(posix.dirname(importer.output), `${specifier}.d.ts`);
+      if (outputs.has(output)) continue;
+      outputs.add(output);
+      const source = posix.join(posix.dirname(importer.source), `${specifier}.d.ts`);
+      const sourceText = await readFile(join(distDir, source), "utf8").catch(() => {
         throw new Error(
-          `Vendor: ${packageName}'s ${declaration} imports "${specifier}.js", but ${target} was not copied. ` +
-            "List it in copyDeclarations' files or add a discoverExtraFiles hook.",
+          `Vendor: ${packageName}'s ${importer.source} imports "${specifier}.js", but ${source} is not in its published declarations.`,
         );
-      }
+      });
+      declarations.push({ output, source, sourceText });
     }
   }
 }

@@ -6,13 +6,16 @@
  */
 
 import type { ContextReader } from "#context/key.js";
-import { DynamicSkillManifestKey } from "#context/keys.js";
+import { contextStorage } from "#context/container.js";
+import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { skillTarget } from "#shared/action-request-name.js";
 import { stripSkillFrontmatter } from "#shared/skill-package.js";
+import { MODEL_SKILL_ROOT, resolveSandboxModelPath } from "#shared/skill-paths.js";
+import type { SandboxAccess } from "#sandbox/state.js";
 import { toInputSchema } from "#tools/schema.js";
 
 import { closestNames } from "./rank.js";
@@ -72,13 +75,39 @@ export function createSkillLoader(
       const skill = skills.get(input.name);
       // `eve__skill` validation resolves every skill before the call runs.
       if (skill === undefined) throw new Error(`No skill named "${input.name}".`);
-      return skill.markdown;
+      const sandbox = contextStorage.getStore()?.get(SandboxKey);
+      if (skill.path === undefined || sandbox === undefined) return skill.markdown;
+      return resolveSkillDirectory(sandbox, skill.name).then((directory) =>
+        directory === undefined
+          ? skill.markdown
+          : `Skill files: ${directory}/\n\n${skill.markdown}`,
+      );
     },
     frameworkTool: true,
     inputSchema: SKILL_INPUT_SCHEMA,
     label: SKILL_LOAD_LABEL,
     name: SKILL_ENTRY_NAME,
   };
+}
+
+/**
+ * Where the skill's package files live in the session sandbox, if it has one. Shell commands
+ * need the real directory, because a provider can keep skills outside the
+ * sandbox's `$HOME`. If opening the sandbox fails, the symbolic path stays,
+ * which file tools still resolve.
+ */
+async function resolveSkillDirectory(
+  access: SandboxAccess,
+  name: string,
+): Promise<string | undefined> {
+  const symbolic = `${MODEL_SKILL_ROOT}/${name}`;
+  try {
+    const sandbox = await access.get();
+    if (sandbox === null) return undefined;
+    return await resolveSandboxModelPath({ path: symbolic, sandbox });
+  } catch {
+    return symbolic;
+  }
 }
 
 /** Why `eve__skill` can't load `name`: the closest skills, or the connection it names. */

@@ -12,7 +12,11 @@ import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
-import { sandboxWorkspaceRoot } from "#shared/sandbox-session.js";
+import { sandboxWorkspaceRoot, type SandboxSession } from "#shared/sandbox-session.js";
+import {
+  removeSkillPackageFromSandbox,
+  writeSkillPackageToSandbox,
+} from "#shared/skill-package.js";
 import { resolveSandboxModelPath, resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -158,6 +162,41 @@ describe("HostSandbox", () => {
     await expect.poll(() => isProcessAlive(abortedChild)).toBe(false);
     await expect.poll(() => isProcessAlive(stoppedChild)).toBe(false);
     await expect.poll(() => isProcessAlive(orphan)).toBe(false);
+  });
+
+  it("writes and removes skill packages in its own skill root, never under the real HOME", async () => {
+    const home = await createScratchDirectory("eve-host-home-");
+    vi.stubEnv("HOME", home);
+    try {
+      const appRoot = await createScratchDirectory("eve-host-skills-");
+      const { sandbox } = await createHostProvider().openSession({
+        appRoot,
+        sandboxName: "session-skills",
+      });
+      // Only public members survive, like a wrapper that rebuilds the session.
+      const wrapped = Object.fromEntries(
+        Object.entries(sandbox).filter(([, value]) => typeof value === "function"),
+      ) as unknown as SandboxSession;
+      const skill = {
+        description: "Tenant notes",
+        files: [{ content: Buffer.from("notes"), relativePath: "references/notes.md" }],
+        markdown: "# Tenant",
+        name: "tenant",
+      };
+
+      await writeSkillPackageToSandbox({ sandbox: wrapped, skill });
+      const skillRoot = await resolveSandboxSkillRoot({ sandbox: wrapped });
+      expect(skillRoot.startsWith(join(appRoot, "host", "sessions"))).toBe(true);
+      await expect(readFile(join(skillRoot, "tenant/references/notes.md"), "utf8")).resolves.toBe(
+        "notes",
+      );
+      await removeSkillPackageFromSandbox({ name: "tenant", sandbox: wrapped });
+
+      expect(existsSync(join(skillRoot, "tenant"))).toBe(false);
+      expect(existsSync(join(home, ".agents"))).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("stops bash tool jobs that keep running after the call returns", async () => {

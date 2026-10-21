@@ -1,19 +1,29 @@
-import {
-  declaredSandboxSkillRoot,
-  sandboxWorkspaceRoot,
-  type SandboxSession,
-} from "#shared/sandbox-session.js";
+import { sandboxWorkspaceRoot, type SandboxSession } from "#shared/sandbox-session.js";
 
 const MODEL_HOME_ROOT = "$HOME";
 
 export const MODEL_SKILL_ROOT = `${MODEL_HOME_ROOT}/.agents/skills`;
 
-const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
-const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
+/**
+ * A provider whose home directory is not its own, such as the host sandbox,
+ * sets this on every command so eve keeps skills in a directory it owns.
+ */
+export const SANDBOX_SKILL_ROOT_ENV = "EVE_SANDBOX_SKILL_ROOT";
+
+// One probe reports the home directory and the declared skill root, one per line.
+const SANDBOX_PATHS_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${${SANDBOX_SKILL_ROOT_ENV}-}"`;
+
+interface SandboxPaths {
+  readonly home: string | null;
+  readonly skillRoot: string | null;
+}
+
+const sandboxPathsCache = new WeakMap<SandboxSession, Promise<SandboxPaths>>();
 
 /**
- * Resolves where skills live in the sandbox: the provider-declared skill root,
- * else under the probed home, else under `skills/` in the workspace root.
+ * Resolves where skills live in the sandbox: the root the provider declares in
+ * `EVE_SANDBOX_SKILL_ROOT`, else under the probed home, else under `skills/`
+ * in the workspace root.
  */
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
@@ -23,9 +33,10 @@ export async function resolveSandboxSkillRoot(input: {
 
 /**
  * Resolves a leading `$HOME` in a model-supplied sandbox path without
- * evaluating any other shell syntax. Skill paths resolve to the provider's
- * declared skill root when it has one, and fall back to `skills/` under the
- * workspace root when the sandbox does not expose a usable home directory.
+ * evaluating any other shell syntax. `$HOME/.agents/skills` paths resolve to
+ * the provider's declared skill root when it has one; other `$HOME` paths
+ * always resolve to the sandbox's home. Skill paths fall back to `skills/`
+ * under the workspace root when the sandbox has neither.
  */
 export async function resolveSandboxModelPath(input: {
   readonly path: string;
@@ -35,15 +46,14 @@ export async function resolveSandboxModelPath(input: {
     return input.path;
   }
 
+  const { home, skillRoot } = await resolveSandboxPaths(input.sandbox);
   const skillSuffix = isModelSkillPath(input.path)
     ? input.path.slice(MODEL_SKILL_ROOT.length)
     : undefined;
-  const declaredSkillRoot = declaredSandboxSkillRoot(input.sandbox);
-  if (skillSuffix !== undefined && declaredSkillRoot !== undefined) {
-    return `${declaredSkillRoot}${skillSuffix}`;
+  if (skillSuffix !== undefined && skillRoot !== null) {
+    return `${skillRoot}${skillSuffix}`;
   }
 
-  const home = await resolveSandboxHome(input.sandbox);
   if (home !== null) {
     const suffix = input.path.slice(MODEL_HOME_ROOT.length);
     return suffix.length === 0 ? home : `${home === "/" ? "" : home}${suffix}`;
@@ -76,32 +86,29 @@ function formatSkillPath(input: {
   return `${input.root}/${input.name}/${input.relativePath}`;
 }
 
-async function resolveSandboxHome(sandbox: SandboxSession): Promise<string | null> {
-  const cached = sandboxHomeCache.get(sandbox);
+async function resolveSandboxPaths(sandbox: SandboxSession): Promise<SandboxPaths> {
+  const cached = sandboxPathsCache.get(sandbox);
   if (cached !== undefined) {
     return await cached;
   }
 
-  const next = probeSandboxHome(sandbox);
-  sandboxHomeCache.set(sandbox, next);
+  const next = probeSandboxPaths(sandbox);
+  sandboxPathsCache.set(sandbox, next);
   return await next;
 }
 
-async function probeSandboxHome(sandbox: SandboxSession): Promise<string | null> {
+async function probeSandboxPaths(sandbox: SandboxSession): Promise<SandboxPaths> {
   try {
-    const result = await sandbox.run({ command: HOME_PROBE_COMMAND });
+    const result = await sandbox.run({ command: SANDBOX_PATHS_PROBE_COMMAND });
     if (result.exitCode !== 0) {
-      return null;
+      return { home: null, skillRoot: null };
     }
-
-    const home = result.stdout.trim();
-    if (!isUsableSandboxHome(home)) {
-      return null;
-    }
-
-    return normalizeSandboxHome(home);
+    // A login profile can print before the probe, so read its two lines from the end.
+    const lines = result.stdout.split("\n");
+    const [home = "", skillRoot = ""] = lines.slice(-3, -1);
+    return { home: usableDirectory(home), skillRoot: usableDirectory(skillRoot) };
   } catch {
-    return null;
+    return { home: null, skillRoot: null };
   }
 }
 
@@ -113,16 +120,10 @@ function isModelSkillPath(path: string): boolean {
   return path === MODEL_SKILL_ROOT || path.startsWith(`${MODEL_SKILL_ROOT}/`);
 }
 
-function isUsableSandboxHome(path: string): boolean {
-  return (
-    path.length > 0 &&
-    path.startsWith("/") &&
-    !path.includes("\0") &&
-    !path.includes("\n") &&
-    !path.includes("\r")
-  );
-}
-
-function normalizeSandboxHome(home: string): string {
-  return home === "/" ? home : home.replace(/\/+$/, "");
+function usableDirectory(path: string): string | null {
+  const trimmed = path.trim();
+  if (trimmed.length === 0 || !trimmed.startsWith("/") || trimmed.includes("\0")) {
+    return null;
+  }
+  return trimmed === "/" ? trimmed : trimmed.replace(/\/+$/, "");
 }

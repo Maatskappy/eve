@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { declareSandboxSkillRoot } from "#shared/sandbox-session.js";
 import {
   MODEL_SKILL_ROOT,
   resolveSandboxModelPath,
   resolveSandboxSkillRoot,
 } from "#shared/skill-paths.js";
 
-const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+const HOME_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 
 describe("skill path helpers", () => {
   it("resolves the sandbox skill root from HOME", async () => {
@@ -88,17 +87,29 @@ describe("skill path helpers", () => {
     ).resolves.toBe("/home/agent/.agents/skills/research/references/catalog.md");
   });
 
-  it("resolves skill paths to a declared skill root without probing HOME", async () => {
-    const sandbox = mockSandbox();
-    const session = declareSandboxSkillRoot(sandbox.session, "/app/.eve/skills");
+  it("resolves skill paths to a declared skill root and other paths to HOME", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: {
+          exitCode: 0,
+          stderr: "",
+          stdout: "Welcome!\n/home/agent\n/app/.eve/skills\n",
+        },
+      },
+    });
 
-    await expect(resolveSandboxSkillRoot({ sandbox: session })).resolves.toBe("/app/.eve/skills");
+    await expect(resolveSandboxSkillRoot({ sandbox: sandbox.session })).resolves.toBe(
+      "/app/.eve/skills",
+    );
     await expect(
       resolveSandboxModelPath({
         path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
-        sandbox: session,
+        sandbox: sandbox.session,
       }),
     ).resolves.toBe("/app/.eve/skills/research/references/catalog.md");
-    expect(sandbox.commandLog).toEqual([]);
+    await expect(
+      resolveSandboxModelPath({ path: "$HOME/notes.md", sandbox: sandbox.session }),
+    ).resolves.toBe("/home/agent/notes.md");
+    expect(sandbox.commandLog).toEqual([HOME_PROBE_COMMAND]);
   });
 });

@@ -3,7 +3,6 @@ type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
 import {
-  declareSandboxSkillRoot,
   type InternalSandboxSession,
   type SandboxProcess,
   type SandboxReadBinaryFileOptions,
@@ -126,12 +125,8 @@ export function buildSandboxSession(
       });
     },
   };
-  return declareSandboxSkillRoot(
-    setNetworkPolicy === undefined
-      ? session
-      : ({ ...session, setNetworkPolicy } as NetworkPolicySandboxSession),
-    primitives.skillRoot,
-  );
+  if (setNetworkPolicy === undefined) return session;
+  return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
 }
 
 /**

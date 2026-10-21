@@ -10,7 +10,7 @@ import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
 import { ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
-const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+const HOME_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -5,7 +5,9 @@ import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { isAuthorizationSignal, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import {
   catalogBundle,
   catalogContext,
@@ -24,6 +26,7 @@ import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 import { buildStepCatalog, type StepCatalog } from "./step-catalog.js";
 
 const CHILD = { rootSessionId: "root-session" };
+const SANDBOX_PATHS_PROBE = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 
 const names = (tools: ReadonlyMap<string, HarnessToolDefinition>) => [...tools.keys()];
 
@@ -330,6 +333,27 @@ describe("buildStepCatalog", () => {
       expect(
         await resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "" }),
       ).toBe("# PDF forms");
+    });
+
+    it("reports where a skill's files live in the session sandbox", async () => {
+      const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
+      const sandbox = mockSandbox({
+        commands: {
+          [SANDBOX_PATHS_PROBE]: {
+            exitCode: 0,
+            stderr: "",
+            stdout: "/home/dev\n/app/.eve/skills\n",
+          },
+        },
+      });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+
+      const output = await contextStorage.run(ctx, () =>
+        resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "" }),
+      );
+
+      expect(output).toBe("Skill files: /app/.eve/skills/pdf-forms/\n\n# PDF forms");
     });
 
     it("resolves a direct call only to a listed tool, and eve__tool to a listed tool too", () => {

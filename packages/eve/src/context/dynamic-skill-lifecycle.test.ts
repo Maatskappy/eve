@@ -24,7 +24,7 @@ import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import type { SandboxSessionState } from "#sandbox/state.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
 
-const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+const HOME_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 const SKILL_ROOT = "/home/agent/.agents/skills";
 
 function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledBundle {

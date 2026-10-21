@@ -15,6 +15,7 @@ import type {
   SandboxSession,
   SandboxSpawnOptions,
 } from "#shared/sandbox-session.js";
+import { SANDBOX_SKILL_ROOT_ENV } from "#shared/skill-paths.js";
 
 /** Where the `bash` tool keeps a session's background jobs; see `execution/sandbox/bash.ts`. */
 const JOBS_DIRECTORY_NAME = "jobs";
@@ -50,7 +51,6 @@ export async function openHostSandboxHandle(input: {
 
   const sandbox = buildSandboxSession({
     resolvePath,
-    skillRoot: input.skillRoot,
     async spawn(options) {
       options.abortSignal?.throwIfAborted();
       const cwd = resolvePath(options.workingDirectory ?? ".");
@@ -65,6 +65,7 @@ export async function openHostSandboxHandle(input: {
           ...SANDBOX_AGENT_ENV,
           ...options.env,
           EVE_SANDBOX_JOB_ROOT: jobRoot,
+          [SANDBOX_SKILL_ROOT_ENV]: input.skillRoot,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });

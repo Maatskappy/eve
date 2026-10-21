@@ -7,7 +7,7 @@ import {
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 
-const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+const HOME_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 
 describe("normalizeSkillPackage", () => {
   it("generates SKILL.md and sorts package files deterministically", () => {

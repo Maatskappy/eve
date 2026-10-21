@@ -57,7 +57,7 @@ eve never copies `agent/sandbox/workspace/` files into a shared root and never d
 
 The workspace root is the directory where commands start: the per-session directory, or `root`. Relative paths in `sandbox.readTextFile()`, `sandbox.writeTextFile()`, and the other file methods resolve from it. Absolute paths refer to the same path on your machine.
 
-Skill files are copied into a directory eve owns under `.eve/sandbox-cache/host/sessions/`, not into your home directory. The `read_file` tool and other file tools resolve `$HOME/.agents/skills/` paths to that directory. A `bash` command that expands `$HOME` itself still sees your real home directory.
+Skill files are copied into a directory eve owns under `.eve/sandbox-cache/host/sessions/`, not into your home directory. Commands receive that directory as `EVE_SANDBOX_SKILL_ROOT`. The `read_file` tool and other file tools resolve `$HOME/.agents/skills/` paths to it, and loading a skill tells the model where its files are. A `bash` command that expands `$HOME` itself still sees your real home directory.
 
 ## Commands and environment variables
 

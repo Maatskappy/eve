@@ -30,8 +30,10 @@ export {
  * - `resolvePath` anchors relative paths at the engine's workspace root and
  *   passes absolute paths through. `resolvePath(".")` is the workspace root eve
  *   reports to tools.
- * - `skillRoot` optionally names the absolute directory where eve writes
- *   skill packages, instead of `$HOME/.agents/skills`.
+ *
+ * eve writes skill packages under the sandbox's `$HOME/.agents/skills`. An
+ * engine whose home directory is not its own can set `EVE_SANDBOX_SKILL_ROOT`
+ * to an absolute directory in every command's environment instead.
  *
  * eve resolves every path through `resolvePath` before it calls `readFile`,
  * `writeFile`, or `removePath`.

@@ -157,31 +157,6 @@ export interface InternalSandboxSession extends Pick<
    * paths resolve from the workspace root, so `resolvePath(".")` declares it.
    */
   resolvePath(path: string): string;
-  /**
-   * Absolute directory where eve writes skill packages. Omit it to keep the
-   * default: `$HOME/.agents/skills` as reported by the sandbox, or `skills/`
-   * under the workspace root when the sandbox has no usable home.
-   */
-  readonly skillRoot?: string;
-}
-
-const SKILL_ROOT = Symbol.for("eve.sandbox-skill-root");
-
-/**
- * Records a provider-declared skill root on a built session. A symbol keeps it
- * off the public surface while spreads and proxies around the session keep it.
- */
-export function declareSandboxSkillRoot<Session extends SandboxSession>(
-  session: Session,
-  skillRoot: string | undefined,
-): Session {
-  return skillRoot === undefined ? session : Object.assign(session, { [SKILL_ROOT]: skillRoot });
-}
-
-/** The provider-declared skill root, when the session's provider declared one. */
-export function declaredSandboxSkillRoot(session: SandboxSession): string | undefined {
-  const skillRoot: unknown = Reflect.get(session, SKILL_ROOT);
-  return typeof skillRoot === "string" ? skillRoot : undefined;
 }
 
 /** The session's workspace root: where relative paths resolve and commands start. */

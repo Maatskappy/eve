@@ -11,7 +11,7 @@ import type { WriteFileResult } from "../src/execution/sandbox/write-file.js";
 import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file.js";
 import { createReadFileStamp, ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
-const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+const HOME_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 
 // ---------------------------------------------------------------------------
 // Helpers

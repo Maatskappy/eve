@@ -267,7 +267,7 @@ function createHandle(remote: AcmeRemote): SandboxProviderHandle {
 
 eve passes every path through `resolvePath()` before it calls `readFile`, `writeFile`, or `removePath`. `resolvePath()` also declares the sandbox's workspace root: relative paths resolve from it, and `resolvePath(".")` is the directory that `glob`, `grep`, attachment staging, and error messages use. Return `null` from `readFile` when the file does not exist.
 
-eve writes skill packages to `$HOME/.agents/skills`, using the sandbox's own `$HOME`. To keep skills somewhere else, pass an absolute `skillRoot` directory to `createSandboxSession()`.
+eve writes skill packages to `$HOME/.agents/skills`, using the sandbox's own `$HOME`. To keep skills somewhere else, set `EVE_SANDBOX_SKILL_ROOT` to an absolute directory in the environment of every command your provider runs. eve reads it once per session and writes skills there instead.
 
 ### Example: a just-bash provider
 

@@ -68,11 +68,16 @@ cannot be `/workspace`, so both roots become provider-declared:
 - **Workspace root** is what `sandbox.resolvePath(".")` returns. Every provider
   already implements `resolvePath` by anchoring relative paths at its root;
   Vercel and Docker keep `/workspace`.
-- **Skill root** is optional `skillRoot` on the session primitives. When
-  absent, eve keeps the `$HOME/.agents/skills` probe (with the
-  `<workspace root>/skills` fallback). `HostSandbox` declares
-  `.eve/sandbox-cache/host/sessions/<key>/skills`, so eve never writes skills
-  into the user's real `$HOME`.
+- **Skill root** comes from the command environment. The existing `$HOME`
+  probe becomes `printf '%s\n%s\n' "$HOME" "${EVE_SANDBOX_SKILL_ROOT-}"`,
+  cached per session. `$HOME/.agents/skills/...` paths resolve under
+  `EVE_SANDBOX_SKILL_ROOT` when it is set; every other `$HOME` path resolves to
+  the probed home, and skills fall back to `<workspace root>/skills` when
+  neither is usable. `HostSandbox` sets
+  `EVE_SANDBOX_SKILL_ROOT=.eve/sandbox-cache/host/sessions/<key>/skills/<template>`
+  on every command, so eve never writes skills into the user's real `$HOME`.
+  The environment travels with every command, so no session wrapper can drop
+  it and fall back to the real home.
 
 The system prompt is composed once per agent at bootstrap, before any session
 or sandbox exists, and the per-session root depends on the session id. So the
@@ -86,8 +91,10 @@ every runtime surface renders the real root from the opened session:
 
 The model learns the absolute root from its first `bash`, `glob`, or `grep`
 call. Skill paths stay symbolic (`$HOME/.agents/skills/<skill>/SKILL.md`); file
-tools resolve that prefix to the declared skill root. On `HostSandbox`, a
-`bash` command that expands `$HOME` itself sees the real home directory.
+tools resolve that prefix to the declared skill root, and loading a skill with
+package files opens the sandbox and prefixes the result with the resolved
+directory so shell commands use the right path. On `HostSandbox`, a `bash`
+command that expands `$HOME` itself sees the real home directory.
 
 Rejected alternatives: announcing the root as a `context.state` message after
 the first open (adds harness plumbing and still arrives after the first tool
@@ -99,8 +106,8 @@ credential lookups that the provider exists to reach).
 Custom providers built on a non-shell engine previously had just-bash as the
 reference. `eve/sandbox/provider` now exports `createSandboxSession(primitives)`,
 which wraps the internal `buildSandboxSession`: a provider implements `spawn`,
-`readFile`, `writeFile`, `removePath`, `resolvePath`, and optionally
-`skillRoot`, and gets the full `SandboxSession` (`run`, binary and text
+`readFile`, `writeFile`, `removePath`, and `resolvePath`, and gets the full
+`SandboxSession` (`run`, binary and text
 variants, encodings, line ranges). The custom provider docs include a
 just-bash-backed recipe built on it; the application installs `just-bash`
 itself.
@@ -180,7 +187,8 @@ part of the public extension contract.
 ## Known limitations
 
 - A `bash` command that expands `$HOME` itself sees the real home directory;
-  only eve's file tools map `$HOME/.agents/skills` to the session skill root.
+  only eve's file tools and skill loading map `$HOME/.agents/skills` to the
+  session skill root.
 - Sessions that share a `root` share its files and can overwrite each other.
 - Commands run detached in their own process group, so they outlive an eve
   process that exits without shutting down (for example after `kill -9`).

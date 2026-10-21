@@ -1,0 +1,66 @@
+---
+title: "Host Sandbox"
+description: "Run sandbox commands with this machine's shell and filesystem during local development."
+---
+
+`HostSandbox.environment()` runs sandbox commands with this machine's `bash`, against a real directory. The agent can use the tools you already have installed, such as `git`, `pnpm`, `tsc`, and `python`. It does not start a container or VM.
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { HostSandbox } from "eve/sandbox/host";
+
+export const environment = HostSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+## Not an isolation boundary
+
+The host sandbox runs commands as the user that started eve, with that user's files, network access, and credentials. A command the agent runs can read, change, or delete anything you can. eve does not apply a network policy, and the session does not expose `setNetworkPolicy()`. Use the host sandbox only for agents and inputs you trust. For isolation, use [Docker](/docs/sandbox/docker) or [Vercel Sandbox](/docs/sandbox/vercel).
+
+## Per-session directories
+
+By default, each eve session gets its own workspace directory under `.eve/sandbox-cache/host/sessions/` in your app. eve builds a template from `agent/sandbox/workspace/` and the environment's `prepare` function, then copies it once for each new session:
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { HostSandbox } from "eve/sandbox/host";
+
+export const environment = HostSandbox.environment({
+  async prepare(sandbox) {
+    const result = await sandbox.run({ command: "git init -q" });
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+eve deletes a session's directory when you call `sandbox.delete()` and when the session ends. Templates live under `.eve/sandbox-cache/host/templates/` and are pruned with other local sandbox templates.
+
+## Shared directory
+
+Pass `root` to run every session in an existing directory, resolved from your app root:
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { HostSandbox } from "eve/sandbox/host";
+
+export const environment = HostSandbox.environment({ root: "." });
+export default defineSandbox(() => environment.open());
+```
+
+eve never copies `agent/sandbox/workspace/` files into a shared root and never deletes it, including on `sandbox.delete()` and session end. Because eve does not prepare a directory it does not own, `root` and `prepare` cannot be combined. Sessions that share a root also share its files, so concurrent sessions can see and overwrite each other's changes.
+
+## Paths
+
+The workspace root is the directory where commands start: the per-session directory, or `root`. Relative paths in `sandbox.readTextFile()`, `sandbox.writeTextFile()`, and the other file methods resolve from it. Absolute paths refer to the same path on your machine.
+
+Skill files are copied into a directory eve owns under `.eve/sandbox-cache/host/sessions/`, not into your home directory. The `read_file` tool and other file tools resolve `$HOME/.agents/skills/` paths to that directory. A `bash` command that expands `$HOME` itself still sees your real home directory.
+
+## Commands and environment variables
+
+eve runs each command with `bash -c` in its own process group. Aborting a command kills the process group, and `sandbox.stop()` and server shutdown kill every command that the session still has running. If the eve process exits without shutting down, for example after `kill -9`, commands it started keep running.
+
+Commands inherit the environment variables of the process that started eve, except values eve loaded from your `.env` files. eve also sets `AI_AGENT=eve`, and the `env` you pass to `run()` or `spawn()` overrides both. If your shell exports a variable that an `.env` file also defines with a different value, the command keeps your shell's value.
+
+See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

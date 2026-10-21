@@ -1,5 +1,5 @@
 /**
- * Facade over every local sandbox provider (Docker, just-bash) plus their
+ * Facade over every local sandbox provider (Docker, host, just-bash) plus their
  * availability probes and cache pruning.
  *
  * This module is the single import path for local-engine functionality
@@ -13,6 +13,7 @@ import {
   DockerUnavailableError,
 } from "#execution/sandbox/bindings/docker-cli.js";
 import { pruneDockerSandboxTemplates } from "#execution/sandbox/bindings/docker.js";
+import { pruneHostSandboxTemplates } from "#execution/sandbox/bindings/host.js";
 import { pruneJustBashSandboxTemplates } from "#execution/sandbox/bindings/just-bash.js";
 
 export {
@@ -22,6 +23,11 @@ export {
 } from "#execution/sandbox/bindings/docker.js";
 export { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/docker-cli.js";
 export {
+  createHostSandboxProvider,
+  HOST_PROVIDER_NAME,
+  pruneHostSandboxTemplates,
+} from "#execution/sandbox/bindings/host.js";
+export {
   createJustBashSandboxProvider,
   JUST_BASH_PROVIDER_NAME,
   pruneJustBashSandboxTemplates,
@@ -30,7 +36,7 @@ export { stopDevelopmentSandboxResources } from "#execution/sandbox/development-
 
 /**
  * Removes stale local sandbox template state for one application
- * across every local engine: just-bash template directories and Docker
+ * across every local engine: host and just-bash template directories and Docker
  * template images (tracked through per-app marker files). Docker pruning
  * silently skips when no Docker runtime is reachable so docker-less setups
  * stay quiet.
@@ -42,6 +48,7 @@ export async function pruneLocalSandboxTemplates(input: {
   readonly retainCount?: number;
 }): Promise<void> {
   await Promise.all([
+    pruneHostSandboxTemplates(input),
     pruneJustBashSandboxTemplates(input),
     pruneDockerSandboxTemplates(input).catch((error: unknown) => {
       if (

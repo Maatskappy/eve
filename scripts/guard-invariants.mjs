@@ -1683,7 +1683,7 @@ function diffCounts(current, baseline) {
 // ---------- Entry point ----------
 
 async function checkRule44SandboxProviders() {
-  const providerNames = ["docker", "just-bash", "vercel"];
+  const providerNames = ["docker", "host", "just-bash", "vercel"];
   const forbidden = [
     "#execution/sandbox/ensure.js",
     "#execution/sandbox/prewarm.js",

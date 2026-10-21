@@ -3,7 +3,7 @@ title: "Sandbox"
 description: "Configure the isolated filesystem and command environment used by an eve agent."
 ---
 
-Every eve agent has one sandbox rooted at `/workspace`. The built-in `bash`, `read_file`, and `write_file` tools use it. Without an authored sandbox file, eve selects the best available environment automatically.
+Every eve agent has one sandbox with a workspace root: `/workspace` in Vercel and Docker sandboxes, or a real directory on your machine with the [host sandbox](/docs/sandbox/host). The built-in `bash`, `read_file`, and `write_file` tools use it. Without an authored sandbox file, eve selects the best available environment automatically.
 
 ## Use the sandbox
 
@@ -26,7 +26,7 @@ export default defineTool({
 });
 ```
 
-Relative paths resolve under `/workspace`. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
+Relative paths resolve under the workspace root, which is also where commands start. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
 
 Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, set `AI_AGENT` in the environment's `env` option or pass it in the `env` of one `run()` or `spawn()` call.
 
@@ -126,9 +126,9 @@ agent/sandbox/
     schema.sql
 ```
 
-Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies the seed when it prepares a new environment generation. Existing live sandbox state is not overwritten by later seed changes.
+Files under `agent/sandbox/workspace/` seed the writable workspace root. eve copies the seed when it prepares a new environment generation. Existing live sandbox state is not overwritten by later seed changes.
 
-Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
+Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. Instructions and tools can refer to `$HOME/.agents/skills` with every built-in provider; file tools resolve it to the provider's skill directory. Refer to workspace files with relative paths, or with `/workspace` only when you pin a Vercel or Docker sandbox. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
 
 Providers receive both trees with explicit metadata:
 
@@ -155,7 +155,7 @@ Docker mounts the compiled trees read-only under `/eve/resources`, copies worksp
 
 ## Inbound attachments
 
-eve writes byte-backed files that reach the agent into the sandbox under `/workspace/.eve/attachments/` and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
+eve writes byte-backed files that reach the agent into the sandbox under `.eve/attachments/` in the workspace root (`/workspace/.eve/attachments/` in Vercel and Docker sandboxes) and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
 
 Before every model call, eve reads the referenced files back from the sandbox. Every file, whether attached to a message or returned by a tool, reaches the model with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow its label only when every major provider reads the format natively:
 
@@ -276,6 +276,7 @@ eve writes skill packages to `$HOME/.agents/skills`, using the sandbox's own `$H
 | [Default](/docs/sandbox/default)     | Automatic provider selection with eve's standard behavior.                              |
 | [Vercel](/docs/sandbox/vercel)       | Snapshot-backed persistent Vercel Sandboxes, domain network policies, and Drive mounts. |
 | [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.        |
+| [Host](/docs/sandbox/host)           | Local development with this machine's shell, tools, and filesystem, without isolation.  |
 | [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.        |
 
 ## Lifecycle

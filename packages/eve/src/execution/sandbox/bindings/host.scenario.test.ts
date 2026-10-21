@@ -1,0 +1,213 @@
+import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
+import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
+import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
+import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
+import { sandboxWorkspaceRoot } from "#shared/sandbox-session.js";
+import { resolveSandboxModelPath, resolveSandboxSkillRoot } from "#shared/skill-paths.js";
+
+const createScratchDirectory = useTemporaryDirectories();
+
+function createHostProvider(options: HostSandboxEnvironmentOptions = {}) {
+  const implementation = createHostSandboxProvider(options);
+  return {
+    ...createSandboxProviderHarness(implementation, undefined),
+    async endSession(appRoot: string, sessionId: string) {
+      await implementation.onSessionEnd?.(
+        {
+          host: createSandboxProviderHost(appRoot),
+          session: {
+            auth: { current: null, initiator: null },
+            id: sessionId,
+            turn: { id: "test-turn", sequence: 0 },
+          },
+          storagePath: appRoot,
+        },
+        { templateKey: "unused" },
+        { root: "unused", version: 1 },
+        { reason: "completed" },
+      );
+    },
+  };
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForFile(path: string): Promise<string> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const text = await readFile(path, "utf8").catch(() => "");
+    if (text.trim().length > 0) return text.trim();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for ${path}.`);
+}
+
+describe("HostSandbox", () => {
+  it("runs real bash in a per-session workspace seeded from resources and prepare", async () => {
+    const appRoot = await createScratchDirectory("eve-host-seeded-");
+    const outside = await createScratchDirectory("eve-host-outside-");
+    const provider = createHostProvider({
+      async prepare(sandbox) {
+        await sandbox.run({ command: "printf prepared > prepared.txt" });
+      },
+    });
+    await provider.prepare({
+      appRoot,
+      seedFiles: [
+        { content: "seeded", path: "/workspace/notes/seed.md" },
+        { content: "# Weather", path: "$HOME/.agents/skills/weather/SKILL.md" },
+      ],
+    });
+
+    const { sandbox } = await provider.openSession({ appRoot, sandboxName: "session-a" });
+    const root = sandboxWorkspaceRoot(sandbox);
+
+    expect(root.startsWith(join(appRoot, "host", "sessions"))).toBe(true);
+    expect((await sandbox.run({ command: "pwd -P" })).stdout.trim()).toBe(await realpath(root));
+    expect(await sandbox.readTextFile({ path: "notes/seed.md" })).toBe("seeded");
+    expect(await sandbox.readTextFile({ path: "prepared.txt" })).toBe("prepared");
+
+    const skillRoot = await resolveSandboxSkillRoot({ sandbox });
+    expect(skillRoot.startsWith(join(appRoot, "host", "sessions"))).toBe(true);
+    expect(skillRoot.startsWith(homedir())).toBe(false);
+    expect(
+      await sandbox.readTextFile({
+        path: await resolveSandboxModelPath({
+          path: "$HOME/.agents/skills/weather/SKILL.md",
+          sandbox,
+        }),
+      }),
+    ).toBe("# Weather");
+
+    await sandbox.writeTextFile({ content: "absolute", path: join(outside, "out.txt") });
+    expect(await readFile(join(outside, "out.txt"), "utf8")).toBe("absolute");
+  });
+
+  it("isolates sessions, reopens one by session id, and removes it when the session ends", async () => {
+    const appRoot = await createScratchDirectory("eve-host-sessions-");
+    const provider = createHostProvider();
+    await provider.prepare({ appRoot });
+
+    const first = await provider.start({ appRoot, sandboxName: "session-a" });
+    const second = await provider.start({ appRoot, sandboxName: "session-b" });
+    await first.handle.sandbox.writeTextFile({ content: "a", path: "owner.txt" });
+
+    expect(second.state.root).not.toBe(first.state.root);
+    expect(await second.handle.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
+
+    const reopened = await provider.start({ appRoot, sandboxName: "session-a" });
+    expect(reopened.state).toEqual(first.state);
+    expect(await reopened.handle.sandbox.readTextFile({ path: "owner.txt" })).toBe("a");
+    const resumed = await provider.openSession({
+      appRoot,
+      existing: first.state,
+      sandboxName: "session-a",
+    });
+    expect(await resumed.sandbox.readTextFile({ path: "owner.txt" })).toBe("a");
+    await expect(
+      provider.openSession({ appRoot, existing: second.state, sandboxName: "session-a" }),
+    ).rejects.toThrow("incompatible");
+
+    await provider.endSession(appRoot, "session-a");
+    expect(existsSync(first.state.root)).toBe(false);
+    expect(existsSync(second.state.root)).toBe(true);
+  });
+
+  it("kills the whole process group when a command is aborted or the sandbox stops", async () => {
+    const appRoot = await createScratchDirectory("eve-host-processes-");
+    const provider = createHostProvider();
+    const { sandbox, onSandboxStop } = await provider.openSession({
+      appRoot,
+      sandboxName: "session-processes",
+    });
+
+    const controller = new AbortController();
+    const aborted = await sandbox.spawn({
+      abortSignal: controller.signal,
+      command: "sleep 30 & echo $! > aborted.pid; wait",
+    });
+    const abortedChild = Number(await waitForFile(sandbox.resolvePath("aborted.pid")));
+    controller.abort(new Error("stop the build"));
+    await expect(aborted.wait()).rejects.toThrow("stop the build");
+
+    await sandbox.spawn({ command: "sleep 30 & echo $! > stopped.pid; wait" });
+    const stoppedChild = Number(await waitForFile(sandbox.resolvePath("stopped.pid")));
+    await onSandboxStop();
+
+    await expect.poll(() => isProcessAlive(abortedChild)).toBe(false);
+    await expect.poll(() => isProcessAlive(stoppedChild)).toBe(false);
+  });
+
+  it("uses a shared root in place and never seeds or deletes it", async () => {
+    const appRoot = await createScratchDirectory("eve-host-shared-");
+    await mkdir(join(appRoot, "project"));
+    await writeFile(join(appRoot, "project", "README.md"), "mine");
+    const provider = createHostProvider({ root: "project" });
+    await provider.prepare({
+      appRoot,
+      seedFiles: [
+        { content: "seeded", path: "/workspace/seed.md" },
+        { content: "# Weather", path: "$HOME/.agents/skills/weather/SKILL.md" },
+      ],
+    });
+
+    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-shared" });
+    expect(state.root).toBe(join(appRoot, "project"));
+    expect((await handle.sandbox.run({ command: "cat README.md" })).stdout).toBe("mine");
+    expect(await readdir(state.root)).toEqual(["README.md"]);
+    expect(
+      await handle.sandbox.readTextFile({
+        path: await resolveSandboxModelPath({
+          path: "$HOME/.agents/skills/weather/SKILL.md",
+          sandbox: handle.sandbox,
+        }),
+      }),
+    ).toBe("# Weather");
+
+    await handle.onSandboxDelete();
+    await provider.endSession(appRoot, "session-shared");
+    expect(await readFile(join(appRoot, "project", "README.md"), "utf8")).toBe("mine");
+    expect(await readdir(join(appRoot, "host", "sessions"))).toEqual([]);
+  });
+
+  describe("environment", () => {
+    const keys = ["EVE_HOST_FROM_FILE", "EVE_HOST_FROM_SHELL"] as const;
+    afterEach(() => {
+      for (const key of keys) delete process.env[key];
+    });
+
+    it("inherits the launch environment without values loaded from .env files", async () => {
+      const appRoot = await createScratchDirectory("eve-host-env-");
+      await writeFile(
+        join(appRoot, ".env.local"),
+        "EVE_HOST_FROM_FILE=file\nEVE_HOST_FROM_SHELL=file\n",
+      );
+      process.env.EVE_HOST_FROM_FILE = "file";
+      process.env.EVE_HOST_FROM_SHELL = "shell";
+      const provider = createHostProvider();
+      const { sandbox } = await provider.openSession({ appRoot, sandboxName: "session-env" });
+
+      const result = await sandbox.run({
+        command:
+          'printf "%s|%s|%s|%s" "${EVE_HOST_FROM_FILE-unset}" "$EVE_HOST_FROM_SHELL" "$AI_AGENT" "$CALL"',
+        env: { CALL: "call" },
+      });
+
+      expect(result.stdout).toBe("unset|shell|eve|call");
+    });
+  });
+});

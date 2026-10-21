@@ -134,9 +134,9 @@ reference. `eve/sandbox/provider` now exports `createSandboxSession(primitives)`
 which wraps the internal `buildSandboxSession`: a provider implements `spawn`,
 `readFile`, `writeFile`, `removePath`, and `resolvePath`, and gets the full
 `SandboxSession` (`run`, binary and text
-variants, encodings, line ranges). The custom provider docs include a
-just-bash-backed recipe built on it; the application installs `just-bash`
-itself.
+variants, encodings, line ranges). The `/sandbox/just-bash` and
+`/sandbox/microsandbox` docs pages are complete custom-provider guides built on
+it; the application installs `just-bash` or `microsandbox` itself.
 
 ## Commands and environment
 
@@ -213,8 +213,8 @@ Read-only mounts become a convention instead of an enforced boundary.
 
 Remove the bindings, provider, `eve/sandbox/just-bash` export, peer and dev
 dependencies, the optional-engine bundling hooks that only existed for it, the
-auto-install scenario, and the docs page (permanently redirected to
-`/sandbox/host`). `SandboxProviderHost.loadOptionalPackage` stays because it is
+and auto-install scenario. The `/sandbox/just-bash` docs route stays as a
+guide to building a just-bash provider instead of describing a built-in. `SandboxProviderHost.loadOptionalPackage` stays because it is
 part of the public extension contract.
 
 ## Known limitations

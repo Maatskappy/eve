@@ -5,15 +5,12 @@ import {
   restoreSessionStep,
   type SessionHistoryStepState,
 } from "#execution/publish-session-events.js";
-import {
-  withSessionStateDelta,
-  type WithSessionStateDelta,
-} from "#execution/session/state-delta.js";
+import { type WithSessionStateDelta } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { cancel, controlled } from "#harness/session-machine/transitions.js";
 import type { ControlDelivery } from "#harness/types.js";
-import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
-import { currentProjection } from "#harness/session-machine/current.js";
+import { applyTransition, saveTransition, sessionView } from "#harness/session-machine/commit.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
@@ -58,25 +55,22 @@ export async function settleCancelledTurn(
   const durableState = step.durableSession.state;
   const owningTurnId =
     runtimeWait(durableState)?.event.turnId ?? activeTurnIdOf(storedProjection(durableState)) ?? "";
+  const transition = controlled(input.control, "cancel", (cause) =>
+    cancel(sessionView(storedProjection(durableState), durableState), { cause }),
+  );
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
-    publish: (emit, session) =>
-      applyTransition(
-        session,
-        controlled(input.control, "cancel", (cause) =>
-          cancel(sessionView(currentProjection(step.ctx), session.state), { cause }),
-        ),
-        emit,
-      ),
+    publish: (emit, session) => applyTransition(session, transition, emit),
     updateSession(_session, cancelled) {
+      const settled = cancelled ?? saveTransition(_session, transition);
       // The cancel reported every request and call it closed and committed the steps it stopped;
       // what remains is private: its runs are forgotten, and its responders retire with the
       // answers it closed.
       const cancelledSession = removeBlockingWorkflowToolRuns(
-        { ...cancelled, outputSchema: undefined },
+        { ...settled, outputSchema: undefined },
         owningTurnId,
       );
-      const spent = sessionUsage(cancelled);
+      const spent = sessionUsage(settled);
       const spentNothing =
         spent.inputTokens + spent.outputTokens + spent.cacheReadTokens + spent.cacheWriteTokens ===
           0 && spent.costUsd === undefined;

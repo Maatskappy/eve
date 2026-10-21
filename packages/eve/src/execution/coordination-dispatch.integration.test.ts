@@ -87,7 +87,7 @@ describe("coordination dispatch", () => {
       try {
         const events = await stream.nextTurn();
         expect(interrupted).toBe(true);
-        expect(reported).toBeGreaterThan(1);
+        expect(reported).toBe(1);
         expect(filterEventsByType(events, "task.ended").map((event) => event.data.outcome)).toEqual(
           ["completed"],
         );

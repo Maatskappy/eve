@@ -119,6 +119,26 @@ export function closeUnder(view: SessionView, owner: Ref, reason: string): Sessi
   });
 }
 
+/**
+ * The facts that close the open entities `which` selects, leaves first, as a retry superseded
+ * them. The writer closes what each leaves open under it.
+ */
+export function supersede(
+  view: SessionView,
+  which: (ref: Ref) => boolean,
+  reason: string,
+): SessionEvent[] {
+  const scratch = copyView(view);
+  const facts: SessionEvent[] = [];
+  for (const ref of openUnder(scratch, "session")) {
+    if (!isOpen(scratch, ref) || !which(ref)) continue;
+    const fact = closing(scratch, ref, { reason, superseded: true }, false);
+    foldReceivedEvent(scratch, { ...fact, meta: { endOfLine: false } });
+    facts.push(fact);
+  }
+  return facts;
+}
+
 /** Why what an owner held closed, as its readers already see it. */
 function reasonFor(owner: Ref | "session", outcome?: string, reason?: string): string {
   if (owner === "session") return "session-ended";

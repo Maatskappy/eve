@@ -16,6 +16,7 @@ import {
   turnSettled,
 } from "#harness/facts.js";
 import { closeUnder } from "#harness/session-machine/cascade.js";
+import { interruptedCallResult, type InterruptedCall } from "#harness/interrupted-attempt.js";
 import { isOpen } from "#protocol/session-projection/tree.js";
 import { activeTurn, interactionOwner } from "#protocol/session-projection/selectors.js";
 import type {
@@ -912,6 +913,44 @@ function unreadSettled(view: SessionView): SessionEvent[] {
 
 /** A stopped step's response, each call without a result answered as cancelled. */
 function cancelledTranscript(step: SuspendedStep): ModelMessage[] {
+  return stoppedTranscript(step, () => CANCELLED_CALL_RESULT);
+}
+
+/**
+ * A step was interrupted after it published, and its retry runs from the checkpoint before it.
+ * Each step waiting on what the interrupted attempt did, an answer it applied or a call it
+ * started, can't resume from it again: the step stops, each call it made answered with what the
+ * stream says of it, so none runs again. The events the attempt wrote already say what changed.
+ */
+export function stopInterruptedSteps(
+  view: SessionView,
+  input: {
+    readonly calls: ReadonlyMap<string, InterruptedCall>;
+    readonly settledInteractions: ReadonlySet<string>;
+  },
+): Transition {
+  const stopped = view.turn.suspended.filter(
+    (step) =>
+      step.requests.some((request) => input.settledInteractions.has(request.interactionId)) ||
+      [...stepCallIds(step)].some((callId) => input.calls.get(callId)?.started === true),
+  );
+  return {
+    commit: stopped.flatMap((step) =>
+      stoppedTranscript(step, (callId) => interruptedCallResult(input.calls.get(callId))),
+    ),
+    events: [],
+    turn: {
+      ...view.turn,
+      suspended: view.turn.suspended.filter((step) => !stopped.includes(step)),
+    },
+  };
+}
+
+/** A stopped step's response, each call without a result answered with `resultOf` it. */
+function stoppedTranscript(
+  step: SuspendedStep,
+  resultOf: (callId: string) => string,
+): ModelMessage[] {
   const answered = answeredCallIds(step.messages);
   let messages = [...step.messages];
   for (const message of step.messages) {
@@ -920,7 +959,7 @@ function cancelledTranscript(step: SuspendedStep): ModelMessage[] {
       if (part.type !== "tool-call" || part.providerExecuted === true) continue;
       if (answered.has(part.toolCallId)) continue;
       messages = withResult(messages, {
-        output: { type: "text", value: CANCELLED_CALL_RESULT },
+        output: { type: "text", value: resultOf(part.toolCallId) },
         toolCallId: part.toolCallId,
         toolName: part.toolName,
         type: "tool-result",

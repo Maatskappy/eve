@@ -91,6 +91,7 @@ export async function finalizeSession(
     await emitTerminalSessionCompletionStep({
       control: outcome.control,
       projection: stored,
+      sessionState,
       sessionWritable: context.sessionWritable,
       serializedContext,
       turn: latest && { id: latest.turnId, sequence: latest.sequence },
@@ -99,6 +100,7 @@ export async function finalizeSession(
   } else if (outcome.kind === "failed") {
     await emitTerminalSessionFailureStep({
       error: normalizeSerializableError(outcome.error),
+      sessionState,
       projection: stored,
       sessionWritable: context.sessionWritable,
       serializedContext,

@@ -18,7 +18,10 @@ import {
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
-import { createInstrumentationHandleEvent } from "#instrumentation/native-events.js";
+import {
+  createInstrumentationHandleEvent,
+  type CreateInstrumentationHandleEventInput,
+} from "#instrumentation/native-events.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
@@ -32,6 +35,10 @@ import { eveOutputMapping } from "#tracing/eve/profile.js";
 function session(
   tracePolicy: TraceCapturePolicy = () => ({ emit: true, recordInputs: true, recordOutputs: true }),
   deliveryInput?: DeliverHookPayload,
+  child?: Pick<
+    CreateInstrumentationHandleEventInput,
+    "parentLineage" | "parentTraceContext" | "rootSessionId"
+  >,
 ) {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -76,6 +83,7 @@ function session(
     },
     hooks,
     sessionId: "s",
+    ...child,
   })!;
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(facts)),
@@ -350,5 +358,57 @@ describe("a session's spans, from its committed lines", () => {
       expect(content.includes("Oslo"), `input recorded: ${records}`).toBe(records);
       expect(content.includes("temperature"), `output recorded: ${records}`).toBe(records);
     }
+  });
+});
+
+describe("a child session's turn span", () => {
+  const caller = { spanId: "c".repeat(16), traceFlags: 1, traceId: "a".repeat(32) };
+  // A propagated traceparent arrives as a remote span context.
+  const remoteCaller = { ...caller, isRemote: true };
+  const parentLineage = {
+    callId: "call_ask",
+    sessionId: "parent",
+    subagentName: "helper",
+    turnId: "turn_p",
+  };
+
+  async function childTurn(isRemote: boolean) {
+    const { commit, spans } = session(undefined, undefined, {
+      parentLineage,
+      parentTraceContext: isRemote ? remoteCaller : caller,
+      rootSessionId: "root",
+    });
+    await commit(...opening);
+    await commit(turnSettled({ outcome: "completed" }));
+    const turn = (await spans()).find((span) => span.name === "invoke_agent weather");
+    expect(turn?.attributes).toMatchObject({
+      "agent.parent_call.id": "call_ask",
+      "agent.parent_run.id": "parent",
+      "agent.run.id": "s",
+      "agent.subagent.name": "helper",
+      "gen_ai.conversation.id": "root",
+    });
+    return turn!;
+  }
+
+  it("nests a local child beneath its caller's call in the caller's trace", async () => {
+    const turn = await childTurn(false);
+
+    expect(turn.spanContext().traceId).toBe(caller.traceId);
+    expect(turn.parentSpanContext?.spanId).toBe(caller.spanId);
+    expect(turn.links).toEqual([]);
+  });
+
+  it("starts a remote child's own trace and links back to its dispatch", async () => {
+    const turn = await childTurn(true);
+
+    expect(turn.spanContext().traceId).not.toBe(caller.traceId);
+    expect(turn.parentSpanContext).toBeUndefined();
+    expect(turn.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "agent.dispatch" },
+        context: expect.objectContaining({ spanId: caller.spanId, traceId: caller.traceId }),
+      }),
+    ]);
   });
 });

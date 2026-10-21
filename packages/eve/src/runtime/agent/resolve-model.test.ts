@@ -124,7 +124,8 @@ describe("dynamic runtime model resolution", () => {
         model: defineDynamic({
           events: {
             "session.started": (_event, ctx) => ({
-              model: ctx.channel.kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
+              model:
+                ctx.channel.kind === "channel:slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
               modelContextWindowTokens: 128_000,
               modelOptions: {
                 providerOptions: { gateway: { order: ["openai"] } },
@@ -143,7 +144,7 @@ describe("dynamic runtime model resolution", () => {
       { type: "session.started" },
       {
         model: { id: "openai/gpt-5.5" },
-        channel: { kind: "slack" },
+        channel: { kind: "channel:slack", metadata: {} },
         messages: [{ content: "Hi", role: "user" }],
         session: { auth: { current: null, initiator: null }, id: "session-1" },
       },

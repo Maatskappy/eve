@@ -176,21 +176,23 @@ describe("self-modification setup", () => {
       principalType: "service",
     };
 
-    expect(authorize({ channel: { kind: "channel:eve" }, principal })).toBe(allowed);
+    expect(authorize({ channel: { kind: "channel:eve", metadata: {} }, principal })).toBe(allowed);
     expect(
       authorize({
-        channel: { kind: "channel:eve" },
+        channel: { kind: "channel:eve", metadata: {} },
         principal: { ...principal, attributes: { project_id: "prj_other" } },
       }),
     ).toBe(false);
     expect(
       authorize({
-        channel: { kind: "channel:eve" },
+        channel: { kind: "channel:eve", metadata: {} },
         principal: { ...principal, authenticator: "jwt-hmac" },
       }),
     ).toBe(false);
-    expect(authorize({ channel: { kind: "channel:slack" }, principal })).toBe(false);
-    expect(authorize({ channel: { kind: "channel:eve" }, principal: null })).toBe(false);
+    expect(authorize({ channel: { kind: "channel:slack", metadata: {} }, principal })).toBe(false);
+    expect(authorize({ channel: { kind: "channel:eve", metadata: {} }, principal: null })).toBe(
+      false,
+    );
   });
 
   it("renders no HTTP authorization branch without a Vercel backend", () => {

@@ -97,7 +97,7 @@ describe("schedule creation and invocation", () => {
       const tools = (await dynamic.events["turn.started"]!(undefined, {
         model: null,
         session: { id: "alice", auth: { current: alice, initiator: null }, schedule },
-        channel: {},
+        channel: { kind: "unknown", metadata: {} },
         messages: [],
       })) as Record<string, DynamicToolEntry>;
       expect(Object.keys(tools).sort()).toEqual(

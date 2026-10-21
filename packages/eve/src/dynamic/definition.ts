@@ -1,3 +1,4 @@
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 
 import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
@@ -82,14 +83,7 @@ export interface DynamicResolveContext {
     readonly predecessor?: SessionPredecessor;
   };
   /** Channel metadata for the request that triggered this resolve. */
-  readonly channel: {
-    /** Channel type that produced the request (e.g. `"slack"`, `"http"`), when known. */
-    readonly kind?: string;
-    /** Channel-owned resume handle for the conversation, when the channel supplies one. */
-    readonly continuationToken?: string;
-    /** Free-form channel-specific metadata attached to the request. */
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: InstrumentationChannel;
   /**
    * Immutable classification and execution context for the active conversation.
    * Absent on sessions persisted before this context key existed.

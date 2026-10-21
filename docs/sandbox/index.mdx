@@ -238,7 +238,23 @@ export const AcmeSandbox = defineSandboxProvider<
 
 Provider handles implement `onSandboxStop()`, `onRuntimeShutdown()`, and `onSandboxDelete()`. These handle-level methods cover authored stop or delete calls and process shutdown; `onSessionEnd()` is the single provider hook for durable terminal session cleanup. eve does not delete a sandbox whose initialization failed: the next access runs the selector against it again, and session end removes it.
 
-Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and fails if it is gone rather than recreating callback side effects. When a built-in provider reports that the native sandbox is gone, eve clears the session's provider state and reruns the selector. Custom providers cannot report this. If a custom provider's `resume()` throws, every sandbox call in that session fails with that error until the session ends, so a provider whose sandbox derives from the session key can recreate it in `resume()` instead. A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
+Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and does not recreate it, because initialization that `defineSandbox()` runs after `open()` would not run again.
+
+When the native sandbox no longer exists, throw `SandboxSessionGoneError` from `eve/sandbox/provider` in `resume()`. eve then clears the session's provider state and reruns the selector, whose `start()` creates a fresh sandbox, as after `sandbox.delete()`. Any other error from `resume()` leaves the state in place, so every sandbox call in that session fails with that error until the session ends:
+
+```ts
+import { SandboxSessionGoneError } from "eve/sandbox/provider";
+
+async function resume(_ctx: unknown, _artifact: unknown, state: { name: string }) {
+  const remote = await client.find(state.name);
+  if (remote === undefined) {
+    throw new SandboxSessionGoneError(`Acme sandbox "${state.name}" no longer exists.`);
+  }
+  return createHandle(remote);
+}
+```
+
+A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
 
 Preparation discovers authored files through `ctx.files`; core keeps project layout and artifact storage keys private. Keep provider SDK values behind the provider. `environment.open()` preserves the provider's sandbox capability type, while the heterogeneous runtime registry erases it to eve's common session surface.
 

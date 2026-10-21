@@ -1,5 +1,5 @@
 ---
-title: "microsandbox"
+title: "microsandbox Provider"
 description: "Build a sandbox provider that runs each session in a local microsandbox microVM."
 ---
 
@@ -17,10 +17,10 @@ Add the SDK to your application:
 pnpm add microsandbox@0.5
 ```
 
-The provider on this page targets microsandbox 0.5. microsandbox also needs its VM runtime, which the SDK installs into `~/.microsandbox`. Install it once on each machine:
+The provider on this page targets microsandbox 0.5. The SDK runs VMs with a runtime in `~/.microsandbox`, and its `isInstalled()` function reports whether that runtime is present. If it is not, install it once on each machine with the SDK's `install()`:
 
 ```sh
-node --input-type=module -e "import { install } from 'microsandbox'; await install();"
+node --input-type=module -e "import { install, isInstalled } from 'microsandbox'; if (!isInstalled()) await install();"
 ```
 
 ## Write the provider
@@ -28,9 +28,10 @@ node --input-type=module -e "import { install } from 'microsandbox'; await insta
 Save the provider in your application, for example in `agent/lib/`:
 
 ```ts title="agent/lib/microsandbox.ts"
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -39,6 +40,7 @@ import {
   defineSandboxProvider,
   type SandboxProviderHandle,
   type SandboxProviderSessionContext,
+  SandboxSessionGoneError,
 } from "eve/sandbox/provider";
 import {
   isInstalled,
@@ -58,7 +60,10 @@ export interface MicrosandboxOptions {
 type Artifact = { readonly templateKey: string };
 type State = { readonly version: 1 };
 
-const DEFAULT_IMAGE = "ghcr.io/vercel/eve:latest";
+// eve's Docker sandbox uses the eve image tagged with the installed eve version.
+const eveVersion = (createRequire(import.meta.url)("eve/package.json") as { version: string })
+  .version;
+const DEFAULT_IMAGE = `ghcr.io/vercel/eve:${eveVersion.replace(/\+.*$/u, "")}`;
 const USER = "vercel-sandbox";
 const HOME = `/home/${USER}`;
 const WORKSPACE = "/workspace";
@@ -130,7 +135,12 @@ async function upsertVm(name: string, template: string, options: MicrosandboxOpt
     `mkdir -p "$HOME/.agents/skills" && cp -R ${RESOURCES}/workspace/. ${WORKSPACE}/ && ` +
       `cp -R ${RESOURCES}/skills/. "$HOME/.agents/skills/"`,
   );
-  if (seeded.code !== 0) throw new Error(`Seeding the microVM failed: ${seeded.stderr()}`);
+  if (seeded.code !== 0) {
+    // Never leave an unseeded VM for the next start to reconnect to.
+    await vm.detach();
+    await removeVm(name);
+    throw new Error(`Seeding the microVM failed: ${seeded.stderr()}`);
+  }
   return vm;
 }
 
@@ -157,7 +167,7 @@ function createHandle(name: string, vm: Sandbox): SandboxProviderHandle {
           builder
             .args(["-lc", command])
             .cwd(workingDirectory ?? WORKSPACE)
-            .envs({ ...env }),
+            .envs({ AI_AGENT: "eve", ...env }),
         );
         abortSignal?.addEventListener("abort", () => void exec.kill().catch(() => {}), {
           once: true,
@@ -236,7 +246,10 @@ function createHandle(name: string, vm: Sandbox): SandboxProviderHandle {
       await vm.detach();
     },
     onSandboxDelete: () => removeVm(name),
-    onSandboxStop: () => vm.stop(),
+    async onSandboxStop() {
+      await vm.stop();
+      await vm.detach();
+    },
   };
 }
 
@@ -262,8 +275,7 @@ export const MicrosandboxSandbox = defineSandboxProvider<
         const template = templateRoot(ctx.storagePath, templateKey);
         if (existsSync(template)) return { templateKey };
 
-        const draft = `${template}.${process.pid}.tmp`;
-        await rm(draft, { force: true, recursive: true });
+        const draft = `${template}.${randomUUID()}.tmp`;
         const trees = [
           { files: workspace?.files ?? [], path: "workspace" },
           { files: skills?.files ?? [], path: "skills" },
@@ -286,13 +298,19 @@ export const MicrosandboxSandbox = defineSandboxProvider<
       async start(ctx, _openOptions, artifact) {
         return { handle: await open(ctx, artifact), state: { version: 1 } };
       },
-      // Recreates a VM that was removed outside eve.
-      async resume(ctx, artifact) {
-        return await open(ctx, artifact);
-      },
-      // The key finds the VM, so `state` may be null.
-      async onSessionEnd(ctx) {
+      // A VM removed outside eve is gone: eve then reruns the selector, whose start creates a new one.
+      async resume(ctx) {
         requireRuntime();
+        const name = vmName(ctx);
+        const vm = await findVm(name);
+        if (vm === undefined) {
+          throw new SandboxSessionGoneError(`microsandbox VM "${name}" no longer exists.`);
+        }
+        return createHandle(name, await wake(vm));
+      },
+      // The key finds the VM, so `state` may be null. Without a runtime, no VM can exist.
+      async onSessionEnd(ctx) {
+        if (!isInstalled()) return;
         await removeVm(vmName(ctx));
       },
     };
@@ -317,7 +335,7 @@ export default defineSandbox(() => environment.open());
 
 ## Choose an image
 
-By default the provider boots `ghcr.io/vercel/eve:latest`, the image that eve's Docker sandbox uses by default. Each eve release also publishes `ghcr.io/vercel/eve:<version>`; pin the tag that matches your installed eve version so the image does not change underneath you:
+By default the provider boots `ghcr.io/vercel/eve:<version>`, where `<version>` is your installed eve version, the same image that eve's Docker sandbox uses by default. Pass `image` to use another image, and `cpus` or `memoryMiB` to size the VM:
 
 ```ts title="agent/sandbox/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
@@ -326,7 +344,7 @@ import { MicrosandboxSandbox } from "../lib/microsandbox";
 
 export const environment = MicrosandboxSandbox.environment({
   cpus: 2,
-  image: "ghcr.io/vercel/eve:0.82.0",
+  image: "ghcr.io/acme/agent-sandbox@sha256:...",
   memoryMiB: 2048,
 });
 export default defineSandbox(() => environment.open());
@@ -342,7 +360,9 @@ The provider follows eve's [custom provider contract](/docs/sandbox#custom-provi
 - **Sessions:** each eve session gets one microVM, named from a hash of the app's storage path and the session id. `start()` is an upsert: it connects to the VM when it is running, starts it when it exists but is not running, and creates it only when it does not exist. On creation, the provider mounts the template read-only at `/eve/resources`, then copies the workspace files to `/workspace` and the skills to `/home/vercel-sandbox/.agents/skills`. If creation fails and the VM exists afterward, because another process created it first, the provider connects to that VM.
 - **Commands:** every command runs as `vercel-sandbox` with `bash -lc`, starting in `/workspace`. Aborting a command kills it.
 - **Lifecycle:** `sandbox.stop()` and server shutdown stop the VM, and its disk persists, so the next access starts it again. `sandbox.delete()` and session end remove the VM. `onSessionEnd()` finds the VM from the session id, succeeds when it does not exist, and can run more than once.
-- **Removed VMs:** eve's built-in providers report a sandbox that no longer exists so that eve starts a fresh one, but a custom provider cannot. If `resume()` throws, every sandbox call in that session fails with that error until the session ends. This provider's `resume()` creates and seeds a new VM instead. Initialization that `defineSandbox()` runs after `open()` does not run again for a recreated VM.
+- **Removed VMs:** if the session's VM was removed outside eve, `resume()` throws `SandboxSessionGoneError`. eve then clears the session's sandbox state and runs `defineSandbox()` again, and `start()` creates and seeds a new VM.
+- **Failed seeding:** if copying the template into a new VM fails, the provider removes the VM before it reports the error, so the next `start()` creates it again instead of reconnecting to an unseeded VM.
+- **Environment:** every command gets `AI_AGENT=eve`, as in eve's built-in providers, plus the `env` eve passes for that command.
 
 ## What this provider omits
 
@@ -352,13 +372,15 @@ The removed built-in provider did more than this page's provider. Add these piec
 - **Saved state outside development:** the built-in provider snapshotted a session's disk when it captured state in production and restored it on reconnect. This provider relies on the stopped VM's disk on the same machine.
 - **A cross-process creation lock:** the built-in provider held a file lock while it created, reconnected, or removed a session's VM. This provider resolves a creation race by connecting to whichever VM exists after its own creation fails. Add a lock, for example a file lock under `ctx.storagePath`, if your setup runs several eve processes against one machine.
 - **Network policies:** the built-in provider accepted a `networkPolicy` open option, applied domain rules, and injected credentials into outbound requests. This provider leaves the VM's network at microsandbox's default and does not expose `setNetworkPolicy()`. Configure networking at creation with the builder's `network()`, `disableNetwork()`, or `secretEnv()` methods.
-- **Template pruning:** the built-in provider removed old template directories and their snapshots. This provider never deletes templates under `.eve/sandbox-cache/microsandbox/templates/`, and it removes a VM only on `sandbox.delete()` and session end. List leftover VMs with `msb ls` and remove them with `msb rm <name>`.
+- **Template pruning:** the built-in provider removed old template directories and their snapshots. This provider never deletes templates under `.eve/sandbox-cache/microsandbox/templates/`, and it removes a VM only on `sandbox.delete()` and session end. List leftover VMs with `msb ls` and remove them with `msb rm <name>`. Two consequences of the provider's design:
+  - VM names hash the app's storage path, so moving or renaming the app directory leaves its existing VMs behind under names the provider no longer derives.
+  - Each VM bind-mounts its template directory read-only. If you delete `.eve/sandbox-cache`, a stopped VM can no longer restart; remove such VMs with `msb rm <name>`, and the next access creates fresh ones.
 - **Platform checks and installation:** the built-in provider checked the host platform and installed the SDK and runtime during `eve dev`. This provider only checks that the runtime is installed.
 
 ## Troubleshooting
 
-| Symptom                                        | Check                                                                    | Next action                                                           |
-| ---------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `The microsandbox VM runtime is not installed` | Whether `~/.microsandbox` exists on the machine running eve              | Run the install command from [Requirements](#requirements).           |
-| Opening the sandbox fails on Linux             | Whether `/dev/kvm` exists and your user can open it                      | Enable KVM for the host or VM, or use [Docker](/docs/sandbox/docker). |
-| Commands fail with a permission or user error  | Whether the image has a `vercel-sandbox` user and a `/workspace` it owns | Use `ghcr.io/vercel/eve` or an image built from it.                   |
+| Symptom                                        | Check                                                                                 | Next action                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `The microsandbox VM runtime is not installed` | Whether `isInstalled()` from `microsandbox` returns `true` on the machine running eve | Run the install command from [Requirements](#requirements).           |
+| Opening the sandbox fails on Linux             | Whether `/dev/kvm` exists and your user can open it                                   | Enable KVM for the host or VM, or use [Docker](/docs/sandbox/docker). |
+| Commands fail with a permission or user error  | Whether the image has a `vercel-sandbox` user and a `/workspace` it owns              | Use `ghcr.io/vercel/eve` or an image built from it.                   |

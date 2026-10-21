@@ -1,5 +1,14 @@
 {
   "title": "Sandbox",
   "defaultOpen": false,
-  "pages": ["index", "default", "vercel", "docker", "host"]
+  "pages": [
+    "index",
+    "default",
+    "vercel",
+    "docker",
+    "host",
+    "---Custom Providers---",
+    "just-bash",
+    "microsandbox"
+  ]
 }

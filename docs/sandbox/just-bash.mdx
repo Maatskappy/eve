@@ -1,0 +1,281 @@
+---
+title: "just-bash"
+description: "Build a sandbox provider on just-bash, a bash interpreter and virtual filesystem written in TypeScript."
+---
+
+eve no longer ships a just-bash sandbox provider. To run commands on your own machine during development, use the [host sandbox](/docs/sandbox/host), which [`DefaultSandbox`](/docs/sandbox/default) selects during `eve dev` and `eve eval`. For isolation, use [Docker](/docs/sandbox/docker) or [Vercel Sandbox](/docs/sandbox/vercel).
+
+If you want [just-bash](https://www.npmjs.com/package/just-bash) itself, for example a shell with no native processes or commands written in TypeScript, build a provider for it with `defineSandboxProvider()` and `createSandboxSession()` from `eve/sandbox/provider`. This page shows a complete provider that keeps one directory per session on local disk.
+
+## Install just-bash
+
+Add just-bash to your application:
+
+```sh
+pnpm add just-bash
+```
+
+The provider on this page targets just-bash 3.1.
+
+## Write the provider
+
+Save the provider in your application, for example in `agent/lib/`:
+
+```ts title="agent/lib/just-bash.ts"
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { join, posix } from "node:path";
+
+import type { SandboxSession } from "eve/sandbox";
+import {
+  createSandboxSession,
+  defineSandboxProvider,
+  type SandboxProviderHandle,
+  type SandboxProviderSessionContext,
+} from "eve/sandbox/provider";
+import { Bash, type CustomCommand, type IFileSystem, ReadWriteFs } from "just-bash";
+
+export interface JustBashOptions {
+  /** Commands written in TypeScript that every shell command can call. */
+  readonly customCommands?: CustomCommand[];
+  /** Replaces the session filesystem, for example to mount more directories. */
+  readonly filesystem?: (session: IFileSystem) => IFileSystem;
+  /** Runs once against the template that new sessions copy. */
+  readonly prepare?: (sandbox: SandboxSession) => Promise<void>;
+}
+
+type Artifact = { readonly templateKey: string };
+type State = { readonly version: 1 };
+
+const HOME = "/home/agent";
+const WORKSPACE = "/workspace";
+
+const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
+const templateRoot = (storagePath: string, key: string) =>
+  join(storagePath, "just-bash", "templates", key);
+// The session id alone names the directory, so every start for a session finds it.
+const sessionRoot = (ctx: SandboxProviderSessionContext) =>
+  join(ctx.storagePath, "just-bash", "sessions", hash(ctx.session.id));
+const toStream = (body: string | Uint8Array) =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(typeof body === "string" ? new TextEncoder().encode(body) : body);
+      controller.close();
+    },
+  });
+
+/** Publishes `build(draft)` at `target` unless it exists; concurrent callers race on the rename. */
+async function publishOnce(target: string, build: (draft: string) => Promise<void>) {
+  if (existsSync(target)) return;
+  const draft = `${target}.${randomUUID()}.tmp`;
+  try {
+    await build(draft);
+    await rename(draft, target);
+  } catch (error) {
+    if (!existsSync(target)) throw error;
+  } finally {
+    await rm(draft, { force: true, recursive: true });
+  }
+}
+
+function openHandle(root: string, options: JustBashOptions): SandboxProviderHandle {
+  // eve stages PDFs up to 20 MiB, past just-bash's default 10 MB read limit.
+  const sessionFs = new ReadWriteFs({ maxFileReadSize: Number.MAX_SAFE_INTEGER, root });
+  const fs = options.filesystem?.(sessionFs) ?? sessionFs;
+  const bash = new Bash({
+    customCommands: options.customCommands,
+    cwd: WORKSPACE,
+    env: { HOME },
+    fs,
+  });
+  return {
+    sandbox: createSandboxSession({
+      resolvePath: (path) => (path.startsWith("/") ? path : `${WORKSPACE}/${path}`),
+      async spawn({ abortSignal, command, env, workingDirectory }) {
+        const result = await bash.exec(command, {
+          cwd: workingDirectory,
+          env,
+          signal: abortSignal,
+        });
+        return {
+          stdout: toStream(result.stdout),
+          stderr: toStream(result.stderr),
+          wait: async () => ({ exitCode: result.exitCode }),
+          kill: async () => {},
+        };
+      },
+      async readFile({ path }) {
+        try {
+          return toStream(await fs.readFileBuffer(path));
+        } catch {
+          return null;
+        }
+      },
+      async writeFile({ content, path }) {
+        await fs.mkdir(posix.dirname(path), { recursive: true });
+        await fs.writeFile(path, new Uint8Array(await new Response(content).arrayBuffer()));
+      },
+      removePath: ({ force, path, recursive }) => fs.rm(path, { force, recursive }),
+    }),
+    onRuntimeShutdown: async () => {},
+    onSandboxDelete: () => rm(root, { force: true, recursive: true }),
+    onSandboxStop: async () => {},
+  };
+}
+
+export const JustBashSandbox = defineSandboxProvider<JustBashOptions, undefined, Artifact, State>({
+  name: "just-bash",
+  environment(options = {}) {
+    async function ensureSessionRoot(ctx: SandboxProviderSessionContext, artifact: Artifact) {
+      const root = sessionRoot(ctx);
+      const template = templateRoot(ctx.storagePath, artifact.templateKey);
+      await publishOnce(root, (draft) => cp(template, draft, { recursive: true }));
+      return root;
+    }
+
+    return {
+      async prepare(ctx) {
+        const { skills, workspace } = ctx.resources;
+        const templateKey = hash(JSON.stringify([workspace?.key, skills?.key, ctx.sourceRevision]));
+        await publishOnce(templateRoot(ctx.storagePath, templateKey), async (draft) => {
+          const files = [
+            ...(workspace?.files ?? []).map((file) => ({
+              content: file.content,
+              path: `${WORKSPACE}/${file.relativePath}`,
+            })),
+            ...(skills?.files ?? []).map((file) => ({
+              content: file.content,
+              path: `${HOME}/.agents/skills/${file.relativePath}`,
+            })),
+          ];
+          await mkdir(join(draft, WORKSPACE), { recursive: true });
+          await mkdir(join(draft, HOME), { recursive: true });
+          for (const file of files) {
+            await mkdir(join(draft, posix.dirname(file.path)), { recursive: true });
+            await writeFile(join(draft, file.path), file.content);
+          }
+          await options.prepare?.(openHandle(draft, options).sandbox);
+        });
+        return { templateKey };
+      },
+      // An upsert on the session id: the template applies only when the directory is created.
+      async start(ctx, _openOptions, artifact) {
+        const root = await ensureSessionRoot(ctx, artifact);
+        return { handle: openHandle(root, options), state: { version: 1 } };
+      },
+      // Recreates a session directory that was removed outside eve.
+      async resume(ctx, artifact) {
+        return openHandle(await ensureSessionRoot(ctx, artifact), options);
+      },
+      // `state` is null when the session never recorded it; the key finds the directory either way.
+      async onSessionEnd(ctx) {
+        await rm(sessionRoot(ctx), { force: true, recursive: true });
+      },
+    };
+  },
+});
+```
+
+## Use the provider
+
+Select the provider in `agent/sandbox/sandbox.ts`:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+import { JustBashSandbox } from "../lib/just-bash";
+
+export const environment = JustBashSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+`DefaultSandbox` never selects a custom provider, so this file is required.
+
+## How the provider works
+
+The provider follows eve's [custom provider contract](/docs/sandbox#custom-providers):
+
+- **Preparation:** `prepare()` writes a template directory under `.eve/sandbox-cache/just-bash/templates/` in your app. It copies `agent/sandbox/workspace/` files to `/workspace` and skill packages to `/home/agent/.agents/skills`, then runs the environment's `prepare` function against the template. The template key covers the resources and the source revision, so a change to either produces a new template.
+- **Sessions:** each eve session gets a directory under `.eve/sandbox-cache/just-bash/sessions/`, named from a hash of the session id. `start()` is an upsert: every call for a session, including concurrent calls and calls from a subagent that shares the sandbox, finds the same directory. The template applies only when `start()` creates the directory, so existing sessions keep their files after a rebuild. Concurrent creators copy to temporary directories and race on an atomic rename.
+- **Paths:** the session directory is the root of the just-bash filesystem. Commands start in `/workspace`, relative paths resolve from it, and `$HOME` is `/home/agent`, so eve keeps skill packages in `/home/agent/.agents/skills`.
+- **Cleanup:** `sandbox.delete()` and session end delete the session directory. `onSessionEnd()` finds the directory from the session id, succeeds when it does not exist, and can run more than once. Stopping the sandbox does nothing because no process keeps running between commands.
+- **Removed directories:** eve's built-in providers report a sandbox that no longer exists so that eve starts a fresh one, but a custom provider cannot. If `resume()` throws, every sandbox call in that session fails with that error until the session ends. This provider's `resume()` copies the template again instead. Initialization that `defineSandbox()` runs after `open()` does not run again for a recreated directory.
+
+## Add custom commands
+
+just-bash runs only its own built-in commands, so use `customCommands` to give the agent commands written in TypeScript. Define them with `defineCommand()` from just-bash:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { defineCommand } from "just-bash";
+
+import { JustBashSandbox } from "../lib/just-bash";
+
+const forecast = defineCommand("forecast", async (args) => ({
+  exitCode: 0,
+  stderr: "",
+  stdout: `Sunny in ${args[0] ?? "San Francisco"}\n`,
+}));
+
+export const environment = JustBashSandbox.environment({ customCommands: [forecast] });
+export default defineSandbox(() => environment.open());
+```
+
+A custom command runs inside the eve process with eve's permissions, not inside the virtual filesystem's boundary.
+
+## Mount more directories
+
+Use the `filesystem` option to wrap the session filesystem. This example mounts a host directory read-only at `/reference` with just-bash's `MountableFs` and `OverlayFs`:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { MountableFs, OverlayFs } from "just-bash";
+
+import { JustBashSandbox } from "../lib/just-bash";
+
+export const environment = JustBashSandbox.environment({
+  filesystem: (session) =>
+    new MountableFs({
+      base: session,
+      mounts: [
+        {
+          filesystem: new OverlayFs({
+            mountPoint: "/",
+            readOnly: true,
+            root: "/absolute/path/to/reference",
+          }),
+          mountPoint: "/reference",
+        },
+      ],
+    }),
+});
+export default defineSandbox(() => environment.open());
+```
+
+Without `readOnly`, `OverlayFs` keeps writes in memory and never changes the host directory. Use `ReadWriteFs` instead to let the agent write to a mounted directory.
+
+## Seed the template
+
+Use the `prepare` option to write files or run commands once in the template that new sessions copy:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+
+import { JustBashSandbox } from "../lib/just-bash";
+
+export const environment = JustBashSandbox.environment({
+  async prepare(sandbox) {
+    await sandbox.writeTextFile({ content: "# Notes\n", path: "notes/README.md" });
+  },
+});
+export default defineSandbox(() => environment.open());
+```
+
+## Limitations
+
+- **No native processes:** commands run in just-bash's TypeScript interpreter. Binaries such as `git` or `node` from your machine are not available unless you implement them as custom commands. just-bash can add its own sandboxed `python` and `js-exec` commands through the `python` and `javascript` options of `new Bash()`.
+- **No background jobs:** each command runs to completion before `spawn()` returns, so a command cannot keep running in the background between `bash` calls.
+- **No network policy:** the session does not expose `setNetworkPolicy()`. just-bash network commands such as `curl` stay disabled unless you pass just-bash's `network` option to `new Bash()`.
+- **Local disk only:** sessions live in your app's `.eve/` directory on the machine running eve. On Vercel Functions, a session directory lasts only as long as the function instance, so use [Vercel Sandbox](/docs/sandbox/vercel) there.
+- **No template pruning:** old templates stay under `.eve/sandbox-cache/just-bash/templates/` until you delete them.

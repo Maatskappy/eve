@@ -85,8 +85,6 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/multi-agent-projects", "/concepts/project-structure"),
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
   ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
-  ...createDocsRedirects("/sandbox/microsandbox", "/sandbox"),
-  ...createDocsRedirects("/sandbox/just-bash", "/sandbox/host"),
 ];
 
 export const rootMarkdownRedirects: DocsRedirect[] = [

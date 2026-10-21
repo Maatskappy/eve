@@ -238,7 +238,7 @@ export const AcmeSandbox = defineSandboxProvider<
 
 Provider handles implement `onSandboxStop()`, `onRuntimeShutdown()`, and `onSandboxDelete()`. These handle-level methods cover authored stop or delete calls and process shutdown; `onSessionEnd()` is the single provider hook for durable terminal session cleanup. eve does not delete a sandbox whose initialization failed: the next access runs the selector against it again, and session end removes it.
 
-Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and fails if it is gone rather than recreating callback side effects. When a built-in provider reports that the native sandbox is gone, eve clears the session's provider state and reruns the selector. A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
+Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and fails if it is gone rather than recreating callback side effects. When a built-in provider reports that the native sandbox is gone, eve clears the session's provider state and reruns the selector. Custom providers cannot report this. If a custom provider's `resume()` throws, every sandbox call in that session fails with that error until the session ends, so a provider whose sandbox derives from the session key can recreate it in `resume()` instead. A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
 
 Preparation discovers authored files through `ctx.files`; core keeps project layout and artifact storage keys private. Keep provider SDK values behind the provider. `environment.open()` preserves the provider's sandbox capability type, while the heterogeneous runtime registry erases it to eve's common session surface.
 
@@ -269,104 +269,12 @@ eve passes every path through `resolvePath()` before it calls `readFile`, `write
 
 eve writes skill packages to `$HOME/.agents/skills`, using the sandbox's own `$HOME`. To keep skills somewhere else, set `EVE_SANDBOX_SKILL_ROOT` to an absolute directory in the environment of every command your provider runs. eve reads it once per session and writes skills there instead.
 
-### Example: a just-bash provider
+### Example providers
 
-eve does not ship a provider for [just-bash](https://www.npmjs.com/package/just-bash), a bash interpreter and virtual filesystem written in TypeScript. This provider runs it over a per-session directory on local disk. Install the package in your application first (`pnpm add just-bash`):
+eve no longer ships providers for just-bash or microsandbox. These guides show complete custom providers for each, built with `defineSandboxProvider()` and `createSandboxSession()`:
 
-```ts title="agent/lib/just-bash.ts"
-import { mkdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
-
-import { Bash, ReadWriteFs } from "just-bash";
-import {
-  createSandboxSession,
-  defineSandboxProvider,
-  type SandboxProviderHandle,
-  type SandboxProviderSessionContext,
-} from "eve/sandbox/provider";
-
-// Derived from the session id alone, so every start for a session finds the same root.
-const sessionRoot = (ctx: SandboxProviderSessionContext) =>
-  join(ctx.storagePath, "just-bash", encodeURIComponent(ctx.session.id));
-
-const toStream = (body: string | Uint8Array) => new Response(body).body!;
-
-function openHandle(root: string): SandboxProviderHandle {
-  const fs = new ReadWriteFs({ root });
-  const bash = new Bash({ cwd: "/workspace", fs });
-  return {
-    sandbox: createSandboxSession({
-      resolvePath: (path) => (path.startsWith("/") ? path : `/workspace/${path}`),
-      async spawn({ command, env, workingDirectory }) {
-        const result = await bash.exec(command, { cwd: workingDirectory, env });
-        return {
-          stdout: toStream(result.stdout),
-          stderr: toStream(result.stderr),
-          wait: async () => ({ exitCode: result.exitCode }),
-          kill: async () => {},
-        };
-      },
-      async readFile({ path }) {
-        try {
-          return toStream(await fs.readFileBuffer(path));
-        } catch {
-          return null;
-        }
-      },
-      async writeFile({ path, content }) {
-        await fs.mkdir(dirname(path), { recursive: true });
-        await fs.writeFile(path, new Uint8Array(await new Response(content).arrayBuffer()));
-      },
-      removePath: ({ path, force, recursive }) => fs.rm(path, { force, recursive }),
-    }),
-    onRuntimeShutdown: async () => {},
-    onSandboxStop: async () => {},
-    onSandboxDelete: () => rm(root, { force: true, recursive: true }),
-  };
-}
-
-export const JustBashSandbox = defineSandboxProvider<
-  undefined,
-  undefined,
-  null,
-  { readonly root: string; readonly version: 1 }
->({
-  name: "just-bash",
-  environment() {
-    return {
-      async prepare() {
-        return null;
-      },
-      // An upsert: `mkdir` keeps an existing root, so repeated and concurrent starts share it.
-      async start(ctx) {
-        const root = sessionRoot(ctx);
-        await mkdir(join(root, "workspace"), { recursive: true });
-        return { handle: openHandle(root), state: { root, version: 1 } };
-      },
-      async resume(_ctx, _artifact, state) {
-        return openHandle(state.root);
-      },
-      // `state` is null when the session never recorded it; the key finds the root either way.
-      async onSessionEnd(ctx) {
-        await rm(sessionRoot(ctx), { force: true, recursive: true });
-      },
-    };
-  },
-});
-```
-
-Use it from `agent/sandbox/sandbox.ts` like a built-in provider:
-
-```ts title="agent/sandbox/sandbox.ts"
-import { defineSandbox } from "eve/sandbox";
-
-import { JustBashSandbox } from "../lib/just-bash";
-
-export const environment = JustBashSandbox.environment();
-export default defineSandbox(() => environment.open());
-```
-
-just-bash runs no native binaries and each command runs to completion, so commands cannot keep running in the background. This example does not copy `agent/sandbox/workspace/` files or skills into the sandbox; write `ctx.resources` in `prepare()` and copy them in `start()` if your agent needs them.
+- [just-bash](/docs/sandbox/just-bash): a TypeScript bash interpreter over a per-session directory on local disk, with custom commands and mounts.
+- [microsandbox](/docs/sandbox/microsandbox): one local microVM per session from any OCI image.
 
 ## Providers
 

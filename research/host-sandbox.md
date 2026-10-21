@@ -157,16 +157,21 @@ defineSandboxBackend<Options>({
 only when `open` reports `created`: workspace files under `workspaceRoot`,
 authored skills at the sandbox's resolved skill root, then `prepare`; on failure
 it stops and removes the sandbox so a later open cannot reconnect to it
-half-seeded. Seeding runs after `open` returns, so another process can use a
-sandbox it opened mid-seed; backends that run several eve processes against one
-engine add a lock. Every open refreshes authored skills through the marker
+half-seeded. Seeding runs after `open` returns, so when separate eve processes
+open the same new session at once, one can use the sandbox mid-seed.
+This is a documented limitation of backends without `directoryTemplate`; eve
+gives no completion signal to lock on, and adds no seeded marker. Every open refreshes authored skills through the marker
 described under [Modes](#modes). eve injects `AI_AGENT=eve`, normalizes buffered
 and streaming exec (killing streaming commands on abort), and maps `stop()` to
 stop, delete, and shutdown.
 
-Resume calls `find`. When it returns `undefined`, eve calls `remove` before
-throwing `SandboxSessionGoneError`, so a partly removed sandbox (such as a host
-session whose workspace alone was deleted) cannot survive into the next start.
+Resume calls `find` and never removes anything: `ensure` deduplicates starts,
+not resumes, so a stale resume that removed on `undefined` could delete the
+sandbox a concurrent resume had just started. When `find` returns `undefined`,
+eve throws `SandboxSessionGoneError`. For a `directoryTemplate` backend, the
+next start copies the template when `ctx.directory` is missing, and copies back
+only the missing entries when the directory exists but `find` reports it
+unusable (a host session whose workspace alone was deleted).
 Without `find`, only a `directoryTemplate` backend can resume: it reopens a
 template copy while `ctx.directory` exists, so no resume path returns an
 unseeded sandbox. A state whose key differs from the current one, because the

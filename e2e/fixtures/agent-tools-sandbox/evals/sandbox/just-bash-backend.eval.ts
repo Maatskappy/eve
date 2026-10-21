@@ -19,6 +19,6 @@ export default defineEval({
     t.calledSubagent("just-bash", { count: 1, status: "completed" });
     t.check(turn.message, includes(PREPARED));
     t.check(turn.message, includes(WRITTEN));
-    t.check(turn.message, includes("eve"));
+    t.check(turn.message, includes("agent=eve"));
   },
 });

@@ -10,7 +10,7 @@ export default defineTool({
     const sandbox = await ctx.getSandbox();
     await sandbox.writeTextFile({ content: JUST_BASH_WRITTEN, path: "notes/written.txt" });
     const result = await sandbox.run({
-      command: 'cat prepared.txt; echo; cat notes/written.txt; echo; printf "%s" "$AI_AGENT"',
+      command: 'cat prepared.txt; echo; cat notes/written.txt; echo; printf "agent=%s" "$AI_AGENT"',
     });
     return result.stdout;
   },

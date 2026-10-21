@@ -132,9 +132,9 @@ interface SandboxBackendDefinitionBase<Options extends object> {
    * session, even from separate processes, must end up with the same sandbox.
    * Set `created` when this call created it: eve then writes the workspace
    * files and skills and runs the environment's `prepare`, and removes the
-   * sandbox if that fails. Seeding runs after `open` returns, so when eve
-   * processes on several machines or in several servers open the same new
-   * session at once, one of them can use the sandbox before seeding finishes.
+   * sandbox if that fails. Seeding runs after `open` returns, so when separate
+   * eve processes open the same new session at once, one of them can use the
+   * sandbox before seeding finishes.
    * A `directoryTemplate` backend is not affected, because its directory is a
    * finished template copy before `open` runs.
    */

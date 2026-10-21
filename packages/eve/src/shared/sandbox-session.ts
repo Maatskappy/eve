@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 import type { Experimental_SandboxSession as AiSdkSandbox } from "ai";
 
 import type { SandboxDeleteOptions } from "#shared/sandbox-provider.js";
@@ -65,7 +67,7 @@ export type SandboxWriteTextFileOptions = Parameters<AiSdkSandbox["writeTextFile
 /**
  * Options for removing a path from a sandbox.
  *
- * Relative paths resolve from `/workspace`; absolute paths pass through.
+ * Relative paths resolve from the workspace root; absolute paths pass through.
  * `force` ignores missing paths. `recursive` permits removing non-empty
  * directories.
  */
@@ -83,11 +85,11 @@ export interface SandboxRemovePathOptions {
  * `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile`) are
  * pulled directly from the AI SDK {@link AiSdkSandbox} type, so authored
  * code that targets either surface uses identical signatures. `resolvePath`
- * is an eve-specific extension for `/workspace` path anchoring.
+ * is an eve-specific extension for workspace-root path anchoring.
  *
- * Relative paths resolve from `/workspace`, the live working directory
- * for every provider. Absolute paths pass through unchanged.
- *
+ * Relative paths resolve from the provider's workspace root, the live
+ * working directory of every command: `/workspace` for Vercel and Docker,
+ * a real directory for `HostSandbox`. Absolute paths pass through unchanged.
  */
 export interface SandboxSession extends Pick<
   AiSdkSandbox,
@@ -101,17 +103,17 @@ export interface SandboxSession extends Pick<
   | "writeTextFile"
 > {
   /**
-   * Anchors a sandbox-relative path to `/workspace` and returns the
+   * Anchors a sandbox-relative path to the workspace root and returns the
    * resulting absolute path.
    *
-   * Relative paths resolve from `/workspace`; absolute paths pass through.
-   * The read and write methods already apply this internally.
+   * Relative paths resolve from the workspace root; absolute paths pass
+   * through. The read and write methods already apply this internally.
    */
   resolvePath(path: string): string;
   /**
    * Removes one file or directory from the sandbox filesystem.
    *
-   * Relative paths resolve from `/workspace`; absolute paths pass through.
+   * Relative paths resolve from the workspace root; absolute paths pass through.
    */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
 }
@@ -150,6 +152,39 @@ export interface InternalSandboxSession extends Pick<
 > {
   /** Removes an already-resolved path from the provider filesystem. */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
-  /** Translates a user-facing path to the provider's native path. */
+  /**
+   * Translates a user-facing path to the provider's native path. Relative
+   * paths resolve from the workspace root, so `resolvePath(".")` declares it.
+   */
   resolvePath(path: string): string;
+  /**
+   * Absolute directory where eve writes skill packages. Omit it to keep the
+   * default: `$HOME/.agents/skills` as reported by the sandbox, or `skills/`
+   * under the workspace root when the sandbox has no usable home.
+   */
+  readonly skillRoot?: string;
+}
+
+const SKILL_ROOT = Symbol.for("eve.sandbox-skill-root");
+
+/**
+ * Records a provider-declared skill root on a built session. A symbol keeps it
+ * off the public surface while spreads and proxies around the session keep it.
+ */
+export function declareSandboxSkillRoot<Session extends SandboxSession>(
+  session: Session,
+  skillRoot: string | undefined,
+): Session {
+  return skillRoot === undefined ? session : Object.assign(session, { [SKILL_ROOT]: skillRoot });
+}
+
+/** The provider-declared skill root, when the session's provider declared one. */
+export function declaredSandboxSkillRoot(session: SandboxSession): string | undefined {
+  const skillRoot: unknown = Reflect.get(session, SKILL_ROOT);
+  return typeof skillRoot === "string" ? skillRoot : undefined;
+}
+
+/** The session's workspace root: where relative paths resolve and commands start. */
+export function sandboxWorkspaceRoot(session: SandboxSession): string {
+  return posix.normalize(session.resolvePath(".")).replace(/(.)\/$/, "$1");
 }

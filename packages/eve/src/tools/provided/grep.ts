@@ -54,7 +54,7 @@ export const GREP_INPUT_SCHEMA = defineJsonSchema<GrepToolInput>({
     path: {
       type: "string",
       description:
-        "The directory or file to search in. Defaults to /workspace. " +
+        "The directory or file to search in. Defaults to the workspace root, where `bash` commands start. " +
         "Must be an absolute path or begin with $HOME/. Omit to use the default.",
     },
     pattern: {

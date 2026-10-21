@@ -1,4 +1,5 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
+import { sandboxWorkspaceRoot } from "#shared/sandbox-session.js";
 import { resolveSandboxModelPath } from "#shared/skill-paths.js";
 
 /**
@@ -14,7 +15,7 @@ export async function resolveAbsoluteFilePath(
   if (!resolvedPath.startsWith("/")) {
     throw new Error(
       `filePath must be an absolute path. Received: "${filePath}". ` +
-        "Use an absolute path such as /workspace/foo.ts or a path beginning with $HOME/.",
+        `Use an absolute path such as ${sandboxWorkspaceRoot(sandbox)}/foo.ts or a path beginning with $HOME/.`,
     );
   }
 

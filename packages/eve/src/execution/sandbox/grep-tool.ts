@@ -1,6 +1,6 @@
 import { normalizeModelPath } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
+import { sandboxWorkspaceRoot, type SandboxSession } from "#shared/sandbox-session.js";
 import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
@@ -11,7 +11,6 @@ import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-out
 
 const DEFAULT_GREP_LIMIT = 100;
 const MAX_GREP_LIMIT = 1000;
-const DEFAULT_PATH = "/workspace";
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -51,7 +50,7 @@ export async function executeGrepOnSandbox(
   sandbox: SandboxSession,
   args: GrepInput,
 ): Promise<GrepResult> {
-  const effectivePath = args.path ?? DEFAULT_PATH;
+  const effectivePath = args.path ?? sandboxWorkspaceRoot(sandbox);
 
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, effectivePath);
   const normalizedPath = normalizeModelPath(resolvedPath);

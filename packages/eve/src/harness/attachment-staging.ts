@@ -33,12 +33,11 @@ import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 
 /**
- * Sandbox directory where eve stages message attachments and tool-result
- * files. It sits under eve's own dot-directory so it never collides with an
- * agent's `/workspace/attachments`. Authored canonical path —
- * {@link SandboxSession.writeFile} translates to the backend-native location.
+ * Directory, relative to the sandbox workspace root, where eve stages message
+ * attachments and tool-result files. It sits under eve's own dot-directory so
+ * it never collides with an agent's own `attachments/` directory.
  */
-export const ATTACHMENTS_ROOT = "/workspace/.eve/attachments";
+export const ATTACHMENTS_ROOT = ".eve/attachments";
 
 const log = createLogger("harness.attachment-staging");
 
@@ -601,9 +600,11 @@ async function writeSandboxRef(
 ): Promise<SandboxRef> {
   const mediaType = verifyMediaType(bytes, declaredMediaType);
   const sha = sha256Prefix(bytes);
-  const authored = `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha, mediaType)}`;
-  await sandbox.writeBinaryFile({ content: bytes, path: authored });
-  return { ...readMediaMetadata(bytes, mediaType), path: sandbox.resolvePath(authored) };
+  const path = sandbox.resolvePath(
+    `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha, mediaType)}`,
+  );
+  await sandbox.writeBinaryFile({ content: bytes, path });
+  return { ...readMediaMetadata(bytes, mediaType), path };
 }
 
 /**

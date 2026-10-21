@@ -82,7 +82,7 @@ Explicit imports, sandbox workspace files, and packaged skill resources are unaf
 
 ## Files available in the sandbox
 
-Agent source files are not automatically available to shell commands. Put files to copy into the sandbox's `/workspace/` under `agent/sandbox/workspace/`. Skill runtime files are seeded separately under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback. See [Sandboxes](/docs/sandbox) and [Skills](/docs/skills).
+Agent source files are not automatically available to shell commands. Put files to copy into the sandbox's workspace root (`/workspace/` in Vercel and Docker sandboxes) under `agent/sandbox/workspace/`. Skill runtime files are seeded separately under `$HOME/.agents/skills/`, with `skills/` under the workspace root as a fallback. See [Sandboxes](/docs/sandbox) and [Skills](/docs/skills).
 
 ## Local subagents
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { declareSandboxSkillRoot } from "#shared/sandbox-session.js";
 import {
-  FALLBACK_SKILL_ROOT,
   MODEL_SKILL_ROOT,
   resolveSandboxModelPath,
   resolveSandboxSkillRoot,
@@ -55,7 +55,7 @@ describe("skill path helpers", () => {
     expect(sandbox.commandLog).toEqual([]);
   });
 
-  it("falls back to /workspace/skills when HOME is unusable", async () => {
+  it("falls back to skills/ under the workspace root when HOME is unusable", async () => {
     const sandbox = mockSandbox({
       commands: {
         [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "\n" },
@@ -63,7 +63,7 @@ describe("skill path helpers", () => {
     });
 
     await expect(resolveSandboxSkillRoot({ sandbox: sandbox.session })).resolves.toBe(
-      FALLBACK_SKILL_ROOT,
+      "/workspace/skills",
     );
     await expect(
       resolveSandboxModelPath({
@@ -86,5 +86,19 @@ describe("skill path helpers", () => {
         sandbox: sandbox.session,
       }),
     ).resolves.toBe("/home/agent/.agents/skills/research/references/catalog.md");
+  });
+
+  it("resolves skill paths to a declared skill root without probing HOME", async () => {
+    const sandbox = mockSandbox();
+    const session = declareSandboxSkillRoot(sandbox.session, "/app/.eve/skills");
+
+    await expect(resolveSandboxSkillRoot({ sandbox: session })).resolves.toBe("/app/.eve/skills");
+    await expect(
+      resolveSandboxModelPath({
+        path: `${MODEL_SKILL_ROOT}/research/references/catalog.md`,
+        sandbox: session,
+      }),
+    ).resolves.toBe("/app/.eve/skills/research/references/catalog.md");
+    expect(sandbox.commandLog).toEqual([]);
   });
 });

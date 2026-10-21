@@ -2,19 +2,20 @@ import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
-import type {
-  InternalSandboxSession,
-  SandboxProcess,
-  SandboxReadBinaryFileOptions,
-  SandboxReadFileOptions,
-  SandboxRemovePathOptions,
-  SandboxReadTextFileOptions,
-  SandboxRunOptions,
-  SandboxSession,
-  SandboxSpawnOptions,
-  SandboxWriteBinaryFileOptions,
-  SandboxWriteFileOptions,
-  SandboxWriteTextFileOptions,
+import {
+  declareSandboxSkillRoot,
+  type InternalSandboxSession,
+  type SandboxProcess,
+  type SandboxReadBinaryFileOptions,
+  type SandboxReadFileOptions,
+  type SandboxRemovePathOptions,
+  type SandboxReadTextFileOptions,
+  type SandboxRunOptions,
+  type SandboxSession,
+  type SandboxSpawnOptions,
+  type SandboxWriteBinaryFileOptions,
+  type SandboxWriteFileOptions,
+  type SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
@@ -125,8 +126,12 @@ export function buildSandboxSession(
       });
     },
   };
-  if (setNetworkPolicy === undefined) return session;
-  return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
+  return declareSandboxSkillRoot(
+    setNetworkPolicy === undefined
+      ? session
+      : ({ ...session, setNetworkPolicy } as NetworkPolicySandboxSession),
+    primitives.skillRoot,
+  );
 }
 
 /**

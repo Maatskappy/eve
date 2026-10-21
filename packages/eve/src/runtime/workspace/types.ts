@@ -1,10 +1,8 @@
 /**
- * Stable root directory for every workspace eve exposes to agents and
- * sandbox providers.
- *
- * This is both the model-facing logical path and the live `bash` cwd
- * for every backend. Backends must initialize their filesystems so
- * commands run at this path; there is no per-backend translation.
+ * Workspace root for providers that own a dedicated filesystem (Vercel,
+ * Docker). It is both where authored workspace files are seeded and the live
+ * `bash` cwd there. Providers declare their real root through `resolvePath`,
+ * so code that needs the root of an open sandbox reads `sandboxWorkspaceRoot`.
  */
 export const WORKSPACE_ROOT = "/workspace";
 

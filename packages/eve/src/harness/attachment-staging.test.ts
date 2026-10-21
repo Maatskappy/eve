@@ -88,7 +88,9 @@ describe("stageAttachmentsForAdapter", () => {
     expect(sandbox.writes).toHaveLength(1);
     const write = sandbox.writes[0];
     expect(write?.path).toMatch(
-      new RegExp(`^${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/quarterly\\.csv$`),
+      new RegExp(
+        `^/workspace/${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/quarterly\\.csv$`,
+      ),
     );
     expect(write?.content).toEqual(data);
   });

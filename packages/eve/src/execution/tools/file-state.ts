@@ -40,7 +40,7 @@ export const ReadFileStateKey = new ContextKey<ReadFileState>("eve.readFile");
  * with `/`.
  *
  * Examples:
- * - `/workspace/./foo.ts`  → `/workspace/foo.ts`
+ * - `/srv/app/./foo.ts`  → `/srv/app/foo.ts`
  * - `/tmp/project/../project/foo.ts` → `/tmp/project/foo.ts`
  */
 export function normalizeModelPath(path: string): string {

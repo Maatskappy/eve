@@ -1,16 +1,19 @@
-import type { SandboxSession } from "#shared/sandbox-session.js";
+import {
+  declaredSandboxSkillRoot,
+  sandboxWorkspaceRoot,
+  type SandboxSession,
+} from "#shared/sandbox-session.js";
 
 const MODEL_HOME_ROOT = "$HOME";
 
 export const MODEL_SKILL_ROOT = `${MODEL_HOME_ROOT}/.agents/skills`;
-export const FALLBACK_SKILL_ROOT = "/workspace/skills";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
 
 /**
- * Resolves where skills live in the sandbox: under the probed home when it has
- * one, and under {@link FALLBACK_SKILL_ROOT} when it does not.
+ * Resolves where skills live in the sandbox: the provider-declared skill root,
+ * else under the probed home, else under `skills/` in the workspace root.
  */
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
@@ -20,9 +23,9 @@ export async function resolveSandboxSkillRoot(input: {
 
 /**
  * Resolves a leading `$HOME` in a model-supplied sandbox path without
- * evaluating any other shell syntax. Skill paths retain their documented
- * `/workspace/skills` fallback when the sandbox does not expose a usable
- * home directory.
+ * evaluating any other shell syntax. Skill paths resolve to the provider's
+ * declared skill root when it has one, and fall back to `skills/` under the
+ * workspace root when the sandbox does not expose a usable home directory.
  */
 export async function resolveSandboxModelPath(input: {
   readonly path: string;
@@ -32,14 +35,22 @@ export async function resolveSandboxModelPath(input: {
     return input.path;
   }
 
+  const skillSuffix = isModelSkillPath(input.path)
+    ? input.path.slice(MODEL_SKILL_ROOT.length)
+    : undefined;
+  const declaredSkillRoot = declaredSandboxSkillRoot(input.sandbox);
+  if (skillSuffix !== undefined && declaredSkillRoot !== undefined) {
+    return `${declaredSkillRoot}${skillSuffix}`;
+  }
+
   const home = await resolveSandboxHome(input.sandbox);
   if (home !== null) {
     const suffix = input.path.slice(MODEL_HOME_ROOT.length);
     return suffix.length === 0 ? home : `${home === "/" ? "" : home}${suffix}`;
   }
 
-  if (isModelSkillPath(input.path)) {
-    return `${FALLBACK_SKILL_ROOT}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
+  if (skillSuffix !== undefined) {
+    return `${sandboxWorkspaceRoot(input.sandbox)}/skills${skillSuffix}`;
   }
 
   return input.path;

@@ -42,6 +42,11 @@ export async function openHostSandboxHandle(input: {
   readonly skillRoot: string;
   readonly workspaceRoot: string;
 }): Promise<SandboxProviderHandle<SandboxSession>> {
+  if (process.platform === "win32") {
+    throw new Error(
+      "HostSandbox requires a POSIX shell and does not run on Windows; use WSL or DockerSandbox.",
+    );
+  }
   const environmentRoot = (await findEveProjectRoot(input.appRoot)) ?? input.appRoot;
   const jobRoot = join(input.sessionDirectory, JOBS_DIRECTORY_NAME);
   const sessionGroups = sessionGroupSet(input.sessionDirectory);

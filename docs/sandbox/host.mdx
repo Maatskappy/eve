@@ -15,6 +15,8 @@ export default defineSandbox(() => environment.open());
 
 During `eve dev` and `eve eval`, [`DefaultSandbox`](/docs/sandbox/default) selects the host sandbox, so you need this file only to change its options or to use it outside development.
 
+The host sandbox needs `bash` and runs on macOS and Linux. On Windows, opening it fails; run eve inside WSL or use [Docker](/docs/sandbox/docker).
+
 ## Not an isolation boundary
 
 The host sandbox runs commands as the user that started eve, with that user's files, network access, and credentials. A command the agent runs can read, change, or delete anything you can. eve does not apply a network policy, and the session does not expose `setNetworkPolicy()`. Use the host sandbox only for agents and inputs you trust. For isolation, use [Docker](/docs/sandbox/docker) or [Vercel Sandbox](/docs/sandbox/vercel).

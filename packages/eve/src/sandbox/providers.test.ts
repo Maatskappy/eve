@@ -7,16 +7,21 @@ import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSessionFor } from "#shared/sandbox-session.js";
 
 describe("sandbox providers", () => {
-  it("selects Vercel when deployed, the host in development, then Docker", () => {
-    const select = (probes: { vercel: boolean; development: boolean; docker: boolean }) =>
+  it("selects Vercel when deployed, the host in development on POSIX, then Docker", () => {
+    const select = (
+      probes: { vercel: boolean; development: boolean; docker: boolean },
+      posix = true,
+    ) =>
       defineDefaultSandboxProvider({
         isDeployedOnVercel: () => probes.vercel,
         isDevelopment: () => probes.development,
         isDockerAvailable: () => probes.docker,
+        isPosixHost: () => posix,
       }).environment().provider;
 
     expect(select({ vercel: true, development: true, docker: true })).toBe("vercel");
     expect(select({ vercel: false, development: true, docker: true })).toBe("host");
+    expect(select({ vercel: false, development: true, docker: true }, false)).toBe("docker");
     expect(select({ vercel: false, development: false, docker: true })).toBe("docker");
   });
 
@@ -25,6 +30,7 @@ describe("sandbox providers", () => {
       isDeployedOnVercel: () => false,
       isDevelopment: () => false,
       isDockerAvailable: () => false,
+      isPosixHost: () => true,
     }).environment();
     const { implementation } = getSandboxEnvironmentRuntime(environment);
     const context = {} as Parameters<typeof implementation.start>[0];

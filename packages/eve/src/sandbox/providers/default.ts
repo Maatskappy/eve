@@ -19,20 +19,22 @@ export interface DefaultSandboxProbes {
   readonly isDeployedOnVercel: () => boolean;
   readonly isDevelopment: () => boolean;
   readonly isDockerAvailable: () => boolean;
+  readonly isPosixHost: () => boolean;
 }
 
 const SANDBOX_PROVIDER_PROBES: DefaultSandboxProbes = {
   isDeployedOnVercel: () => Boolean(process.env.VERCEL),
   isDevelopment: isEveDevEnvironment,
   isDockerAvailable: () => isLinuxDockerDaemonAvailableSync(),
+  isPosixHost: () => process.platform !== "win32",
 };
 
 const NO_SANDBOX_PROVIDER_MESSAGE =
   "DefaultSandbox found no sandbox provider: this process is not deployed on Vercel, is not " +
-  "running under `eve dev` or `eve eval`, and cannot reach a Docker daemon. Start Docker, deploy " +
-  "to Vercel to use Vercel Sandbox, or choose a provider in agent/sandbox/sandbox.ts. To run " +
-  "commands directly on this machine without isolation, use " +
-  '`HostSandbox.environment()` from "eve/sandbox/host".';
+  "running under `eve dev` or `eve eval` on macOS or Linux, and cannot reach a Docker daemon. " +
+  "Start Docker, deploy to Vercel to use Vercel Sandbox, or choose a provider in " +
+  "agent/sandbox/sandbox.ts. To run commands directly on a macOS or Linux machine without " +
+  'isolation, use `HostSandbox.environment()` from "eve/sandbox/host".';
 
 // Preparation is a no-op so builds succeed on any host; only opening fails.
 const UnavailableSandbox = defineSandboxProvider({
@@ -61,7 +63,8 @@ export function defineDefaultSandboxProvider(probes: DefaultSandboxProbes) {
           createDefaultVercelEnvironment(withPreparation(options.vercel, options.prepare)),
         );
       }
-      if (probes.isDevelopment()) {
+      // The host sandbox needs bash and POSIX process groups, which Windows lacks.
+      if (probes.isDevelopment() && probes.isPosixHost()) {
         return HostSandbox.environment(withPreparation({}, options.prepare));
       }
       if (probes.isDockerAvailable()) {

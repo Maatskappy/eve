@@ -347,8 +347,11 @@ describe("buildStepCatalog", () => {
           },
         },
       });
-      const load = async (access: { open: boolean; provider: string }) => {
-        const get = vi.fn(async () => session);
+      const load = async (access: { fails?: boolean; open: boolean; provider: string }) => {
+        const get = vi.fn(async () => {
+          if (access.fails === true) throw new Error("bash not found");
+          return session;
+        });
         const ctx = new ContextContainer();
         ctx.set(SandboxKey, {
           captureState: async () => ({ session: null }),
@@ -375,6 +378,11 @@ describe("buildStepCatalog", () => {
       await expect(load({ open: false, provider: "host" })).resolves.toEqual({
         opened: true,
         output: located,
+      });
+      // A failed host open still loads the skill, with the path file tools resolve.
+      await expect(load({ fails: true, open: false, provider: "host" })).resolves.toEqual({
+        opened: true,
+        output: "Skill files: $HOME/.agents/skills/pdf-forms/\n\n# PDF forms",
       });
     });
 

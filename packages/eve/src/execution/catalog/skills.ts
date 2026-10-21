@@ -101,11 +101,19 @@ async function resolveSkillDirectory(
   access: SandboxAccess,
   name: string,
 ): Promise<string | undefined> {
-  const sandbox =
-    access.peek?.() ??
-    (access.environment?.provider === HOST_PROVIDER_NAME ? await access.get() : null);
-  if (sandbox === null) return undefined;
-  return await resolveSandboxModelPath({ path: `${MODEL_SKILL_ROOT}/${name}`, sandbox });
+  const symbolic = `${MODEL_SKILL_ROOT}/${name}`;
+  const open = access.peek?.() ?? null;
+  if (open !== null) return await resolveSandboxModelPath({ path: symbolic, sandbox: open });
+  if (access.environment?.provider !== HOST_PROVIDER_NAME) return undefined;
+  try {
+    const sandbox = await access.get();
+    return sandbox === null
+      ? undefined
+      : await resolveSandboxModelPath({ path: symbolic, sandbox });
+  } catch {
+    // The skill still loads; the next sandbox call reports why the host sandbox failed to open.
+    return symbolic;
+  }
 }
 
 /** Why `eve__skill` can't load `name`: the closest skills, or the connection it names. */

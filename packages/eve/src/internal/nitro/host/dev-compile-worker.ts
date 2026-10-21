@@ -2,6 +2,7 @@ import { parentPort, workerData } from "node:worker_threads";
 
 import {
   compileAndStageDevelopmentGeneration,
+  DEVELOPMENT_COMPILE_MESSAGE_KIND,
   type DevelopmentCompileInput,
   type DevelopmentCompileMessage,
   serializeError,
@@ -11,11 +12,12 @@ let message: DevelopmentCompileMessage;
 
 try {
   message = {
+    kind: DEVELOPMENT_COMPILE_MESSAGE_KIND,
     ok: true,
     compilation: await compileAndStageDevelopmentGeneration(workerData as DevelopmentCompileInput),
   };
 } catch (error) {
-  message = { ok: false, error: serializeError(error) };
+  message = { kind: DEVELOPMENT_COMPILE_MESSAGE_KIND, ok: false, error: serializeError(error) };
 }
 
 parentPort?.postMessage(message);

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Fix `eve dev` running out of memory after repeated saves. Each rebuild now compiles the agent in a short-lived worker, so its bundles are released afterward, and a rebuild that exhausts the heap fails without stopping the server. Workspace packages marked `"sideEffects": false` now tree-shake the same way whether a module is imported by relative path or by package name, so unchanged modules no longer produce different bundles between rebuilds.
+Fix `eve dev` running out of memory after repeated saves: each rebuild now compiles in a short-lived worker that releases its memory, and a rebuild that exhausts the heap fails without stopping the server. Modules imported by relative path now carry their `package.json` metadata, so `"sideEffects": false` tree-shakes them the same way between rebuilds, and in `"type": "module"` packages a default import of a CommonJS package that sets `__esModule` now gets that package's `module.exports`, as in Node.

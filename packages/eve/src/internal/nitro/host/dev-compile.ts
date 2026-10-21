@@ -14,9 +14,15 @@ export interface DevelopmentCompilation {
   readonly generation: DevelopmentGeneration;
 }
 
-export type DevelopmentCompileMessage =
+// Authored code also runs in the worker and may post its own messages to `parentPort`.
+export const DEVELOPMENT_COMPILE_MESSAGE_KIND = "eve:development-compile";
+
+export type DevelopmentCompileMessage = {
+  readonly kind: typeof DEVELOPMENT_COMPILE_MESSAGE_KIND;
+} & (
   | { readonly ok: true; readonly compilation: DevelopmentCompilation }
-  | { readonly ok: false; readonly error: SerializedError };
+  | { readonly ok: false; readonly error: SerializedError }
+);
 
 interface SerializedError {
   cause?: SerializedError;
@@ -38,8 +44,8 @@ const MAX_SERIALIZED_CAUSE_DEPTH = 8;
 export async function compileDevelopmentGeneration(
   input: DevelopmentCompileInput,
 ): Promise<DevelopmentCompilation> {
-  // Source checkouts run this module as TypeScript under Vitest, and a worker
-  // thread cannot load that source without the test runner's transform.
+  // eve's own tests load this module from TypeScript source, which a worker
+  // thread cannot import without the test runner's transform.
   if (import.meta.url.endsWith(".ts")) {
     return await compileAndStageDevelopmentGeneration(input);
   }
@@ -50,7 +56,11 @@ export async function compileDevelopmentGeneration(
 
   try {
     const message = await new Promise<DevelopmentCompileMessage>((resolve, reject) => {
-      worker.once("message", resolve);
+      worker.on("message", (message: Partial<DevelopmentCompileMessage> | null) => {
+        if (message?.kind === DEVELOPMENT_COMPILE_MESSAGE_KIND) {
+          resolve(message as DevelopmentCompileMessage);
+        }
+      });
       worker.once("error", reject);
       worker.once("exit", (code) => {
         reject(new Error(`The agent compiler worker exited with code ${code} before finishing.`));

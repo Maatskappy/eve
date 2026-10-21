@@ -144,9 +144,7 @@ export default defineTool({
       throw new Error(`File "${path}" contains NUL bytes and appears to be binary.`);
     }
     // A symlink below the source root can point anywhere; the deployed root is itself a link.
-    const real = await sandbox.run({
-      command: `realpath -- ${shellQuote(sourceRoot)} ${shellQuote(resolved)}`,
-    });
+    const real = await sandbox.run({ command: physicalPathsCommand(sourceRoot, resolved) });
     const [realRoot, realTarget] = real.stdout.trim().split("\n");
     if (real.exitCode !== 0 || !realRoot || !realTarget?.startsWith(`${realRoot}/`)) {
       throw new Error(`Self-modification file edits must stay below ${sourceRoot}.`);
@@ -160,3 +158,18 @@ export default defineTool({
     return { path: resolved, replacements: edits.length };
   },
 });
+
+/**
+ * Prints the physical source root and target path, one per line, with POSIX
+ * `cd -P` and `pwd -P` because `realpath` is missing on older macOS. A target
+ * that is itself a symlink fails, since only its directory is resolved.
+ */
+function physicalPathsCommand(sourceRoot: string, target: string): string {
+  const quoted = shellQuote(target);
+  return [
+    `[ ! -L ${quoted} ]`,
+    `root=$(cd -P -- ${shellQuote(sourceRoot)} && pwd -P)`,
+    `directory=$(cd -P -- "$(dirname -- ${quoted})" && pwd -P)`,
+    `printf '%s\\n%s/%s\\n' "$root" "$directory" "$(basename -- ${quoted})"`,
+  ].join(" && ");
+}

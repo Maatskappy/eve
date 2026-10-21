@@ -1,4 +1,4 @@
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import {
 } from "#runtime/local-dev-capability.js";
 
 import { LOCAL_SOURCE_PATH, selfModificationSourceRoot } from "./paths.js";
+import editFile from "./extension/subagents/agent/tools/edit_file.js";
 import { defineSelfModificationSandbox } from "./sandbox.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -61,6 +62,31 @@ describe("local self-modification sandbox", () => {
     } finally {
       restore();
     }
+  });
+
+  it("keeps edit_file inside agent/ when symlinks point outside it", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const appRoot = await createScratchDirectory("eve-self-modification-links-");
+    const outside = await createScratchDirectory("eve-self-modification-outside-");
+    await mkdir(join(appRoot, "agent"));
+    await writeFile(join(appRoot, "agent", "real.ts"), "old");
+    await writeFile(join(outside, "secret.ts"), "old");
+    await symlink(outside, join(appRoot, "agent", "linked"));
+    await symlink(join(outside, "secret.ts"), join(appRoot, "agent", "file-link.ts"));
+    const environment = getBoundSandboxEnvironment(defineSelfModificationSandbox());
+    const { sandbox } = await createSandboxProviderHarness(
+      getSandboxEnvironmentRuntime(environment!).implementation,
+      undefined,
+    ).openSession({ appRoot, sandboxName: "self-modification-links" });
+    const edit = (path: string) =>
+      editFile.execute({ edits: [{ newText: "new", oldText: "old" }], path }, {
+        getSandbox: async () => sandbox,
+      } as never);
+
+    await expect(edit("agent/real.ts")).resolves.toMatchObject({ replacements: 1 });
+    await expect(edit("agent/linked/secret.ts")).rejects.toThrow("must stay below");
+    await expect(edit("agent/file-link.ts")).rejects.toThrow("must stay below");
+    await expect(readFile(join(outside, "secret.ts"), "utf8")).resolves.toBe("old");
   });
 
   it("binds a prewarm-safe environment that cannot open outside eve dev", async () => {

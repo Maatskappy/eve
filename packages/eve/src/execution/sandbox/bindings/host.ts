@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -41,6 +41,8 @@ export const HOST_PROVIDER_NAME = "host";
 
 const WORKSPACE_DIRECTORY_NAME = "workspace";
 const SKILLS_DIRECTORY_NAME = "skills";
+const AUTHORED_SKILLS_MARKER = "authored-skills.json";
+const RECURSIVE = { force: true, recursive: true } as const;
 
 // Holds the template key, not its path: the build and runtime app roots can differ.
 type HostPreparedArtifact = { readonly templateKey: string };
@@ -150,11 +152,8 @@ export function createHostSandboxProvider(
     root: string,
   ) {
     const sessionDirectory = resolveSessionDirectory(context);
-    const skillRoot = join(sessionDirectory, SKILLS_DIRECTORY_NAME, artifact.templateKey);
-    if (!(await pathExists(skillRoot))) {
-      const templatePath = await requireTemplate(context, artifact);
-      await copyDirectoryAtomically(join(templatePath, SKILLS_DIRECTORY_NAME), skillRoot);
-    }
+    const skillRoot = join(sessionDirectory, SKILLS_DIRECTORY_NAME);
+    await refreshAuthoredSkills({ artifact, context, sessionDirectory, skillRoot });
     return await openHostSandboxHandle({
       appRoot: context.host.resolveProjectPath("."),
       sessionDirectory,
@@ -225,6 +224,65 @@ async function writeResourceTree(
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, file.content);
   }
+}
+
+/** Records which template generation last wrote the session's authored skills. */
+interface AuthoredSkillsMarker {
+  readonly skills: readonly string[];
+  readonly templateKey: string;
+}
+
+/**
+ * Brings the session's authored skills up to the current template generation.
+ * Dynamic skills share the directory and persist across rebuilds, so only the
+ * authored skill directories are replaced, and only those the previous
+ * generation wrote are removed.
+ */
+async function refreshAuthoredSkills(input: {
+  readonly artifact: HostPreparedArtifact;
+  readonly context: SandboxProviderSessionContext;
+  readonly sessionDirectory: string;
+  readonly skillRoot: string;
+}): Promise<void> {
+  const markerPath = join(input.sessionDirectory, AUTHORED_SKILLS_MARKER);
+  const previous = await readAuthoredSkillsMarker(markerPath);
+  if (previous?.templateKey === input.artifact.templateKey) return;
+
+  const templateSkills = join(
+    await requireTemplate(input.context, input.artifact),
+    SKILLS_DIRECTORY_NAME,
+  );
+  const skills = await readdir(templateSkills).catch((): string[] => []);
+  for (const name of previous?.skills ?? []) {
+    if (!skills.includes(name)) await rm(join(input.skillRoot, name), RECURSIVE);
+  }
+  for (const name of skills) {
+    await rm(join(input.skillRoot, name), RECURSIVE);
+    await copyDirectoryAtomically(join(templateSkills, name), join(input.skillRoot, name));
+  }
+  await mkdir(input.skillRoot, { recursive: true });
+  const marker: AuthoredSkillsMarker = { skills, templateKey: input.artifact.templateKey };
+  await writeFile(markerPath, JSON.stringify(marker));
+}
+
+async function readAuthoredSkillsMarker(path: string): Promise<AuthoredSkillsMarker | undefined> {
+  try {
+    const value: unknown = JSON.parse(await readFile(path, "utf8"));
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "templateKey" in value &&
+      typeof value.templateKey === "string" &&
+      "skills" in value &&
+      Array.isArray(value.skills) &&
+      value.skills.every((name: unknown) => typeof name === "string")
+    ) {
+      return { skills: value.skills, templateKey: value.templateKey };
+    }
+  } catch {
+    // A missing or unreadable marker means no generation has written skills yet.
+  }
+  return undefined;
 }
 
 async function requireTemplate(

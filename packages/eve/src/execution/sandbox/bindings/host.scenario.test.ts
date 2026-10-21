@@ -184,6 +184,51 @@ describe("HostSandbox", () => {
     await expect.poll(() => isProcessAlive(orphan)).toBe(false);
   });
 
+  it("refreshes authored skills on a rebuild and keeps dynamic skills", async () => {
+    const appRoot = await createScratchDirectory("eve-host-rebuild-");
+    const provider = createHostProvider();
+    await provider.prepare({
+      appRoot,
+      seedFiles: [
+        { content: "# Weather v1", path: "$HOME/.agents/skills/weather/SKILL.md" },
+        { content: "# Retired", path: "$HOME/.agents/skills/retired/SKILL.md" },
+      ],
+      sourceRevision: "first",
+    });
+    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-rebuild" });
+    await writeSkillPackageToSandbox({
+      sandbox: handle.sandbox,
+      skill: {
+        description: "Tenant notes",
+        files: [{ content: Buffer.from("notes"), relativePath: "references/notes.md" }],
+        markdown: "# Tenant",
+        name: "tenant",
+      },
+    });
+    await handle.onSandboxStop();
+
+    const rebuilt = await provider.prepare({
+      appRoot,
+      seedFiles: [{ content: "# Weather v2", path: "$HOME/.agents/skills/weather/SKILL.md" }],
+      sourceRevision: "second",
+    });
+    const { sandbox } = await provider.openSession({
+      appRoot,
+      existing: state,
+      prepared: rebuilt,
+      sandboxName: "session-rebuild",
+    });
+
+    const skillRoot = await resolveSandboxSkillRoot({ sandbox });
+    await expect(readFile(join(skillRoot, "weather/SKILL.md"), "utf8")).resolves.toBe(
+      "# Weather v2",
+    );
+    await expect(readFile(join(skillRoot, "tenant/references/notes.md"), "utf8")).resolves.toBe(
+      "notes",
+    );
+    expect((await readdir(skillRoot)).sort()).toEqual(["tenant", "weather"]);
+  });
+
   it("writes and removes skill packages in its own skill root, never under the real HOME", async () => {
     const home = await createScratchDirectory("eve-host-home-");
     vi.stubEnv("HOME", home);

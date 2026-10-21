@@ -55,9 +55,13 @@ has no open options and no `setNetworkPolicy`.
 find the same directory. Templates live under
 `.eve/sandbox-cache/host/templates/<key>`, keyed by resources and source
 revision, published atomically, and pruned with the other local templates.
-The session directory also holds `skills/<template key>/`, copied from the
-template the first time a session opens on that generation so rebuilt skills
-reach existing sessions in both modes, and `jobs/` for the `bash` tool.
+The session directory also holds `skills/` and `jobs/` (for the `bash` tool).
+Authored skills are copied from the template when a session opens on a new
+generation, recorded in `authored-skills.json` with the template key and skill
+names: on a rebuild eve replaces the current authored skills and removes the
+ones the previous generation wrote, while dynamic skills in the same directory
+stay. The session state does not change on a rebuild, so dynamic skill files
+are not rewritten and must survive in place.
 
 Session state is `{ root, version }`. Resume checks that `root` matches what the
 environment derives for the session and that it still exists.
@@ -77,7 +81,7 @@ cannot be `/workspace`, so both roots become provider-declared:
   `EVE_SANDBOX_SKILL_ROOT` when it is set; every other `$HOME` path resolves to
   the probed home, and skills fall back to `<workspace root>/skills` when
   neither is usable. `HostSandbox` sets
-  `EVE_SANDBOX_SKILL_ROOT=.eve/sandbox-cache/host/sessions/<key>/skills/<template>`
+  `EVE_SANDBOX_SKILL_ROOT=.eve/sandbox-cache/host/sessions/<key>/skills`
   on every command, so eve never writes skills into the user's real `$HOME`.
   The environment travels with every command, so no session wrapper can drop
   it and fall back to the real home.

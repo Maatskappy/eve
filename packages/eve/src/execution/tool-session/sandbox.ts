@@ -59,7 +59,15 @@ export async function releaseToolSessionHandle(
 ): Promise<void> {
   const provider = registeredProvider(registry);
   if (provider === undefined) return;
-  await supported.get(provider.implementation)?.releaseHandle?.(handle);
+  await releaseProviderToolSessionHandle(provider.implementation, handle);
+}
+
+/** Releases a keyed call's handle through the provider implementation that opened it. */
+export async function releaseProviderToolSessionHandle(
+  implementation: object,
+  handle: SandboxProviderHandle,
+): Promise<void> {
+  await supported.get(implementation)?.releaseHandle?.(handle);
 }
 
 function registeredProvider(registry: RuntimeSandboxRegistry): SandboxProviderRuntime | undefined {

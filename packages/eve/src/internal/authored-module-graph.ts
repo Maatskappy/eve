@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { createAuthoredModuleBuildOptions } from "#internal/authored-module-build-options.js";
+import {
+  createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
+} from "#internal/authored-module-build-options.js";
 import {
   AUTHORED_BUNDLED_MODULE_EXTENSION,
   AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
@@ -85,7 +88,7 @@ async function writeAuthoredModuleGraph(
       comments: false,
       entryFileNames: "[name]-[hash].mjs",
       format: "esm",
-      sourcemap: "inline",
+      sourcemap: evaluatedBundleSourcemap(),
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);

@@ -11,9 +11,10 @@ import {
   writeDevelopmentCompiledArtifactsFiles,
 } from "#internal/application/compiled-artifacts.js";
 import {
+  type DevelopmentGeneration,
   discardDevelopmentGeneration,
-  stageDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
+import { compileDevelopmentGeneration } from "#internal/nitro/host/dev-compile.js";
 import {
   createDevelopmentHostWorkspace,
   removeDevelopmentHostWorkspace,
@@ -53,10 +54,10 @@ export async function prepareDevelopmentApplicationHost(
   }
   const workspaceExtensions = await prepareDevelopmentWorkspaceExtensions(extensionPreparation);
   const workspace = await createDevelopmentHostWorkspace(appRoot);
-  let generation: Awaited<ReturnType<typeof stageDevelopmentGeneration>> | undefined;
+  let generation: DevelopmentGeneration | undefined;
 
   try {
-    const compileResult = await compileAgentInWorkspace({
+    const compilation = await compileDevelopmentGeneration({
       artifactLocations: {
         publishedRoot: join(appRoot, ".eve"),
         writeRoot: workspace.compilerArtifactsDir,
@@ -64,8 +65,9 @@ export async function prepareDevelopmentApplicationHost(
       developmentExtensions: options.developmentExtensions,
       startPath: appRoot,
     });
+    const { compileResult } = compilation;
+    generation = compilation.generation;
     const schedules = await resolveSchedules({ manifest: compileResult.manifest });
-    generation = await stageDevelopmentGeneration(compileResult);
     const compiledArtifacts = await writeDevelopmentCompiledArtifactsFiles({
       authoredWorkflowModules: generation.authoredWorkflowModules,
       compileResult,

@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 
+import { shellQuote } from "#shared/shell-quote.js";
+
 import { selfModificationSourceRoot } from "../../../../paths.js";
 
 const replacementSchema = {
@@ -140,6 +142,14 @@ export default defineTool({
     }
     if (content.includes("\0")) {
       throw new Error(`File "${path}" contains NUL bytes and appears to be binary.`);
+    }
+    // A symlink below the source root can point anywhere; the deployed root is itself a link.
+    const real = await sandbox.run({
+      command: `realpath -- ${shellQuote(sourceRoot)} ${shellQuote(resolved)}`,
+    });
+    const [realRoot, realTarget] = real.stdout.trim().split("\n");
+    if (real.exitCode !== 0 || !realRoot || !realTarget?.startsWith(`${realRoot}/`)) {
+      throw new Error(`Self-modification file edits must stay below ${sourceRoot}.`);
     }
 
     await sandbox.writeTextFile({

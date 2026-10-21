@@ -69,6 +69,7 @@ describe("applyExactEdits", () => {
     const sandbox = {
       readTextFile: async () => content,
       resolvePath: (path: string) => path,
+      run: async () => ({ exitCode: 0, stdout: "/checkout/agent\n/checkout/agent/file.ts\n" }),
       writeTextFile: async (input: { readonly content: string }) => {
         writes += 1;
         content = input.content;
@@ -90,6 +91,7 @@ describe("applyExactEdits", () => {
     const sandbox = {
       readTextFile: async () => content,
       resolvePath: (path: string) => path,
+      run: async () => ({ exitCode: 0, stdout: "/checkout/agent\n/checkout/agent/file.ts\n" }),
       writeTextFile: async (input: { readonly content: string }) => {
         content = input.content;
       },
@@ -115,9 +117,11 @@ describe("applyExactEdits", () => {
     it("keeps edits inside the application's agent directory", async () => {
       vi.stubEnv("EVE_DEV", "1");
       let content = "before old after";
+      let realTarget = "/app/agent/tools/greet.ts";
       const sandbox = {
         readTextFile: async () => content,
         resolvePath: (path: string) => (path.startsWith("/") ? path : `/app/${path}`),
+        run: async () => ({ exitCode: 0, stdout: `/app/agent\n${realTarget}\n` }),
         writeTextFile: async (input: { readonly content: string }) => {
           content = input.content;
         },
@@ -135,6 +139,9 @@ describe("applyExactEdits", () => {
       await expect(edit("/app/agent/../package.json")).rejects.toThrow(
         "must stay below /app/agent",
       );
+      realTarget = "/home/dev/.zshrc";
+      await expect(edit("/app/agent/linked.ts")).rejects.toThrow("must stay below /app/agent");
+      expect(content).toBe("before new after");
     });
   });
 });

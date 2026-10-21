@@ -1,12 +1,14 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, readdir, realpath, utimes, writeFile } from "node:fs/promises";
+import { homedir, uptime } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "#execution/sandbox/bash.js";
 
+import { releaseHostSandboxHandle } from "#execution/sandbox/bindings/host-session.js";
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
@@ -51,6 +53,24 @@ function isProcessAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** Starts a `bash` tool job that outlives the call's yield; returns its background pid. */
+async function startBashJob(
+  sandbox: SandboxSession,
+  pidFile: string,
+): Promise<{ readonly job: number; readonly outputDirectory: string }> {
+  const call = executeBashOnSandbox(sandbox, { command: `sleep 60 & echo $! > ${pidFile}; wait` });
+  let job = 0;
+  await vi.waitFor(async () => {
+    job = Number((await readFile(sandbox.resolvePath(pidFile), "utf8")).trim());
+    expect(job).toBeGreaterThan(0);
+  });
+  await vi.advanceTimersByTimeAsync(BASH_YIELD_SECONDS * 1000);
+  const result = await call;
+  if (result.status !== "running") throw new Error(`expected running: ${JSON.stringify(result)}`);
+  expect(isProcessAlive(job)).toBe(true);
+  return { job, outputDirectory: result.outputDirectory };
 }
 
 async function waitForFile(path: string): Promise<string> {
@@ -199,36 +219,72 @@ describe("HostSandbox", () => {
     }
   });
 
-  it("stops bash tool jobs that keep running after the call returns", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
+  describe("bash tool jobs", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("stops jobs that keep running after the call returns and records them as killed", async () => {
       const appRoot = await createScratchDirectory("eve-host-jobs-");
-      const provider = createHostProvider();
-      const { sandbox, onSandboxStop } = await provider.openSession({
+      const { sandbox, onSandboxStop } = await createHostProvider().openSession({
         appRoot,
         sandboxName: "session-jobs",
       });
-      const call = executeBashOnSandbox(sandbox, {
-        command: "sleep 60 & echo $! > job.pid; wait",
-      });
-      let job = 0;
-      await vi.waitFor(async () => {
-        job = Number((await readFile(sandbox.resolvePath("job.pid"), "utf8")).trim());
-        expect(job).toBeGreaterThan(0);
-      });
-      await vi.advanceTimersByTimeAsync(BASH_YIELD_SECONDS * 1000);
-      const result = await call;
-
-      if (result.status !== "running")
-        throw new Error(`expected running: ${JSON.stringify(result)}`);
-      expect(result.outputDirectory.startsWith(join(appRoot, "host", "sessions"))).toBe(true);
-      expect(isProcessAlive(job)).toBe(true);
+      const { job, outputDirectory } = await startBashJob(sandbox, "job.pid");
+      expect(outputDirectory.startsWith(join(appRoot, "host", "sessions"))).toBe(true);
 
       await onSandboxStop();
 
       await vi.waitFor(() => expect(isProcessAlive(job)).toBe(false), { timeout: 10_000 });
+      await expect(readFile(join(outputDirectory, "exit"), "utf8")).resolves.toBe("137");
+    });
+
+    it("releasing one keyed handle stops only the jobs that handle started", async () => {
+      const appRoot = await createScratchDirectory("eve-host-release-");
+      const provider = createHostProvider();
+      const released = await provider.openSession({ appRoot, sandboxName: "session-keyed" });
+      const kept = await provider.openSession({ appRoot, sandboxName: "session-keyed" });
+      const releasedJob = (await startBashJob(released.sandbox, "released.pid")).job;
+      const keptJob = (await startBashJob(kept.sandbox, "kept.pid")).job;
+
+      releaseHostSandboxHandle(released);
+
+      await vi.waitFor(() => expect(isProcessAlive(releasedJob)).toBe(false), {
+        timeout: 10_000,
+      });
+      expect(isProcessAlive(keptJob)).toBe(true);
+      await kept.onSandboxStop();
+      await vi.waitFor(() => expect(isProcessAlive(keptJob)).toBe(false), { timeout: 10_000 });
+    });
+  });
+
+  it("never signals a job pid recorded before this boot", async () => {
+    const appRoot = await createScratchDirectory("eve-host-stale-");
+    const { sandbox, onSandboxStop } = await createHostProvider().openSession({
+      appRoot,
+      sandboxName: "session-stale",
+    });
+    // An unrelated process group that now holds the id a job recorded before a reboot.
+    const unrelated = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    try {
+      const jobRoot = (await sandbox.run({ command: 'printf %s "$EVE_SANDBOX_JOB_ROOT"' })).stdout;
+      const stale = join(jobRoot, "stale");
+      await mkdir(stale, { recursive: true });
+      await writeFile(join(stale, "pid"), `${unrelated.pid}\n`);
+      const beforeBoot = new Date(Date.now() - uptime() * 1000 - 3_600_000);
+      await utimes(join(stale, "pid"), beforeBoot, beforeBoot);
+
+      await onSandboxStop();
+
+      // The test owns this child, so a kill would leave a zombie; read its exit status instead.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(unrelated.signalCode).toBeNull();
+      await expect(readFile(join(stale, "exit"), "utf8")).resolves.toBe("137");
     } finally {
-      vi.useRealTimers();
+      unrelated.kill("SIGKILL");
     }
   });
 

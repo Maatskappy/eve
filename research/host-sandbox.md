@@ -130,8 +130,10 @@ itself.
   `EVE_SANDBOX_JOB_ROOT=<session dir>/jobs`, and the tool keeps its job files
   there instead of `/tmp/.eve/jobs`. `stop()`, runtime shutdown, `delete()`,
   and session end kill the session's groups plus every job group without an
-  `exit` file. Releasing a keyed tool-session handle kills only the groups and
-  jobs that handle started.
+  `exit` file, then record `exit` for each such job. Releasing a keyed
+  tool-session handle kills only the groups and jobs that handle started; jobs
+  match by the launcher pid the tool records, against every command the handle
+  ever launched.
 - Absolute paths pass through; relative paths resolve from the workspace root.
 - Commands inherit the eve process environment minus variables that eve loaded
   from `.env*` files and minus an explicit list of eve-owned names: what eve
@@ -206,10 +208,12 @@ part of the public extension contract.
   `<root>/.eve/attachments`; eve never deletes inside a root it does not own.
 - Commands run detached in their own process group, so they outlive an eve
   process that exits without shutting down (for example after `kill -9`).
-- Process group ids are reused after every member exits. eve drops a group
-  when it sees it empty and skips jobs that wrote an `exit` file, but a group
-  that empties between checks, or a job killed with `SIGKILL`, can leave a
-  stale id that a later stop signals.
+- Process group ids are reused after every member exits. eve drops a tracked
+  group once it is empty, ignores job pid files written before the current
+  boot or whose group is gone, and writes `exit` (`137`) for every job it kills
+  or finds gone, so later stops skip it. A job killed outside eve (for example
+  `kill -9` by the model) whose id is reused before the next stop in the same
+  boot can still be signalled.
 - The system prompt does not name the absolute workspace root; file tools take
   relative paths and report absolute ones.
 - Fixtures that need the eve base image (Python, `/home/vercel-sandbox`) pin

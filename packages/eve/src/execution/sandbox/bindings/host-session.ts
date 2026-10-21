@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { constants } from "node:os";
+import { constants, uptime } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 
@@ -49,8 +49,11 @@ export async function openHostSandboxHandle(input: {
   }
   const environmentRoot = (await findEveProjectRoot(input.appRoot)) ?? input.appRoot;
   const jobRoot = join(input.sessionDirectory, JOBS_DIRECTORY_NAME);
-  const sessionGroups = sessionGroupSet(input.sessionDirectory);
+  // Groups this handle started that may still run, for release.
   const handleGroups = new Set<number>();
+  // Every command this handle launched, never pruned: a `bash` tool job records
+  // its launcher's pid, and the launcher exits long before the job.
+  const handleLaunchers = new Set<number>();
   const resolvePath = (path: string) =>
     isAbsolute(path) ? path : resolve(input.workspaceRoot, path);
 
@@ -76,12 +79,13 @@ export async function openHostSandboxHandle(input: {
       });
       const group = child.pid;
       if (group !== undefined) {
-        sessionGroups.add(group);
+        sessionGroupSet(input.sessionDirectory).add(group);
         handleGroups.add(group);
+        handleLaunchers.add(group);
       }
       return adaptProcess(child, options, () => {
         if (group === undefined || isGroupAlive(group)) return;
-        sessionGroups.delete(group);
+        groupsBySession.get(input.sessionDirectory)?.delete(group);
         handleGroups.delete(group);
       });
     },
@@ -116,10 +120,10 @@ export async function openHostSandboxHandle(input: {
     },
   };
   handleReleases.set(handle, () => {
-    killJobGroups(jobRoot, handleGroups);
+    killJobGroups(jobRoot, handleLaunchers);
     for (const group of handleGroups) {
       killGroup(group);
-      sessionGroups.delete(group);
+      groupsBySession.get(input.sessionDirectory)?.delete(group);
     }
     handleGroups.clear();
   });
@@ -231,10 +235,19 @@ function adaptProcess(
   };
 }
 
+/** Exit code recorded for a job eve killed, or found gone without one. */
+const KILLED_JOB_EXIT_CODE = "137";
+
 /**
  * Kills the process group of every `bash` tool job under `jobRoot` that has
  * not written its exit code, optionally only jobs launched by `launchers`. The
  * launcher records its own pid, which is the pid of the command that ran it.
+ *
+ * Session directories outlive the eve process, and a group id is reused once
+ * its processes are gone, so a job's pid is trusted only while it can still
+ * name that job: written since this boot, and the group still exists. Once
+ * killed or found gone, the job gets an `exit` file, so no later stop signals
+ * whatever reuses the id.
  */
 function killJobGroups(jobRoot: string, launchers?: ReadonlySet<number>): void {
   let jobs: string[];
@@ -243,15 +256,28 @@ function killJobGroups(jobRoot: string, launchers?: ReadonlySet<number>): void {
   } catch {
     return;
   }
+  const bootTime = Date.now() - uptime() * 1000;
   for (const job of jobs) {
     const directory = join(jobRoot, job);
-    if (existsSync(join(directory, "exit"))) continue;
-    const group = readPid(join(directory, "pid"));
-    if (group === undefined) continue;
+    const pidPath = join(directory, "pid");
+    const writtenAt = statSync(pidPath, { throwIfNoEntry: false })?.mtimeMs;
+    const group = readPid(pidPath);
+    if (writtenAt === undefined || group === undefined) continue;
     if (launchers !== undefined && !launchers.has(readPid(join(directory, "launcher")) ?? -1)) {
       continue;
     }
-    killGroup(group);
+    if (!recordKilledJob(directory)) continue;
+    if (writtenAt >= bootTime && isGroupAlive(group)) killGroup(group);
+  }
+}
+
+/** Claims a job that has not exited by writing its exit code; false if it already had one. */
+function recordKilledJob(directory: string): boolean {
+  try {
+    writeFileSync(join(directory, "exit"), KILLED_JOB_EXIT_CODE, { flag: "wx" });
+    return true;
+  } catch {
+    return false;
   }
 }
 

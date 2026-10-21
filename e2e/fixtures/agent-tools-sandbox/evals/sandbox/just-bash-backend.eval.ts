@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
 
 // Mirrors the subagent's prepared and written notes; on Vercel the subagent uses Vercel Sandbox.
 const PREPARED = "just-bash-prepared-K4T";
@@ -14,11 +13,21 @@ export default defineEval({
         "Alice is checking the notes workspace. Verify the notes.",
     );
     turn.expectOk();
+    const started = turn.events.find(
+      (event) => event.type === "agent.started" && event.data.name === "just-bash",
+    );
+    if (started?.type !== "agent.started") {
+      throw new Error("The turn did not call the just-bash subagent.");
+    }
+
+    // Asserts the tool's output, not the model's paraphrase of it.
+    const childTurn = await t.target.watchTurn(started.data.sessionId).result();
+    childTurn.expectOk();
 
     t.succeeded();
     t.calledSubagent("just-bash", { count: 1, status: "completed" });
-    t.check(turn.message, includes(PREPARED));
-    t.check(turn.message, includes(WRITTEN));
-    t.check(turn.message, includes("agent=eve"));
+    childTurn.calledTool("verify-just-bash", {
+      output: new RegExp(`${PREPARED}\\n${WRITTEN}\\nagent=eve`),
+    });
   },
 });

@@ -95,6 +95,8 @@ export interface TurnInput {
   readonly messages: readonly HarnessModelMessage[];
   /** The input carries a user's message, which follows tool results across a boundary. */
   readonly hasUserMessage: boolean;
+  /** The message with its attachments staged, so input queued again isn't staged twice. */
+  readonly message: HarnessStepInput["message"];
 }
 
 /**
@@ -140,6 +142,8 @@ export async function prepareTurnInput(
     clientContext,
     ephemeral,
     hasUserMessage: staged !== undefined && kind === undefined,
+    // Staging keeps a message's text and file parts, with each file a sandbox ref.
+    message: staged as HarnessStepInput["message"],
     messages,
     storedClientContext,
     turnId,

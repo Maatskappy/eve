@@ -173,10 +173,10 @@ describe("HostSandbox", () => {
         appRoot,
         sandboxName: "session-skills",
       });
-      // Only public members survive, like a wrapper that rebuilds the session.
-      const wrapped = Object.fromEntries(
-        Object.entries(sandbox).filter(([, value]) => typeof value === "function"),
-      ) as unknown as SandboxSession;
+      // Hides anything attached under a symbol, like a wrapper that rebuilds the session.
+      const wrapped: SandboxSession = new Proxy(sandbox, {
+        get: (target, key) => (typeof key === "symbol" ? undefined : Reflect.get(target, key)),
+      });
       const skill = {
         description: "Tenant notes",
         files: [{ content: Buffer.from("notes"), relativePath: "references/notes.md" }],

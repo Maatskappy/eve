@@ -377,6 +377,41 @@ describe("HostSandbox", () => {
       await expect(readFile(join(outputDirectory, "exit"), "utf8")).resolves.toBe("137");
     });
 
+    it("stops what a finished command left running, on release and on stop", async () => {
+      const appRoot = await createScratchDirectory("eve-host-leftover-");
+      const environment = HostSandbox.environment();
+      const registry = createStubSandboxRegistry(environment);
+      const provider = createSandboxProviderHarness(
+        getSandboxEnvironmentRuntime(environment).implementation,
+        undefined,
+      );
+      const released = await provider.openSession({ appRoot, sandboxName: "session-leftover-a" });
+      const stopped = await provider.openSession({ appRoot, sandboxName: "session-leftover-b" });
+      // The command returns at once, leaving a process in its job's group with no running job.
+      const leave = async (sandbox: SandboxSession) => {
+        const result = await executeBashOnSandbox(sandbox, {
+          command: "sleep 60 > /dev/null 2>&1 & echo $!",
+        });
+        if (result.status !== "completed") throw new Error("expected the command to finish");
+        const pid = Number(result.stdout.trim());
+        expect(isProcessAlive(pid)).toBe(true);
+        return pid;
+      };
+      const releasedLeftover = await leave(released.sandbox);
+      const stoppedLeftover = await leave(stopped.sandbox);
+
+      await releaseToolSessionHandle(registry, released);
+      await stopped.onSandboxStop();
+
+      await vi.waitFor(
+        () => {
+          expect(isProcessAlive(releasedLeftover)).toBe(false);
+          expect(isProcessAlive(stoppedLeftover)).toBe(false);
+        },
+        { timeout: 10_000 },
+      );
+    });
+
     it("releasing one keyed handle stops only the jobs that handle started", async () => {
       const appRoot = await createScratchDirectory("eve-host-release-");
       // Releases through the same registry lookup `invokeTool` uses after a keyed call.
@@ -400,6 +435,31 @@ describe("HostSandbox", () => {
       await kept.onSandboxStop();
       await vi.waitFor(() => expect(isProcessAlive(keptJob)).toBe(false), { timeout: 10_000 });
     });
+  });
+
+  it("never signals a finished job's group once another process holds its id", async () => {
+    const appRoot = await createScratchDirectory("eve-host-reused-");
+    const { sandbox, onSandboxStop } = await createHostProvider().openSession({
+      appRoot,
+      sandboxName: "session-reused",
+    });
+    // Leads its own group, as a process that reused a finished job's group id would.
+    const unrelated = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    try {
+      const jobRoot = (await sandbox.run({ command: 'printf %s "$EVE_SANDBOX_JOB_ROOT"' })).stdout;
+      const finished = join(jobRoot, "finished");
+      await mkdir(finished, { recursive: true });
+      await writeFile(join(finished, "pid"), `${unrelated.pid}\n`);
+      await writeFile(join(finished, "exit"), "0\n");
+
+      await onSandboxStop();
+
+      // The test owns this child, so a kill would leave a zombie; read its exit status instead.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(unrelated.signalCode).toBeNull();
+    } finally {
+      unrelated.kill("SIGKILL");
+    }
   });
 
   it("never signals a job pid recorded before this boot", async () => {

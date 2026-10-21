@@ -1,5 +1,4 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { constants, uptime } from "node:os";
 import { dirname, join } from "node:path";
@@ -10,21 +9,23 @@ import type {
   InternalSandboxBackendInstance,
   SandboxBackendProcess,
 } from "#execution/sandbox/backend.js";
+import { claimKilledJob, JOB_ROOT_ENV, readJobRecords } from "#execution/sandbox/job-records.js";
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
 import { MODEL_API_KEY_ENV } from "#internal/model-auth/key-env.js";
 import { readDevelopmentEnvironmentValues } from "#shared/development-env-files.js";
 import { SANDBOX_SKILL_ROOT_ENV } from "#shared/skill-paths.js";
 
-/** Where the `bash` tool keeps a session's background jobs; see `execution/sandbox/bash.ts`. */
+/** Where the `bash` tool keeps a session's job records; see `execution/sandbox/job-records.ts`. */
 const JOBS_DIRECTORY_NAME = "jobs";
 const SKILLS_DIRECTORY_NAME = "skills";
 
 /**
- * Process groups each session's commands started. A group stays here after its
- * `bash` leader exits while any member still runs, such as `server > log &`, so
- * stop and delete can still reach it; groups with no members left are dropped.
+ * Process groups each session's commands started, and whether each group's
+ * `bash` leader has exited. A group stays here after its leader exits while any
+ * member still runs, such as `server > log &`, so stop and delete can still
+ * reach it; groups that are no longer ours are dropped (see {@link ownsGroup}).
  */
-const groupsBySession = new Map<string, Set<number>>();
+const groupsBySession = new Map<string, Map<number, { leaderExited: boolean }>>();
 
 /**
  * Opens a host sandbox instance: real `bash` and filesystem in the session's
@@ -50,25 +51,29 @@ export async function openHostSandboxInstance(
       if ((await stat(cwd).catch(() => undefined))?.isDirectory() !== true) {
         throw new Error(`HostSandbox working directory "${cwd}" does not exist.`);
       }
+      pruneSessionGroups(sessionDirectory);
       const child = spawn("bash", ["-c", command], {
         cwd,
         detached: true,
         env: {
           ...hostEnvironment(environmentRoot),
           ...env,
-          EVE_SANDBOX_JOB_ROOT: jobRoot,
+          [JOB_ROOT_ENV]: jobRoot,
           [SANDBOX_SKILL_ROOT_ENV]: skillRoot,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
       const group = child.pid;
       if (group !== undefined) {
-        sessionGroupSet(sessionDirectory).add(group);
+        sessionGroups(sessionDirectory).set(group, { leaderExited: false });
         instanceGroups.add(group);
         instanceLaunchers.add(group);
       }
       return adaptProcess(child, () => {
-        if (group === undefined || isGroupAlive(group)) return;
+        if (group === undefined) return;
+        const tracked = groupsBySession.get(sessionDirectory)?.get(group);
+        if (tracked !== undefined) tracked.leaderExited = true;
+        if (ownsGroup(group, true)) return;
         groupsBySession.get(sessionDirectory)?.delete(group);
         instanceGroups.delete(group);
       });
@@ -95,9 +100,11 @@ export async function openHostSandboxInstance(
     // without touching overlapping calls that share the session directory.
     dispose() {
       killJobGroups(jobRoot, instanceLaunchers);
+      const groups = groupsBySession.get(sessionDirectory);
       for (const group of instanceGroups) {
-        killGroup(group);
-        groupsBySession.get(sessionDirectory)?.delete(group);
+        const tracked = groups?.get(group);
+        if (tracked !== undefined) killOwnedGroup(group, tracked.leaderExited);
+        groups?.delete(group);
       }
       instanceGroups.clear();
     },
@@ -107,7 +114,9 @@ export async function openHostSandboxInstance(
 /** Kills every command and `bash` tool job the session still has running. */
 export function stopHostSessionCommands(sessionDirectory: string): void {
   killJobGroups(join(sessionDirectory, JOBS_DIRECTORY_NAME));
-  for (const group of groupsBySession.get(sessionDirectory) ?? []) killGroup(group);
+  for (const [group, { leaderExited }] of groupsBySession.get(sessionDirectory) ?? []) {
+    killOwnedGroup(group, leaderExited);
+  }
   groupsBySession.delete(sessionDirectory);
 }
 
@@ -181,65 +190,58 @@ function adaptProcess(child: ChildProcess, onClose: () => void): SandboxBackendP
   };
 }
 
-/** Exit code recorded for a job eve killed, or found gone without one. */
-const KILLED_JOB_EXIT_CODE = "137";
-
 /**
- * Kills the process group of every `bash` tool job under `jobRoot` that has
- * not written its exit code, optionally only jobs launched by `launchers`. The
- * launcher records its own pid, which is the pid of the command that ran it.
+ * Kills what the `bash` tool's jobs under `jobRoot` still run, optionally only
+ * jobs launched by `launchers`. A job that has not exited is claimed with the
+ * killed exit code, then its group is killed. A job that has exited may have
+ * left background processes in its group, which are killed if the group is
+ * still ours.
  *
  * Session directories outlive the eve process, and a group id is reused once
- * its processes are gone, so a job's pid is trusted only while it can still
- * name that job: written since this boot, and the group still exists. Once
- * killed or found gone, the job gets an `exit` file, so no later stop signals
- * whatever reuses the id.
+ * its processes are gone, so a job's group is trusted only while it can still
+ * name that job: recorded since this boot, and still ours. Claiming the job
+ * first means no later stop treats it as running again.
  */
 function killJobGroups(jobRoot: string, launchers?: ReadonlySet<number>): void {
-  let jobs: string[];
-  try {
-    jobs = readdirSync(jobRoot);
-  } catch {
-    return;
-  }
   const bootTime = Date.now() - uptime() * 1000;
-  for (const job of jobs) {
-    const directory = join(jobRoot, job);
-    const pidPath = join(directory, "pid");
-    const writtenAt = statSync(pidPath, { throwIfNoEntry: false })?.mtimeMs;
-    const group = readPid(pidPath);
-    if (writtenAt === undefined || group === undefined) continue;
-    if (launchers !== undefined && !launchers.has(readPid(join(directory, "launcher")) ?? -1)) {
-      continue;
+  for (const job of readJobRecords(jobRoot)) {
+    if (launchers !== undefined && !launchers.has(job.launcher ?? -1)) continue;
+    const claimed = !job.exited && claimKilledJob(job);
+    if (job.recordedAt < bootTime) continue;
+    if (claimed) {
+      if (isGroupAlive(job.group)) killGroup(job.group);
+    } else {
+      killOwnedGroup(job.group, true);
     }
-    if (!recordKilledJob(directory)) continue;
-    if (writtenAt >= bootTime && isGroupAlive(group)) killGroup(group);
   }
 }
 
-/** Claims a job that has not exited by writing its exit code; false if it already had one. */
-function recordKilledJob(directory: string): boolean {
-  try {
-    writeFileSync(join(directory, "exit"), KILLED_JOB_EXIT_CODE, { flag: "wx" });
-    return true;
-  } catch {
-    return false;
+/**
+ * Whether `group` still holds processes we started. While its leader runs, it
+ * is ours. Once the leader has exited, the group is ours only while members
+ * remain and no process has the leader's pid: a pid is never reused while its
+ * process group exists, so a process with that pid means the group emptied and
+ * the id now names someone else's group.
+ */
+function ownsGroup(group: number, leaderExited: boolean): boolean {
+  return isGroupAlive(group) && !(leaderExited && processExists(group));
+}
+
+function killOwnedGroup(group: number, leaderExited: boolean): void {
+  if (ownsGroup(group, leaderExited)) killGroup(group);
+}
+
+function pruneSessionGroups(sessionDirectory: string): void {
+  const groups = groupsBySession.get(sessionDirectory);
+  for (const [group, { leaderExited }] of groups ?? []) {
+    if (!ownsGroup(group, leaderExited)) groups?.delete(group);
   }
 }
 
-function readPid(path: string): number | undefined {
-  try {
-    const pid = Number(readFileSync(path, "utf8").trim());
-    return Number.isInteger(pid) && pid > 1 ? pid : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function sessionGroupSet(sessionDirectory: string): Set<number> {
+function sessionGroups(sessionDirectory: string): Map<number, { leaderExited: boolean }> {
   let groups = groupsBySession.get(sessionDirectory);
   if (groups === undefined) {
-    groups = new Set();
+    groups = new Map();
     groupsBySession.set(sessionDirectory, groups);
   }
   return groups;
@@ -260,6 +262,16 @@ function isGroupAlive(group: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: a process with this pid exists but belongs to another user.
+    return error instanceof Error && "code" in error && error.code === "EPERM";
   }
 }
 

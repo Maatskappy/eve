@@ -220,9 +220,12 @@ its own sandbox, so CI exercises it.
   `bash` leader exits. The `bash` tool's launcher moves long-running commands
   into their own groups with `set -m`; host commands set
   `EVE_SANDBOX_JOB_ROOT=<session dir>/jobs`, and the tool keeps its job files
-  there instead of `/tmp/.eve/jobs`. `stop()`, runtime shutdown, `delete()`,
-  and session end kill the session's groups plus every job group without an
-  `exit` file, then record `exit` for each such job. Releasing a keyed
+  there instead of `/tmp/.eve/jobs`. The record format lives in
+  `execution/sandbox/job-records.ts`; the launcher keeps a finished command's
+  record (minus its output files), because processes the command started in the
+  background stay in its group. `stop()`, runtime shutdown, `delete()`, and
+  session end kill the session's groups, claim and kill every job without an
+  `exit` file, and kill what finished jobs left behind. Releasing a keyed
   tool-session handle kills only the groups and jobs that handle started; jobs
   match by the launcher pid the tool records, against every command the handle
   ever launched.
@@ -300,12 +303,14 @@ part of the public extension contract.
   `<root>/.eve/attachments`; eve never deletes inside a root it does not own.
 - Commands run detached in their own process group, so they outlive an eve
   process that exits without shutting down (for example after `kill -9`).
-- Process group ids are reused after every member exits. eve drops a tracked
-  group once it is empty, ignores job pid files written before the current
-  boot or whose group is gone, and writes `exit` (`137`) for every job it kills
-  or finds gone, so later stops skip it. A job killed outside eve (for example
-  `kill -9` by the model) whose id is reused before the next stop in the same
-  boot can still be signalled.
+- Process group ids are reused after every member exits. Once a group's
+  leader has exited, eve signals it only while members remain and no process
+  holds the leader's pid (a pid is never reused while its group exists), and it
+  prunes tracked groups that fail that check on every spawn. It ignores job
+  records written before the current boot, and writes `exit` (`137`) for every
+  running job it kills. A running job killed outside eve (for example `kill -9`
+  by the model) whose id is reused before the next stop in the same boot can
+  still be signalled.
 - The system prompt does not name the absolute workspace root; file tools take
   relative paths and report absolute ones.
 - Fixtures that need the eve base image (Python, `/home/vercel-sandbox`) pin

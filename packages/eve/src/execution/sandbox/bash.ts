@@ -4,17 +4,11 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { MAX_OUTPUT_BYTES, truncateTail } from "#execution/sandbox/truncate-output.js";
+import { DEFAULT_JOB_ROOT, JOB_FILE, JOB_ROOT_ENV } from "#execution/sandbox/job-records.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 /** How long a `bash` call waits before it leaves the command running in the background. */
 export const BASH_YIELD_SECONDS = 30;
-
-/**
- * Where each command's output files live inside the sandbox. A provider that
- * keeps per-session state on a shared machine, such as the host sandbox, sets
- * `EVE_SANDBOX_JOB_ROOT` on its commands so it can find and stop every job.
- */
-const DEFAULT_JOB_ROOT = "/tmp/.eve/jobs";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
 
@@ -24,28 +18,32 @@ const MAX_LOG_COMMAND_LENGTH = 240;
 // launcher and the yield's claim creates `claimed` first reports the command;
 // a claim also signals the launcher to exit, which ends the provider's stream
 // without touching the command. The command holds none of the launcher's file
-// descriptors, or the stream would stay open until the command exits.
+// descriptors, or the stream would stay open until the command exits. A
+// reported command's output files go, but its record stays: processes it
+// started in the background still run in its group, and a provider stopping
+// the session finds them through it.
+const F = JOB_FILE;
 const LAUNCHER = `d=$1
 mkdir -p "$d" 2>/dev/null || { eval "$2"; exit; }
 trap 'exit 0' USR1
-echo "$$" > "$d/launcher"
+echo "$$" > "$d/${F.launcher}"
 set -m
 (
   trap : TERM INT
-  (eval "$2") > "$d/stdout" 2> "$d/stderr"
+  (eval "$2") > "$d/${F.stdout}" 2> "$d/${F.stderr}"
   code=$?
-  echo "$code" > "$d/exit"
+  echo "$code" > "$d/${F.exit}"
   exit "$code"
 ) < /dev/null > /dev/null 2>&1 &
 pid=$!
 set +m
-echo "$pid" > "$d/pid"
+echo "$pid" > "$d/${F.pid}"
 wait "$pid" 2> /dev/null
 code=$?
-mkdir "$d/claimed" 2> /dev/null || exit 0
-cat "$d/stdout"
-cat "$d/stderr" >&2
-rm -rf "$d"
+mkdir "$d/${F.claimed}" 2> /dev/null || exit 0
+cat "$d/${F.stdout}"
+cat "$d/${F.stderr}" >&2
+rm -f "$d/${F.stdout}" "$d/${F.stderr}"
 exit "$code"`;
 
 // ---------------------------------------------------------------------------
@@ -151,7 +149,7 @@ async function runCommand(
     // Providers may stop only the launcher, and the command runs in its own process group.
     void Promise.resolve(
       sandbox.run({
-        command: `d=${directory}; kill -TERM -- -"$(cat "$d/pid" 2>/dev/null)" 2>/dev/null; rm -rf "$d"`,
+        command: `d=${directory}; kill -TERM -- -"$(cat "$d/${F.pid}" 2>/dev/null)" 2>/dev/null; rm -rf "$d"`,
       }),
     ).catch(() => {});
   };
@@ -184,7 +182,7 @@ async function runCommand(
 
 /** A shell word for one job's directory, expanded inside the sandbox. */
 function jobDirectoryWord(jobId: string): string {
-  return `"\${EVE_SANDBOX_JOB_ROOT:-${DEFAULT_JOB_ROOT}}/${jobId}"`;
+  return `"\${${JOB_ROOT_ENV}:-${DEFAULT_JOB_ROOT}}/${jobId}"`;
 }
 
 /**
@@ -211,11 +209,11 @@ async function claimRunningJob(
   const raw = await sandbox.run({
     command: [
       `d=${directory}`,
-      `cd "$d" 2>/dev/null && mkdir claimed 2>/dev/null || exit 0`,
-      `kill -USR1 "$(cat launcher)" 2>/dev/null`,
-      `printf '%s %s %s %s %s\\n' ${marker} "$(cat pid)" "$(($(wc -c < stdout)))" "$(($(wc -c < stderr)))" "$d"`,
-      `tail -c ${MAX_OUTPUT_BYTES} stdout`,
-      `tail -c ${MAX_OUTPUT_BYTES} stderr >&2`,
+      `cd "$d" 2>/dev/null && mkdir ${F.claimed} 2>/dev/null || exit 0`,
+      `kill -USR1 "$(cat ${F.launcher})" 2>/dev/null`,
+      `printf '%s %s %s %s %s\\n' ${marker} "$(cat ${F.pid})" "$(($(wc -c < ${F.stdout})))" "$(($(wc -c < ${F.stderr})))" "$d"`,
+      `tail -c ${MAX_OUTPUT_BYTES} ${F.stdout}`,
+      `tail -c ${MAX_OUTPUT_BYTES} ${F.stderr} >&2`,
     ].join("\n"),
   });
   // Output a login profile prints comes before the marker.
@@ -232,8 +230,8 @@ async function claimRunningJob(
     ...formatStreams({ stderr: raw.stderr, stdout }, omitted),
     message:
       `The command is still running after ${BASH_YIELD_SECONDS} seconds as process group ${pid}; stdout and stderr show its output so far. ` +
-      `It keeps writing to ${outputDirectory}/stdout and ${outputDirectory}/stderr, and writes its exit code to ${outputDirectory}/exit when it finishes. ` +
-      `Check on it with later commands such as \`tail ${outputDirectory}/stdout\` or \`cat ${outputDirectory}/exit\`, and stop it with \`kill -- -${pid}\`.`,
+      `It keeps writing to ${outputDirectory}/${F.stdout} and ${outputDirectory}/${F.stderr}, and writes its exit code to ${outputDirectory}/${F.exit} when it finishes. ` +
+      `Check on it with later commands such as \`tail ${outputDirectory}/${F.stdout}\` or \`cat ${outputDirectory}/${F.exit}\`, and stop it with \`kill -- -${pid}\`.`,
     outputDirectory,
     pid,
     status: "running",

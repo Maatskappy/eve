@@ -40,6 +40,8 @@ const NO_SANDBOX_PROVIDER_MESSAGE =
 const UnavailableSandbox = defineSandboxProvider({
   name: "default",
   environment: () => ({
+    // Nothing was ever opened, so there is nothing to clean up.
+    async onSessionEnd() {},
     async prepare() {
       return {};
     },

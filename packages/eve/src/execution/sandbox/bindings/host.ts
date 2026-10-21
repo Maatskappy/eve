@@ -117,11 +117,13 @@ export function createHostSandboxProvider(
       }
       return { templateKey };
     },
+    // An upsert on the session id: the template seeds the workspace only when
+    // this call creates it, and concurrent creators race on an atomic rename.
     async start(context, _openOptions, artifactValue) {
       const artifact = requireHostArtifact(artifactValue);
-      const templatePath = await requireTemplate(context, artifact);
       const root = resolveWorkspaceRoot(context);
       if (sharedRoot === undefined && !(await pathExists(root))) {
+        const templatePath = await requireTemplate(context, artifact);
         await copyDirectoryAtomically(join(templatePath, WORKSPACE_DIRECTORY_NAME), root);
       }
       await requireDirectory(root);
@@ -136,6 +138,8 @@ export function createHostSandboxProvider(
       await requireDirectory(state.root);
       return await openHandle(context, artifact, state.root);
     },
+    // The session directory comes from the key, so `state` is not needed; a
+    // shared root lives outside it and is never removed.
     async onSessionEnd(context) {
       await removeHostSessionDirectory(resolveSessionDirectory(context));
     },
@@ -249,6 +253,9 @@ async function refreshAuthoredSkills(input: {
   const previous = await readAuthoredSkillsMarker(markerPath);
   if (previous?.templateKey === input.artifact.templateKey) return;
 
+  const templatePath = resolveTemplatePath(input.context.storagePath, input.artifact.templateKey);
+  // An existing session keeps its skills when this generation's template is gone.
+  if (previous !== undefined && !(await pathExists(templatePath))) return;
   const templateSkills = join(
     await requireTemplate(input.context, input.artifact),
     SKILLS_DIRECTORY_NAME,

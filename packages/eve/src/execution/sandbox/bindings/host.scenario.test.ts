@@ -10,7 +10,6 @@ import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "#execution/sandbox/bas
 
 import { releaseHostSandboxHandle } from "#execution/sandbox/bindings/host-session.js";
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
-import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
@@ -24,26 +23,7 @@ import { resolveSandboxModelPath, resolveSandboxSkillRoot } from "#shared/skill-
 const createScratchDirectory = useTemporaryDirectories();
 
 function createHostProvider(options: HostSandboxEnvironmentOptions = {}) {
-  const implementation = createHostSandboxProvider(options);
-  return {
-    ...createSandboxProviderHarness(implementation, undefined),
-    async endSession(appRoot: string, sessionId: string) {
-      await implementation.onSessionEnd?.(
-        {
-          host: createSandboxProviderHost(appRoot),
-          session: {
-            auth: { current: null, initiator: null },
-            id: sessionId,
-            turn: { id: "test-turn", sequence: 0 },
-          },
-          storagePath: appRoot,
-        },
-        { templateKey: "unused" },
-        { root: "unused", version: 1 },
-        { reason: "completed" },
-      );
-    },
-  };
+  return createSandboxProviderHarness(createHostSandboxProvider(options), undefined);
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -135,9 +115,6 @@ describe("HostSandbox", () => {
     expect(second.state.root).not.toBe(first.state.root);
     expect(await second.handle.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
 
-    const reopened = await provider.start({ appRoot, sandboxName: "session-a" });
-    expect(reopened.state).toEqual(first.state);
-    expect(await reopened.handle.sandbox.readTextFile({ path: "owner.txt" })).toBe("a");
     const resumed = await provider.openSession({
       appRoot,
       existing: first.state,
@@ -148,9 +125,46 @@ describe("HostSandbox", () => {
       provider.openSession({ appRoot, existing: second.state, sandboxName: "session-a" }),
     ).rejects.toThrow("incompatible");
 
-    await provider.endSession(appRoot, "session-a");
+    await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
+    await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
+    await provider.endSession({ appRoot, sandboxName: "never-started", state: null });
     expect(existsSync(first.state.root)).toBe(false);
     expect(existsSync(second.state.root)).toBe(true);
+    const fresh = await provider.openSession({ appRoot, sandboxName: "session-a" });
+    expect(await fresh.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
+  });
+
+  it("starts as an upsert on the session id, seeding only the session it creates", async () => {
+    const appRoot = await createScratchDirectory("eve-host-upsert-");
+    const provider = createHostProvider();
+    await provider.prepare({
+      appRoot,
+      seedFiles: [{ content: "first", path: "/workspace/seed.md" }],
+      sourceRevision: "first",
+    });
+
+    const concurrent = await Promise.all(
+      [1, 2, 3].map(() => provider.start({ appRoot, sandboxName: "session-upsert" })),
+    );
+    const root = concurrent[0]!.state.root;
+    expect(concurrent.map(({ state }) => state.root)).toEqual([root, root, root]);
+    expect(await readdir(join(root, "..", ".."))).toHaveLength(1);
+    await concurrent[0]!.handle.sandbox.writeTextFile({ content: "kept", path: "notes.txt" });
+
+    const rebuilt = await provider.prepare({
+      appRoot,
+      seedFiles: [{ content: "second", path: "/workspace/seed.md" }],
+      sourceRevision: "second",
+    });
+    const again = await provider.start({
+      appRoot,
+      prepared: rebuilt,
+      sandboxName: "session-upsert",
+    });
+
+    expect(again.state).toEqual(concurrent[0]!.state);
+    expect(await again.handle.sandbox.readTextFile({ path: "notes.txt" })).toBe("kept");
+    expect(await again.handle.sandbox.readTextFile({ path: "seed.md" })).toBe("first");
   });
 
   it("kills the whole process group when a command is aborted or the sandbox stops", async () => {
@@ -360,7 +374,7 @@ describe("HostSandbox", () => {
     ).toBe("# Weather");
 
     await handle.onSandboxDelete();
-    await provider.endSession(appRoot, "session-shared");
+    await provider.endSession({ appRoot, sandboxName: "session-shared", state: null });
     expect(await readFile(join(appRoot, "project", "README.md"), "utf8")).toBe("mine");
     expect(await readdir(join(appRoot, "host", "sessions"))).toEqual([]);
   });

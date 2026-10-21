@@ -83,14 +83,15 @@ The system prompt is composed once per agent at bootstrap, before any session
 or sandbox exists, and the per-session root depends on the session id. So the
 static model-facing text describes the workspace root generically ("the
 directory where `bash` commands start") instead of naming `/workspace`, and
-every runtime surface renders the real root from the opened session:
+the model never needs to know the absolute root up front:
 
-- `glob` and `grep` default to the session's workspace root.
-- The absolute-path error names an example under the real root.
+- `read_file`, `write_file`, `glob`, and `grep` accept paths relative to the
+  workspace root and resolve them with `sandbox.resolvePath()`, on every
+  provider. Their results report the resolved absolute path.
+- `glob` and `grep` default to the workspace root.
 - Attachments stage under `<workspace root>/.eve/attachments`.
 
-The model learns the absolute root from its first `bash`, `glob`, or `grep`
-call. Skill paths stay symbolic (`$HOME/.agents/skills/<skill>/SKILL.md`); file
+Skill paths stay symbolic (`$HOME/.agents/skills/<skill>/SKILL.md`); file
 tools resolve that prefix to the declared skill root, and loading a skill with
 package files opens the sandbox and prefixes the result with the resolved
 directory so shell commands use the right path. On `HostSandbox`, a `bash`

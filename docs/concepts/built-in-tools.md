@@ -81,7 +81,7 @@ export default disableTool();
 
 ### `read_file`
 
-`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths and paths beginning with `$HOME/`.
+`read_file` reads text files from the sandbox with line-numbered output, and shows PNG, JPEG, GIF, and WebP images up to 3 MiB and 8000 pixels per side, and PDFs up to 20 MiB, to the model as files. Images and PDFs are detected from their bytes, so a missing or mismatched filename extension does not matter, and other text files are always read as text. It accepts absolute paths, paths relative to the workspace root where `bash` commands start, and paths beginning with `$HOME/`, and reports the resolved absolute path.
 
 ```sh
 eve add tool/read_file
@@ -113,7 +113,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts the same paths as `read_file`.
 
 ```sh
 eve add tool/write_file

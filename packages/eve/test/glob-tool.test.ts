@@ -139,15 +139,6 @@ describe("executeGlobOnSandbox", () => {
   // Path validation
   // ---------------------------------------------------------------------------
 
-  it("rejects relative paths", async () => {
-    await expect(
-      runInContext(
-        () => ({ exitCode: 0, stderr: "", stdout: "" }),
-        (sandbox) => executeGlobOnSandbox(sandbox, { pattern: "*.ts", path: "src" }),
-      ),
-    ).rejects.toThrow("filePath must be an absolute path");
-  });
-
   it("expands a leading $HOME before searching", async () => {
     let capturedCommand = "";
     const result = (await runInContext(

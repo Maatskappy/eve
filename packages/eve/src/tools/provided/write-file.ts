@@ -22,7 +22,8 @@ export const WRITE_FILE_INPUT_SCHEMA = defineJsonSchema<WriteFileToolInput>({
     content: { type: "string", description: "Complete replacement file contents." },
     filePath: {
       type: "string",
-      description: "The absolute path to the file to write. A leading $HOME is supported.",
+      description:
+        "The path to the file to write: absolute, or relative to the workspace root (where `bash` commands start). A leading $HOME is supported.",
     },
   },
   required: ["content", "filePath"],

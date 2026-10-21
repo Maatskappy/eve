@@ -42,7 +42,7 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
         async setNetworkPolicy() {},
         async removePath() {},
         resolvePath(path: string) {
-          return path;
+          return path.startsWith("/") ? path : `/workspace/${path}`;
         },
         async run({ command }: { command: string }) {
           if (command === HOME_PROBE_COMMAND) {
@@ -232,12 +232,12 @@ describe("executeReadFileOnSandbox", () => {
   // Path validation
   // ---------------------------------------------------------------------------
 
-  it("rejects relative paths", async () => {
-    await expect(
-      runInContext({ "/workspace/foo.ts": "content" }, (sandbox) =>
-        executeReadFileOnSandbox(sandbox, { filePath: "foo.ts" }),
-      ),
-    ).rejects.toThrow("filePath must be an absolute path");
+  it("reads relative paths from the workspace root and reports the absolute path", async () => {
+    const result = (await runInContext({ "/workspace/src/foo.ts": "content" }, (sandbox) =>
+      executeReadFileOnSandbox(sandbox, { filePath: "src/../src/foo.ts" }),
+    )) as ReadFileResult;
+
+    expect(result).toMatchObject({ content: "1: content", path: "/workspace/src/foo.ts" });
   });
 
   it("reads skill files through the model-facing $HOME path", async () => {

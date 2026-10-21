@@ -7,8 +7,9 @@ import { isAuthorizationSignal, PendingAuthorizationResultKey } from "#harness/a
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
-import type { SandboxAccess } from "#sandbox/state.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
+import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import {
   catalogBundle,
   catalogContext,
@@ -347,7 +348,16 @@ describe("buildStepCatalog", () => {
           },
         },
       });
-      const load = async (access: { fails?: boolean; open: boolean; provider: string }) => {
+      // The host sandbox declares that it opens cheaply to locate skills; Vercel Sandbox does not.
+      const environments = {
+        host: HostSandbox.environment(),
+        vercel: VercelSandbox.environment(),
+      };
+      const load = async (access: {
+        fails?: boolean;
+        open: boolean;
+        provider: keyof typeof environments;
+      }) => {
         const get = vi.fn(async () => {
           if (access.fails === true) throw new Error("bash not found");
           return session;
@@ -355,7 +365,7 @@ describe("buildStepCatalog", () => {
         const ctx = new ContextContainer();
         ctx.set(SandboxKey, {
           captureState: async () => ({ session: null }),
-          environment: { provider: access.provider } as SandboxAccess["environment"],
+          environment: environments[access.provider],
           get,
           peek: () => (access.open ? session : null),
           stop: async () => {},

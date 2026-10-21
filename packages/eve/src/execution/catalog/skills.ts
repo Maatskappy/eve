@@ -8,7 +8,7 @@
 import type { ContextReader } from "#context/key.js";
 import { contextStorage } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
-import { HOST_PROVIDER_NAME } from "#execution/sandbox/host-provider-name.js";
+import { opensForSkillDirectory } from "#execution/sandbox/skill-directory.js";
 import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
@@ -93,9 +93,9 @@ export function createSkillLoader(
 
 /**
  * Where the skill's package files live, when knowing it costs nothing extra:
- * the session's sandbox is already open, or it is the local host sandbox,
- * which keeps skills outside `$HOME` and opens cheaply. Otherwise the result
- * stays as authored; `$HOME/.agents/skills/<name>` already works there.
+ * the session's sandbox is already open, or its provider declares that it
+ * opens cheaply and keeps skills outside `$HOME`. Otherwise the result stays
+ * as authored; `$HOME/.agents/skills/<name>` already works there.
  */
 async function resolveSkillDirectory(
   access: SandboxAccess,
@@ -104,14 +104,16 @@ async function resolveSkillDirectory(
   const symbolic = `${MODEL_SKILL_ROOT}/${name}`;
   const open = access.peek?.() ?? null;
   if (open !== null) return await resolveSandboxModelPath({ path: symbolic, sandbox: open });
-  if (access.environment?.provider !== HOST_PROVIDER_NAME) return undefined;
+  if (access.environment === undefined || !opensForSkillDirectory(access.environment)) {
+    return undefined;
+  }
   try {
     const sandbox = await access.get();
     return sandbox === null
       ? undefined
       : await resolveSandboxModelPath({ path: symbolic, sandbox });
   } catch {
-    // The skill still loads; the next sandbox call reports why the host sandbox failed to open.
+    // The skill still loads; the next sandbox call reports why the sandbox failed to open.
     return symbolic;
   }
 }

@@ -20,6 +20,7 @@ import {
   selectStaleTemplateEntries,
 } from "#execution/sandbox/bindings/local-template-prune.js";
 import { HOST_PROVIDER_NAME } from "#execution/sandbox/host-provider-name.js";
+import { withEagerSkillDirectory } from "#execution/sandbox/skill-directory.js";
 import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
@@ -81,9 +82,12 @@ export function createHostSandboxProvider(
   SandboxSession
 > {
   if (process.platform === "win32") return windowsHostProvider();
-  return createSandboxBackendImplementation(
-    options.root === undefined ? SESSION_HOST_BACKEND : SHARED_HOST_BACKEND,
-    options,
+  // Opening is local and cheap, and skills live outside `$HOME`, so loading a skill may open it.
+  return withEagerSkillDirectory(
+    createSandboxBackendImplementation(
+      options.root === undefined ? SESSION_HOST_BACKEND : SHARED_HOST_BACKEND,
+      options,
+    ),
   );
 }
 

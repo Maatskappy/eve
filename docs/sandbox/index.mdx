@@ -232,7 +232,7 @@ eve provides the rest of the provider contract:
 
 - **Seeding:** when `open()` reports a created sandbox, eve writes the workspace files and skill packages through `writeFile()`, then runs the environment's `prepare` option, which every backend accepts. If any of that fails, eve stops and removes the sandbox so a later open creates it again. With `directoryTemplate`, eve does this once in the template instead.
 - **Concurrent first opens:** eve seeds after `open()` returns. When separate eve processes open the same new session at the same moment, one of them can use the sandbox before the other finishes seeding it. This affects only backends without `directoryTemplate`, whose template copy is complete before `open()` runs.
-- **Rebuilds:** an existing sandbox keeps its files, and eve replaces its authored skills with the current build's on the next open.
+- **Rebuilds:** an existing sandbox keeps its files, and eve replaces its authored skills with the current build's on the next open. A dynamic skill that overrides an authored skill keeps its files.
 - **Commands:** every command gets `AI_AGENT=eve` plus the `env` eve passes for it. On every open, eve runs one command that reads `$HOME` to find the skill directory.
 - **Lifecycle:** eve stops the sandbox for `sandbox.stop()` and server shutdown, stops and removes it for `sandbox.delete()`, and removes it at session end.
 

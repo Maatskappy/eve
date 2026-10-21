@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
 
@@ -245,8 +245,17 @@ export interface InternalSandboxBackendDefinition<Options extends object> {
 /** The prepared artifact of a backend: its template's cache key. */
 export type SandboxBackendArtifact = { readonly templateKey: string };
 
-/** The session state of a backend: the sandbox key, so resume can check it. */
-export type SandboxBackendState = { readonly key: string; readonly version: 1 };
+/**
+ * The session state of a backend: the sandbox key, so resume can check it, and
+ * an id that changes on every start. The key alone would give a sandbox
+ * recreated after it was gone the same identity, and eve would skip rewriting
+ * dynamic skill files the old sandbox had.
+ */
+export type SandboxBackendState = {
+  readonly key: string;
+  readonly startId: string;
+  readonly version: 1;
+};
 
 const PROVIDER_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 // Built-in providers own these names and their cache directories.
@@ -505,6 +514,7 @@ export function createSandboxBackendImplementation<Options extends object>(
             errorOnExist: false,
             force: false,
             recursive: true,
+            verbatimSymlinks: true,
           });
         }
       }
@@ -533,7 +543,7 @@ export function createSandboxBackendImplementation<Options extends object>(
       }
       return {
         handle: createHandle(context, instance, sandbox),
-        state: { key: context.key, version: 1 },
+        state: { key: context.key, startId: randomUUID(), version: 1 },
       };
     },
 
@@ -709,17 +719,28 @@ function toBytes(data: SandboxBackendData): Uint8Array {
   return typeof data === "string" ? new TextEncoder().encode(data) : data;
 }
 
-/** Records which build last wrote the sandbox's authored skills. */
+/**
+ * Records which build last wrote the sandbox's authored skills, and a digest
+ * of each `SKILL.md` it wrote, so a later refresh can tell its own files from a
+ * dynamic skill that took the same name.
+ */
 interface AuthoredSkillsMarker {
-  readonly skills: readonly string[];
+  readonly skills: Readonly<Record<string, string>>;
   readonly templateKey: string;
+}
+
+const SKILL_MARKDOWN_NAME = "SKILL.md";
+
+function digest(content: SandboxBackendData): string {
+  return createHash("sha256").update(toBytes(content)).digest("hex");
 }
 
 /**
  * Brings the sandbox's authored skills up to the current build. Dynamic
- * skills share the skill root and persist across rebuilds, so only the
- * authored skill directories are replaced, and only those the previous build
- * wrote are removed. The marker sits beside the skill root, not in it.
+ * skills share the skill root and persist across rebuilds, so a skill
+ * directory is replaced or removed only while its `SKILL.md` is missing or
+ * still the one an earlier build wrote; a dynamic skill that overrides an
+ * authored one keeps its package. The marker sits beside the skill root.
  */
 async function refreshAuthoredSkills(input: {
   readonly name: string;
@@ -740,31 +761,36 @@ async function refreshAuthoredSkills(input: {
       templateKey: input.resources,
     });
   }
+  // Errors propagate: a build always has this directory, and treating a failed read as
+  // "no skills" would delete the session's skills and record the refresh as done.
   const skillsDirectory = join(input.resources, "skills");
-  const skills = await readdir(skillsDirectory).catch((): string[] => []);
-  for (const skill of previous?.skills ?? []) {
-    if (!skills.includes(skill)) {
-      await input.sandbox.removePath({
-        force: true,
-        path: posix.join(skillRoot, skill),
-        recursive: true,
-      });
-    }
-  }
-  for (const skill of skills) {
+  const skills = await readdir(skillsDirectory);
+  const isAuthored = async (skill: string) => {
+    const markdown = await input.instance.readFile(
+      posix.join(skillRoot, skill, SKILL_MARKDOWN_NAME),
+    );
+    return markdown === null || digest(markdown) === previous?.skills[skill];
+  };
+  const remove = async (skill: string) =>
     await input.sandbox.removePath({
       force: true,
       path: posix.join(skillRoot, skill),
       recursive: true,
     });
+  for (const skill of Object.keys(previous?.skills ?? {})) {
+    if (!skills.includes(skill) && (await isAuthored(skill))) await remove(skill);
+  }
+  const written: Record<string, string> = {};
+  for (const skill of skills) {
+    if (!(await isAuthored(skill))) continue;
+    await remove(skill);
     for (const file of await listFiles(join(skillsDirectory, skill))) {
-      await input.instance.writeFile(
-        posix.join(skillRoot, skill, file.relativePath),
-        await readFile(file.path),
-      );
+      const content = await readFile(file.path);
+      await input.instance.writeFile(posix.join(skillRoot, skill, file.relativePath), content);
+      if (file.relativePath === SKILL_MARKDOWN_NAME) written[skill] = digest(content);
     }
   }
-  const marker: AuthoredSkillsMarker = { skills, templateKey: input.templateKey };
+  const marker: AuthoredSkillsMarker = { skills: written, templateKey: input.templateKey };
   await input.instance.writeFile(markerPath, new TextEncoder().encode(JSON.stringify(marker)));
 }
 
@@ -777,10 +803,10 @@ function parseSkillsMarker(content: SandboxBackendData | null): AuthoredSkillsMa
     if (
       isSandboxPreparedArtifactRecord(value) &&
       typeof value.templateKey === "string" &&
-      Array.isArray(value.skills) &&
-      value.skills.every((skill) => typeof skill === "string")
+      isSandboxPreparedArtifactRecord(value.skills) &&
+      Object.values(value.skills).every((hash) => typeof hash === "string")
     ) {
-      return { skills: value.skills, templateKey: value.templateKey };
+      return { skills: value.skills as Record<string, string>, templateKey: value.templateKey };
     }
   } catch {
     // An unreadable marker means no build has written skills yet.
@@ -804,9 +830,7 @@ async function writeResourceTree(
 async function listFiles(
   directory: string,
 ): Promise<{ readonly path: string; readonly relativePath: string }[]> {
-  const entries = await readdir(directory, { recursive: true, withFileTypes: true }).catch(
-    () => [],
-  );
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile())
     .map((entry) => {
@@ -832,9 +856,10 @@ function requireState(name: string, state: SandboxPreparedArtifact): SandboxBack
   if (
     !isSandboxPreparedArtifactRecord(state) ||
     state.version !== 1 ||
-    typeof state.key !== "string"
+    typeof state.key !== "string" ||
+    typeof state.startId !== "string"
   ) {
     throw new Error(`Invalid session state for sandbox backend "${name}".`);
   }
-  return { key: state.key, version: 1 };
+  return { key: state.key, startId: state.startId, version: 1 };
 }

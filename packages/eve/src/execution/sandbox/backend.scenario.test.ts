@@ -170,12 +170,83 @@ describe("defineSandboxBackend", () => {
     });
     const again = await provider.start({ appRoot, prepared: rebuilt, sandboxName: "session-a" });
 
-    expect(again.state).toEqual(first.state);
+    expect(again.state.key).toBe(first.state.key);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(text(files.get("/workspace/notes/seed.md"))).toBe("first");
     expect(text(files.get(`${SKILLS}/weather/SKILL.md`))).toBe("# Weather v2");
     expect(files.has(`${SKILLS}/retired/SKILL.md`)).toBe(false);
     expect(text(files.get(`${SKILLS}/tenant/SKILL.md`))).toBe("# Tenant");
+  });
+
+  it("leaves a dynamic skill that overrides an authored one in place across rebuilds", async () => {
+    const appRoot = await createScratchDirectory("eve-backend-override-");
+    const { definition, sandboxes } = createMemoryBackend();
+    const provider = harness(definition);
+    const build = (sourceRevision: string, seedFiles: { content: string; path: string }[]) =>
+      provider.prepare({ appRoot, seedFiles, sourceRevision });
+    await build("first", [
+      { content: "# Weather v1", path: "$HOME/.agents/skills/weather/SKILL.md" },
+      { content: "# Notes v1", path: "$HOME/.agents/skills/notes/SKILL.md" },
+    ]);
+    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-a" });
+    // Dynamic packages with supporting files replace both authored skills.
+    for (const skill of ["weather", "notes"]) {
+      await handle.sandbox.removePath({ force: true, path: `${SKILLS}/${skill}`, recursive: true });
+      await handle.sandbox.writeTextFile({
+        content: "# Dynamic",
+        path: `${SKILLS}/${skill}/SKILL.md`,
+      });
+      await handle.sandbox.writeTextFile({ content: "data", path: `${SKILLS}/${skill}/data.txt` });
+    }
+
+    const rebuilt = await build("second", [
+      { content: "# Weather v2", path: "$HOME/.agents/skills/weather/SKILL.md" },
+    ]);
+    await provider.openSession({
+      appRoot,
+      existing: state,
+      prepared: rebuilt,
+      sandboxName: "session-a",
+    });
+
+    const files = sandboxes.get(state.key)!.files;
+    for (const skill of ["weather", "notes"]) {
+      expect(text(files.get(`${SKILLS}/${skill}/SKILL.md`))).toBe("# Dynamic");
+      expect(text(files.get(`${SKILLS}/${skill}/data.txt`))).toBe("data");
+    }
+  });
+
+  it("keeps a sandbox's skills when the build's skills cannot be read", async () => {
+    const appRoot = await createScratchDirectory("eve-backend-unreadable-");
+    const { definition, sandboxes } = createMemoryBackend();
+    const provider = harness(definition);
+    await provider.prepare({
+      appRoot,
+      seedFiles: [{ content: "# Weather", path: "$HOME/.agents/skills/weather/SKILL.md" }],
+      sourceRevision: "first",
+    });
+    const { state } = await provider.start({ appRoot, sandboxName: "session-a" });
+    const rebuilt = await provider.prepare({
+      appRoot,
+      seedFiles: [{ content: "# Weather v2", path: "$HOME/.agents/skills/weather/SKILL.md" }],
+      sourceRevision: "second",
+    });
+    const templates = join(appRoot, "memory", "templates");
+    for (const template of await readdir(templates)) {
+      await rm(join(templates, template, "resources", "skills"), { force: true, recursive: true });
+    }
+
+    await expect(
+      provider.openSession({
+        appRoot,
+        existing: state,
+        prepared: rebuilt,
+        sandboxName: "session-a",
+      }),
+    ).rejects.toThrow("ENOENT");
+    expect(text(sandboxes.get(state.key)!.files.get(`${SKILLS}/weather/SKILL.md`))).toBe(
+      "# Weather",
+    );
   });
 
   it("runs commands with AI_AGENT=eve and normalizes finished and streaming output", async () => {

@@ -64,13 +64,20 @@ source revision, and options, published atomically, and pruned with the other
 local templates. The session directory also holds `skills/` and `jobs/` (for
 the `bash` tool). Authored skills are copied from the build's resources when a
 session opens on a new generation, recorded in `.eve-authored-skills.json`
-beside the skill root with the template key and skill names: on a rebuild eve replaces the current authored skills and removes the
-ones the previous generation wrote, while dynamic skills in the same directory
-stay. The session state does not change on a rebuild, so dynamic skill files
-are not rewritten and must survive in place.
+beside the skill root with the template key and a digest of each `SKILL.md` it
+wrote: on a rebuild eve replaces the current authored skills and removes the
+ones the previous generation wrote, but only while a skill's `SKILL.md` is
+missing or still matches its digest, so dynamic skills in the same directory,
+including one that overrides an authored skill, stay. The session state does
+not change on a rebuild, so dynamic skill files are not rewritten and must
+survive in place.
 
-Session state is `{ key, version }`. Resume checks that `key` matches what the
-environment derives for the session. When a per-session workspace was removed
+Session state is `{ key, startId, version }`. Resume checks that `key` matches
+what the environment derives for the session. `startId` changes on every
+start, so a sandbox recreated after it was gone has a new identity and eve
+rewrites the dynamic skill files it lost; `copyDirectoryAtomically` and the
+fill-in copy keep symlinks verbatim, so a relative link made in `prepare` points
+into the session copy, not the template. When a per-session workspace was removed
 outside eve (for example with `.eve`), resume throws `SandboxSessionGoneError`
 (#5117): eve clears the session's sandbox state and reruns the selector, whose
 `start()` seeds a fresh directory from the template, as after

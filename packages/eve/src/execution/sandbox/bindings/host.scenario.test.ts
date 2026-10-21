@@ -164,7 +164,9 @@ describe("HostSandbox", () => {
     );
     const fresh = await provider.start(session);
 
-    expect(fresh.state).toEqual(state);
+    // Same sandbox key, new identity, so eve rewrites dynamic skill files the old one had.
+    expect(fresh.state.key).toBe(state.key);
+    expect(fresh.state).not.toEqual(state);
     expect(await fresh.handle.sandbox.readTextFile({ path: "seed.md" })).toBe("seeded");
     expect(await fresh.handle.sandbox.readTextFile({ path: "notes.txt" })).toBeNull();
   });
@@ -238,9 +240,33 @@ describe("HostSandbox", () => {
       sandboxName: "session-upsert",
     });
 
-    expect(again.state).toEqual(concurrent[0]!.state);
+    expect(again.state.key).toBe(concurrent[0]!.state.key);
     expect(await again.handle.sandbox.readTextFile({ path: "notes.txt" })).toBe("kept");
     expect(await again.handle.sandbox.readTextFile({ path: "seed.md" })).toBe("first");
+  });
+
+  it("copies symlinks a template's prepare created as written", async () => {
+    const appRoot = await createScratchDirectory("eve-host-symlink-");
+    const provider = createHostProvider({
+      async prepare(sandbox) {
+        await sandbox.run({
+          command:
+            "mkdir data && printf original > data/target.txt && ln -s data/target.txt link.txt",
+        });
+      },
+    });
+    await provider.prepare({ appRoot });
+    const { sandbox } = await provider.openSession({ appRoot, sandboxName: "session-symlink" });
+
+    expect((await sandbox.run({ command: "readlink link.txt" })).stdout.trim()).toBe(
+      "data/target.txt",
+    );
+    await sandbox.run({ command: "printf changed > link.txt" });
+    const templates = join(appRoot, "host", "templates");
+    const [template] = await readdir(templates);
+    await expect(
+      readFile(join(templates, template!, "sandbox", "workspace", "data", "target.txt"), "utf8"),
+    ).resolves.toBe("original");
   });
 
   it("kills the whole process group when a command is aborted or the sandbox stops", async () => {

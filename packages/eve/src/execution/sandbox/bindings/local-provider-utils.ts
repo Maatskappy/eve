@@ -38,9 +38,12 @@ export async function copyDirectoryAtomically(
   await mkdir(dirname(targetPath), { recursive: true });
   try {
     // Clones copy-on-write where the filesystem supports it, and copies otherwise.
+    // Symlinks keep their targets as written, so a relative link in the copy
+    // points into the copy, not back into the source.
     await cp(sourcePath, temporaryTargetPath, {
       mode: constants.COPYFILE_FICLONE,
       recursive: true,
+      verbatimSymlinks: true,
     });
     await rename(temporaryTargetPath, targetPath);
   } catch (error) {

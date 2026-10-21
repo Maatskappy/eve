@@ -15,13 +15,9 @@ import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
-import type {
-  AgentInfoResult,
-  Client,
-  InteractionOption,
-  Answer,
-  SessionStreamEvent,
-} from "#client/index.js";
+import type { AgentInfoResult, Client, SessionStreamEvent } from "#client/index.js";
+import type { InteractionOption } from "#protocol/session-events/families/interaction.js";
+import type { Answer } from "#shared/input.js";
 import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
@@ -496,7 +492,7 @@ export class EveTUIRunner {
     this.#renderer = createRenderer(options);
     this.#store = new EveAgentStore({
       client: options.client,
-      followSubagents: true,
+      followAgents: true,
     });
     this.#store.setCallbacks({
       onEvent: (event) => this.#recordDiagnostics(event),

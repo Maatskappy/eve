@@ -68,11 +68,12 @@ the evals above by `expectNoModelCallWhileOpen` and
   `harness/hitl/candidates.test.ts` ("expires only candidates whose deadline
   has passed") and `harness/hitl/coordinator.test.ts` ("completes an expired
   candidate without executing policy").
-- **A `once()` grant hidden while an approval for its key waits.** Policies
+- **A `once()` grant hidden while another approval for its tool waits.** Policies
   only run at a step's start or right before an approved call, and neither
   happens while that approval waits, so HTTP cannot observe the hiding.
-  Covered by `harness/session-machine/machine.test.ts` ("grants a once()
-  approval's key, except to a call still asking for it").
+  The concurrent-prompt contract is covered by
+  `harness/approved-call-recheck.integration.test.ts` ("keeps simultaneous
+  once prompts independent before reusing their approval").
 - **An approved tool removed before the answer.** Step tools persist with
   their step, so only a redeploy between the ask and the answer removes one.
   Local e2e cannot redeploy.

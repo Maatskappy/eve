@@ -4,6 +4,7 @@ import { isToolSchema } from "#tools/schema.js";
 import { describe, expect, it, beforeEach } from "vitest";
 
 import { transformDynamicToolExecute } from "./dynamic-tool-transform.js";
+import { once } from "#tools/approval/policies.js";
 import {
   collectDurableDynamicToolCallbacks,
   readDurableDynamicCallback,
@@ -59,7 +60,6 @@ async function transformAndEval(
         outputSchema: entry.outputSchema,
         label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
-        approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
       }),
@@ -74,9 +74,10 @@ async function transformAndEval(
     "defineTool",
     "__eveDefineDurableSchema",
     "z",
+    "once",
     `${code}\nreturn __exported;`,
   );
-  evalFn(defineDynamic, defineTool, defineDurableSchema, z);
+  evalFn(defineDynamic, defineTool, defineDurableSchema, z, once);
 
   return {
     code,
@@ -2533,35 +2534,6 @@ export default defineDynamic({
 
     expect(code).toMatch(/function __eve_dynamic_exec_\d+\(\{ tag \}, _input/);
     expect(code).toMatch(/\(\.\.\.__args\) => __eve_dynamic_exec_\d+\(\{ tag \}, \.\.\.__args\)/);
-  });
-});
-
-describe("approvalKey callbacks", () => {
-  it("captures input-scoped approval keys for durable replay", async () => {
-    const { callHandler } = await transformAndEval(
-      "tools/scoped.ts",
-      `
-      import { defineDynamic, defineTool } from "eve";
-      export default defineDynamic({ events: { "step.started": () => {
-        const prefix = "repo";
-        return { write: defineTool({
-          description: "write",
-          inputSchema: { type: "object" },
-          execute: () => ({ ok: true }),
-          approvalKey: (input) => prefix + ":" + input.branch,
-        }) };
-      } } });
-    `,
-    );
-    const result = await callHandler();
-    const entry = result.write as { approvalKey: (input: unknown) => string };
-    const descriptor = readDurableDynamicCallback(entry.approvalKey)!;
-    expect(descriptor.closure).toEqual({ prefix: "repo" });
-    expect(
-      (descriptor.callback as Function)(JSON.parse(JSON.stringify(descriptor.closure)), {
-        branch: "main",
-      }),
-    ).toBe("repo:main");
   });
 });
 

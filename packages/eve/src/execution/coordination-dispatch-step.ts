@@ -66,7 +66,7 @@ export async function publishDispatchedCallsStep(
         // runtime address the dispatch already recorded.
         const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
         const events = [
-          ...pending.executing.map((callId) => callStarted(callId)),
+          ...pending.executing,
           ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
           ...pending.refused,
         ];
@@ -98,7 +98,7 @@ async function dispatchCoordination(
   const results: RuntimeActionResult[] = [];
   const started: TaskCallStart[] = [];
   const refused: FactOf<"call.settled">[] = [];
-  const executing: string[] = [];
+  const executing: FactOf<"call.started">[] = [];
   // Prospective facts for this admission batch use the same fold as committed facts. This
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
@@ -130,7 +130,8 @@ async function dispatchCoordination(
     nextSession = dispatched.session;
     if (dispatched.result !== undefined) results.push(dispatched.result);
     // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
-    else if (task.entry.entryPoint === "execute") executing.push(task.callId);
+    else if (task.entry.entryPoint === "execute")
+      executing.push(callStarted(task.callId, { clearedBy: task.clearedBy }));
     if (dispatched.started !== undefined) {
       started.push(dispatched.started);
       const shadow = sessionView(

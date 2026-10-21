@@ -6,8 +6,6 @@ import { continuationModel } from "./lib/continuation/model.ts";
 import { humanInputModel } from "./lib/hitl/model.ts";
 
 const AUTH_PROBE_DIRECTIVE = /call the auth-probe tool exactly once with marker "([^"]+)"/iu;
-const SCOPED_APPROVAL_DIRECTIVE =
-  /call the dynamic_scoped_approval tool exactly once with scope "([^"]+)"/iu;
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 const APPROVAL_FOLLOWUP_DIRECTIVE =
   /call the (gate|read-draft-status) tool exactly once with marker "([^"]+)"/iu;
@@ -39,17 +37,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const reply = REPLY_DIRECTIVE.exec(message);
   if (reply?.[1] !== undefined) {
     return reply[1];
-  }
-
-  const scopedApproval = SCOPED_APPROVAL_DIRECTIVE.exec(message);
-  if (scopedApproval?.[1] !== undefined) {
-    const roles = request.messages.map((entry) => entry.role);
-    if (roles.lastIndexOf("tool") < roles.lastIndexOf("user")) {
-      return {
-        toolCalls: [{ input: { scope: scopedApproval[1] }, name: "dynamic_scoped_approval" }],
-      };
-    }
-    return `Approved scope: ${scopedApproval[1]}`;
   }
 
   const askQuestion = ASK_QUESTION_DIRECTIVE.exec(message);

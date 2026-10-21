@@ -2,6 +2,7 @@ import type { Experimental_DecisionModel as DecisionModel } from "ai";
 
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
+import { evaluateOnce } from "#approval/evaluation.js";
 import { parseJsonValue, type JsonObject } from "#shared/json.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
@@ -71,13 +72,6 @@ function neverApproval(_closure: JsonObject): "not-applicable" {
   return "not-applicable";
 }
 
-function onceApproval(
-  _closure: JsonObject,
-  context: ApprovalContext,
-): "not-applicable" | "user-approval" {
-  return context.approvedTools.has(context.toolName) ? "not-applicable" : "user-approval";
-}
-
 /**
  * Returns an `approval` callback that asks an AI SDK decision model whether
  * the exact tool call presents concrete security danger. Defaults to TypeSafe Jev.
@@ -85,12 +79,22 @@ function onceApproval(
  */
 export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): ApprovalPolicy<TInput> {
   const decisionModel = options.model ?? "typesafe-ai/jev";
-  const callback = (_closure: JsonObject, context: ApprovalContext) =>
-    autoApproval(decisionModel, options, context);
-  return stampDurableDynamicCallback(
-    (context) => autoApproval(decisionModel, options, context as ApprovalContext),
-    { callback, closure: {} },
-  ) as ApprovalPolicy<TInput>;
+  const policy: ApprovalPolicy<TInput> = (context) =>
+    autoApproval(decisionModel, options, context as ApprovalContext);
+  if (typeof decisionModel !== "string") return policy;
+  const closure = {
+    model: decisionModel,
+    instructions: options.instructions ?? DEFAULT_INSTRUCTIONS,
+    criteria: {
+      clear: options.criteria?.clear ?? DEFAULT_CLEAR_DESCRIPTION,
+      caution: options.criteria?.caution ?? DEFAULT_CAUTION_DESCRIPTION,
+    },
+  };
+  return stampDurableDynamicCallback(policy, {
+    callback: (saved: JsonObject, context: ApprovalContext) =>
+      autoApproval(saved.model as string, saved as AutoApprovalOptions, context),
+    closure,
+  });
 }
 
 /**
@@ -115,17 +119,16 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
   });
 }
 
-/**
- * Returns an `approval` callback that requires approval until the user
- * approves this tool once in the current session. A tool is recorded as
- * approved only on an explicit approval; a denial (or continuing without
- * responding) leaves it unrecorded, so the next call prompts again. Keys off
- * the bare tool name, so it ignores compound approval keys.
- */
+/** Remembers a person's approval for this tool for the rest of the session. */
 export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(
-    ({ approvedTools, toolName }) =>
-      approvedTools.has(toolName) ? "not-applicable" : "user-approval",
-    { callback: onceApproval, closure: {} },
-  );
+  if (arguments.length !== 0) {
+    throw new TypeError(
+      "once() does not accept options. Use a custom approval policy for input-dependent decisions.",
+    );
+  }
+  const evaluate = (context: ApprovalContext<TInput>) => evaluateOnce(context as ApprovalContext);
+  return stampDurableDynamicCallback(evaluate, {
+    callback: (_closure: JsonObject, context: ApprovalContext<TInput>) => evaluate(context),
+    closure: {},
+  });
 }

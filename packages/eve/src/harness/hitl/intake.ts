@@ -16,7 +16,7 @@ import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   admitAnswers,
   dispatch,
-  grantedApprovalKeys,
+  grantedApprovals,
   openLimit,
   queueInput,
   requireSignIn,
@@ -159,10 +159,6 @@ export async function settleHumanInput(
   // Approved calls run with the tools of the step that asked, built before anything runs.
   for (const parked of step.view().turn.suspended) await restoreTools(step, parked);
   const settled = settleApprovals(step.view(), {
-    approvalKey: (request) =>
-      toolsOf(step, stepForRequest(step.view(), request.interactionId))
-        .get(request.call.toolName)
-        ?.approvalKey?.(request.call.input),
     steer: intake.steer,
   });
   await step.apply(settled);
@@ -220,9 +216,7 @@ async function runApproved(
       if (tool?.workflowId === undefined) continue;
       const recheck = await recheckApprovedCall(tool, {
         abortSignal: step.config.abortSignal,
-        approvedTools: grantedApprovalKeys(step.view(), (asked) =>
-          tools.get(asked.call.toolName)?.approvalKey?.(asked.call.input),
-        ),
+        approvalGrants: grantedApprovals(step.view()),
         callId: approval.call.callId,
         input: approval.call.input,
       });
@@ -255,7 +249,14 @@ async function runApproved(
       turnId: parked.event.turnId,
     });
     step.session = dispatched.session;
-    tasks.push(...dispatched.workflowRequests);
+    tasks.push(
+      ...dispatched.workflowRequests.map((task) => {
+        const interactionId = workflows.find(
+          (request) => request.call.callId === task.callId,
+        )?.interactionId;
+        return interactionId === undefined ? task : { ...task, clearedBy: { interactionId } };
+      }),
+    );
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));
   if (tasks.length > 0) await step.apply(dispatch(step.view(), { tasks }));
@@ -288,9 +289,7 @@ async function runApproved(
             });
       return await runApprovedCalls({
         abortSignal: step.config.abortSignal,
-        approvedTools: grantedApprovalKeys(step.view(), (request) =>
-          tools.get(request.call.toolName)?.approvalKey?.(request.call.input),
-        ),
+        approvalGrants: grantedApprovals(step.view()),
         approvals,
         messages: step.projectHistory(step.session.history),
         position: step.position(),

@@ -3,7 +3,7 @@ title: "Multi-Tenant Approvals"
 description: "Resolve tenant policy asynchronously for authored tools, OpenAPI operations, and MCP tools."
 ---
 
-eve's `approval` field is an async policy hook. It receives the active session, qualified tool name, tool input, and previously approved tools. That is enough to ask your application whether this tenant should allow, deny, or require human confirmation for any authored or connection tool.
+eve's `approval` field is an async policy hook. It receives the active session, qualified tool name, and tool input. That is enough to ask your application whether this tenant should allow, deny, or require human confirmation for any authored or connection tool.
 
 Use this with [multi-tenant outbound auth](./multi-tenant-auth) when your own
 API key, JWT, or app session establishes the tenant and the connection
@@ -68,7 +68,7 @@ export async function decideTenantApproval(
 
 For authored tools, `ctx.toolName` is the path-derived name such as `transfer_funds`. For connection tools, it is qualified, such as `billing__updateSubscription` or `support__add_internal_note`. Your policy service can match exact names, connection-wide patterns, roles, amounts, environments, or any other tenant-owned rule.
 
-The callback deliberately does not treat `approvedTools` as a session-wide grant. Every call is evaluated. If your policy supports approve-once behavior, consult `ctx.approvedTools` explicitly after pinning the session tenant.
+The callback evaluates every call. Return `"user-approval"` when each tenant-specific action needs a separate decision. [`once()`](/docs/human-in-the-loop#remember-approval-for-a-tool) remembers approval for the tool across all inputs in the session; it does not create tenant-specific grants.
 
 ## Apply it to an authored tool
 

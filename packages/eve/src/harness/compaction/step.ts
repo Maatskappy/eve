@@ -152,6 +152,7 @@ function summaryFailed(
     readonly spent?: { readonly runId: string; readonly usage: Usage };
   },
 ): SessionEvent[] {
+  if (view.changes[input.changeId]?.status !== "running") return [];
   const error = { code: "COMPACTION_FAILED", message: toErrorMessage(input.error) };
   // The summary run failed, and its change with it; the writer closes what else they held.
   const runs = openWork(view, { changeId: input.changeId }).runs;

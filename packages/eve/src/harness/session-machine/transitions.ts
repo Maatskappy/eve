@@ -888,17 +888,26 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
       { cause: input.cause, outcome: "cancelled" },
       activeTurn(tables)?.turnId ?? turnId,
     ),
+    ...unreadSettled(view),
   );
+  const { queued: _queued, ...turn } = view.turn;
   return {
     commit: stopped.flatMap(cancelledTranscript),
     events,
     // Every sign-in the turn held ends with it.
     signIns: [],
     turn: {
-      ...view.turn,
+      ...turn,
       suspended: view.turn.suspended.filter((step) => !stopped.includes(step)),
     },
   };
+}
+
+function unreadSettled(view: SessionView): SessionEvent[] {
+  const tables = view.projection.view;
+  return (view.turn.queued?.deliveries ?? [])
+    .filter(({ deliveryId }) => tables.deliveries[deliveryId]?.status === "admitted")
+    .map(({ deliveryId }) => fact("delivery.settled", { deliveryId, outcome: "ignored" }));
 }
 
 /** A stopped step's response, each call without a result answered as cancelled. */
@@ -940,6 +949,7 @@ export function clear(
       // non-task work before selecting an empty conversation, instead of dropping only its
       // private suspended steps and leaving the public turn and calls open forever.
       ...turnSettled(projection, { cause: input.cause, outcome: "cancelled" }),
+      ...unreadSettled(view),
       contextStarted({ cause: input.cause, changeId, kind: "clear" }),
       fact("context.settled", { changeId, kind: "clear", outcome: "completed", selects: null }),
     ],

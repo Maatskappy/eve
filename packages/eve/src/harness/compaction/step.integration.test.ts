@@ -2,8 +2,11 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { createStreamChecker } from "#protocol/session-events/checker.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -40,7 +43,10 @@ const summaryStream = (): StreamResult =>
   ]);
 
 /** Manually compacts a short conversation with `model`, as `session.compact()` does. */
-async function compactWith(model: MockLanguageModelV3) {
+async function compactWith(
+  model: MockLanguageModelV3,
+  handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
+) {
   const session: HarnessSession = {
     agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
     compaction: { recentWindowSize: 1, threshold: 100_000 },
@@ -54,13 +60,41 @@ async function compactWith(model: MockLanguageModelV3) {
   };
   return createToolLoopHarness({
     compactOnly: true,
-    handleEvent: async () => {},
+    handleEvent: (publication) => handleEvent(eventsOf(publication)),
     resolveModel: async () => model,
     tools: new Map(),
   })(session, {});
 }
 
 describe("compaction summary call", () => {
+  it("settles a failed manual compaction and its summary run exactly once", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const model = new MockLanguageModelV3({
+      doStream: async () =>
+        streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "error", error: new Error("The summary request is invalid.") },
+        ]),
+    });
+    const events: SessionEvent[] = [];
+    const checker = createStreamChecker();
+    const at = "2026-10-21T00:00:00.000Z";
+    checker.check({ at, facts: [{ type: "session.started", data: {} }] }, 0);
+    const issues: unknown[] = [];
+    let position = 1;
+    const result = await compactWith(model, async (facts) => {
+      events.push(...facts);
+      issues.push(...checker.check({ at, facts }, position++));
+    });
+
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { outcome: "failed" } },
+    ]);
+    expect(events.filter((event) => event.type === "model.settled")).toHaveLength(1);
+    expect(issues).toEqual([]);
+    expect(result.session.history).toHaveLength(3);
+  });
+
   it("streams a manual summary and counts its usage outside any turn", async () => {
     const doGenerate = vi.fn(async () => {
       throw new Error("Stream must be set to true");

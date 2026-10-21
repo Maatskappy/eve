@@ -1095,6 +1095,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      just-bash:
+        specifier: ^3.1.0
+        version: 3.1.0(supports-color@10.2.2)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -4457,18 +4460,21 @@ packages:
   '@opentelemetry/sdk-trace-base@2.11.0':
     resolution: {integrity: sha512-H19x/TX/LZdqiYOjM7fqtSxwlplC5pgelavqbQdHbhdq0q/AI/TGkM2dfGuuynTXmJPeF2HoZVoPDu+TGoW78A==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.6.1':
     resolution: {integrity: sha512-r86ut4T1e8vNwB35CqCcKd45yzqH6/6Wzvpk2/cZB8PsPLlZFTvrh8yfOS3CYZYcUmAx4hHTZJ8AO8Dj8nrdhw==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.7.1':
     resolution: {integrity: sha512-NAYIlsF8MPUsKqJMiDQJTMPOmlbawC1Iz/omMLygZ1C9am8fTKYjTaI+OZM+WTY3t3Glo0wnOg/6/pac6RGPPw==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
@@ -16113,8 +16119,7 @@ snapshots:
       citty: 0.2.2
       commander: 14.0.3
 
-  '@borewit/text-codec@0.2.2':
-    optional: true
+  '@borewit/text-codec@0.2.2': {}
 
   '@braintree/sanitize-url@7.1.2': {}
 
@@ -17201,28 +17206,23 @@ snapshots:
 
   '@jetty/sdk@0.4.0': {}
 
-  '@jitl/quickjs-ffi-types@0.32.0':
-    optional: true
+  '@jitl/quickjs-ffi-types@0.32.0': {}
 
   '@jitl/quickjs-wasmfile-debug-asyncify@0.32.0':
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
-    optional: true
 
   '@jitl/quickjs-wasmfile-debug-sync@0.32.0':
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
-    optional: true
 
   '@jitl/quickjs-wasmfile-release-asyncify@0.32.0':
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
-    optional: true
 
   '@jitl/quickjs-wasmfile-release-sync@0.32.0':
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
-    optional: true
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -17653,8 +17653,7 @@ snapshots:
   '@next/swc-win32-x64-msvc@16.3.4':
     optional: true
 
-  '@nodable/entities@3.0.0':
-    optional: true
+  '@nodable/entities@3.0.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
@@ -21173,10 +21172,8 @@ snapshots:
       token-types: 6.1.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
-  '@tokenizer/token@0.3.0':
-    optional: true
+  '@tokenizer/token@0.3.0': {}
 
   '@tootallnate/quickjs-emscripten@0.23.0': {}
 
@@ -22657,8 +22654,7 @@ snapshots:
       normalize-path: 3.0.0
       picomatch: 2.3.2
 
-  anynum@1.0.1:
-    optional: true
+  anynum@1.0.1: {}
 
   archiver-utils@5.0.2:
     dependencies:
@@ -23373,8 +23369,7 @@ snapshots:
 
   commander@2.20.3: {}
 
-  commander@6.2.1:
-    optional: true
+  commander@6.2.1: {}
 
   commander@7.2.0: {}
 
@@ -24828,7 +24823,6 @@ snapshots:
     dependencies:
       path-expression-matcher: 1.6.2
       xml-naming: 0.3.0
-    optional: true
 
   fast-xml-parser@5.11.1:
     dependencies:
@@ -24838,7 +24832,6 @@ snapshots:
       path-expression-matcher: 1.6.2
       strnum: 2.4.2
       xml-naming: 0.3.0
-    optional: true
 
   fastdom@1.0.12:
     dependencies:
@@ -24896,7 +24889,6 @@ snapshots:
       uint8array-extras: 1.5.0
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   file-uri-to-path@1.0.0: {}
 
@@ -25796,8 +25788,7 @@ snapshots:
 
   ini@4.1.1: {}
 
-  ini@6.0.0:
-    optional: true
+  ini@6.0.0: {}
 
   inline-style-parser@0.2.7: {}
 
@@ -26016,8 +26007,7 @@ snapshots:
 
   is-unicode-supported@2.1.0: {}
 
-  is-unsafe@2.0.2:
-    optional: true
+  is-unsafe@2.0.2: {}
 
   is-weakmap@2.0.2: {}
 
@@ -26195,7 +26185,6 @@ snapshots:
       yaml: 2.9.1
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   just-secrets@0.0.2: {}
 
@@ -27401,8 +27390,7 @@ snapshots:
 
   mocked-exports@0.1.1: {}
 
-  modern-tar@0.7.7:
-    optional: true
+  modern-tar@0.7.7: {}
 
   module-details-from-path@1.0.4: {}
 
@@ -28463,8 +28451,7 @@ snapshots:
 
   package-manager-detector@1.8.0: {}
 
-  papaparse@5.7.0:
-    optional: true
+  papaparse@5.7.0: {}
 
   parent-module@1.0.1:
     dependencies:
@@ -28517,8 +28504,7 @@ snapshots:
 
   path-exists@4.0.0: {}
 
-  path-expression-matcher@1.6.2:
-    optional: true
+  path-expression-matcher@1.6.2: {}
 
   path-key@3.1.1: {}
 
@@ -29005,7 +28991,6 @@ snapshots:
   quickjs-emscripten-core@0.32.0:
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
-    optional: true
 
   quickjs-emscripten@0.32.0:
     dependencies:
@@ -29014,7 +28999,6 @@ snapshots:
       '@jitl/quickjs-wasmfile-release-asyncify': 0.32.0
       '@jitl/quickjs-wasmfile-release-sync': 0.32.0
       quickjs-emscripten-core: 0.32.0
-    optional: true
 
   quickjs-wasi@3.4.0: {}
 
@@ -29099,8 +29083,7 @@ snapshots:
       defu: 6.1.7
       destr: 2.0.5
 
-  re2js@1.3.3:
-    optional: true
+  re2js@1.3.3: {}
 
   react-devtools-core@6.1.5(bufferutil@4.1.0):
     dependencies:
@@ -29724,7 +29707,6 @@ snapshots:
   seek-bzip@2.0.0:
     dependencies:
       commander: 6.2.1
-    optional: true
 
   selderee@0.11.0:
     dependencies:
@@ -29992,8 +29974,7 @@ snapshots:
 
   smob@1.6.2: {}
 
-  smol-toml@1.8.0:
-    optional: true
+  smol-toml@1.8.0: {}
 
   socket.io-adapter@2.5.8(bufferutil@4.1.0)(supports-color@10.2.2):
     dependencies:
@@ -30072,11 +30053,9 @@ snapshots:
 
   sprintf-js@1.0.3: {}
 
-  sprintf-js@1.1.3:
-    optional: true
+  sprintf-js@1.1.3: {}
 
-  sql.js@1.14.2:
-    optional: true
+  sql.js@1.14.2: {}
 
   srvx@0.11.22: {}
 
@@ -30277,12 +30256,10 @@ snapshots:
   strnum@2.4.2:
     dependencies:
       anynum: 1.0.1
-    optional: true
 
   strtok3@10.3.5:
     dependencies:
       '@tokenizer/token': 0.3.0
-    optional: true
 
   structured-clone-es@2.0.1: {}
 
@@ -30530,7 +30507,6 @@ snapshots:
       '@borewit/text-codec': 0.2.2
       '@tokenizer/token': 0.3.0
       ieee754: 1.2.1
-    optional: true
 
   totalist@3.0.1: {}
 
@@ -31394,8 +31370,7 @@ snapshots:
     dependencies:
       sax: 1.6.1
 
-  xml-naming@0.3.0:
-    optional: true
+  xml-naming@0.3.0: {}
 
   xmlbuilder2@4.0.3:
     dependencies:

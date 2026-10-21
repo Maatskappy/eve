@@ -21,7 +21,7 @@ import {
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { openRequests, openSignIns, interaction } from "#protocol/session-reader.js";
+import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
   failure,
   interactionBatches,
@@ -30,7 +30,7 @@ import {
 } from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import { type Answer, parseAnswers } from "#shared/input.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution {

@@ -1,26 +1,38 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { RequestStatus } from "#protocol/session-projection/request-status.js";
+import type { DeliveryOutcome } from "#protocol/session-events/families/delivery.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 
-/** An accepted command: a serializable receipt and a stream through its own settlement. */
-export interface Delivery<TOutput = unknown> extends AsyncIterable<SessionStreamEvent> {
-  readonly sessionId: string;
-  readonly deliveryId: string;
-  /** Reads this delivery's settlement, independently of whether its session remains open. */
-  result(): Promise<DeliveryResult<TOutput>>;
+/** Options for one observation, independent of the accepted work and other reads. */
+export interface DeliveryReadOptions {
+  /** Aborts this read, not the accepted command. Use session.cancel() to cancel work. */
+  readonly signal?: AbortSignal;
 }
 
-/** What happened to one accepted request. */
-export interface DeliveryResult<TOutput = unknown> {
+/** An accepted command: a serializable receipt and reusable, independent reads. */
+export interface Delivery<TOutput = unknown> {
+  readonly sessionId: string;
+  readonly deliveryId: string;
+  /** Reads the admitting commit through the settlement's complete commit. */
+  stream(options?: DeliveryReadOptions): AsyncIterable<SessionStreamEvent>;
+  /** Waits for this delivery's settlement, not the end of its session. */
+  result(options?: DeliveryReadOptions): Promise<DeliveryResult<TOutput>>;
+}
+
+/** A settled request. Human input finishes this delivery; its answer is a new delivery. */
+export type DeliveryResult<TOutput = unknown> = {
   readonly deliveryId: string;
   readonly sessionId: string;
-  readonly status: RequestStatus;
+  readonly outcome: DeliveryOutcome;
   /** Whether the session ended in the response's final commit. */
   readonly sessionEnded: boolean;
   /** The reply's text, when the request produced one. */
   readonly reply: string | undefined;
   /** Structured output inferred from the supplied Standard Schema, when available. */
   readonly data: TOutput | undefined;
-  readonly events: SessionStreamEvent[];
   readonly interactions: readonly Interaction[];
-}
+} & (
+  | { readonly status: Exclude<RequestStatus, "failed">; readonly error?: never }
+  | { readonly status: "failed"; readonly error: ErrorInfo }
+);

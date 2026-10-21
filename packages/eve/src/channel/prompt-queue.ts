@@ -1,5 +1,5 @@
 import { firstOpenRequest } from "#channel/interaction-prompts.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
+import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import type { Interaction } from "#channel/interaction-prompts.js";
 
 /**
@@ -25,7 +25,7 @@ export function promptQueue<TChannel extends { state: PromptQueueState }>(
     _line: unknown,
     { channel, view }: { readonly channel: TChannel; readonly view: SessionView },
   ): Promise<void> => {
-    const first = firstOpenRequest(view);
+    const first = firstOpenRequest(sessionTables(view));
     if (first === undefined) {
       delete channel.state.shownPromptId;
       return;

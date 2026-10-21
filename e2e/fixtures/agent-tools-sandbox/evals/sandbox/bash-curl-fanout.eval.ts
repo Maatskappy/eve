@@ -1,4 +1,4 @@
-import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
+import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
@@ -88,13 +88,12 @@ function curlCallsReachBarrier(input: {
 }
 
 function curlBarrierResults(events: readonly SessionStreamEvent[]): readonly CurlBarrierResult[] {
-  const view = emptySessionView();
-  foldEvents(view, events);
+  const view = foldEvents(emptySessionView(), events);
 
-  return Object.values(view.calls).flatMap((call) => {
-    if (call.capability.name !== BASH_TOOL || call.outcome !== "completed") return [];
+  return calls(view).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.outcome !== "completed") return [];
 
-    return parseCurlBarrierResult(callOutputSource(view, call.callId)?.output);
+    return parseCurlBarrierResult(call.output);
   });
 }
 

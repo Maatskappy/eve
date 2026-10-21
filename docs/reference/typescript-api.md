@@ -182,9 +182,14 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                                  |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                                      |
 | [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, response errors                                                      |
+| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, authenticated `Session`, and `SessionNotActiveError`              |
+| [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Facts, opaque `SessionView`, immutable observations, and query/fold functions                                                  |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                             |
 
-Exported types ship from the entry point that owns them (for example `ToolDefinition` and `ToolContext` from `eve/tools`). Import fact and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return.
+Exported types ship from the entry point that owns them (for example `ToolDefinition` and `ToolContext` from `eve/tools`). Import fact and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return. Shared delivery/session contracts
+have one home, `eve/sessions`; client factories and transport-specific types stay in `eve/client`.
+`SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session.
+`ChannelContext` from `eve/channels` separates session information from continuation aliasing.
 
 `HistoryMessage` and the sandbox session, process, result, and method-option types are eve-owned. Their declarations do not change with your app's AI SDK peer version. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
 

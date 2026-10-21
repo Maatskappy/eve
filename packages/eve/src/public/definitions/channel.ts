@@ -34,7 +34,8 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelContext, ChannelContinuationOps } from "#shared/channel-context.js";
+export type { ChannelContext, ChannelContinuationOps } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
 export type { Delivery, DeliveryResult } from "#shared/delivery.js";
 export { SessionNotActiveError } from "#channel/session-not-active-error.js";
@@ -42,7 +43,7 @@ import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { FactPosition } from "#protocol/session-events/envelope.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
+import { snapshotOf, type SessionView } from "#protocol/session-projection/session-view.js";
 import { currentView } from "#harness/session-machine/current.js";
 import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
 import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/channel-definition.js";
@@ -58,7 +59,7 @@ export type {
   TurnPolicy,
 } from "#channel/types.js";
 export { SessionStrandedError } from "#channel/session-stranded-error.js";
-export type { Session, SessionHandle, SessionOperations } from "#channel/session.js";
+export type { Session } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   AudienceCaller,
@@ -190,18 +191,6 @@ export function isDisabledRouteSentinel(value: unknown): value is DisabledRouteS
 export type ChannelEventOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>;
 
 /** Continuation routing on the `ctx.channel` of every channel event handler. */
-export interface ChannelContinuationOps {
-  readonly continuation?: {
-    readonly token: string;
-    alias(token: string): void;
-  };
-}
-
-/**
- * Channel context passed to event handlers: `TCtx` intersected with
- * {@link ChannelContinuationOps}.
- */
-type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
 
 /**
  * What a channel event handler knows beyond the event it observes: the channel's own context,
@@ -213,7 +202,7 @@ export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends 
   readonly channel: TChannel;
   /** The position of the event's line, and its index in that line. */
   readonly position: FactPosition;
-  /** The session's tables as of the whole commit the event is in. */
+  /** Immutable observation snapshot of the whole commit the event is in. */
   readonly view: SessionView;
 }
 
@@ -223,7 +212,7 @@ export interface ChannelEventContext<TChannel = ChannelContinuationOps> extends 
  */
 export type ChannelEventHandler<T extends SessionEvent["type"], TCtx = void> = (
   event: ChannelEventOf<T>,
-  ctx: ChannelEventContext<ChannelContext<TCtx>>,
+  ctx: ChannelEventContext<TCtx & ChannelContinuationOps>,
 ) => void | Promise<void>;
 
 /**
@@ -234,7 +223,7 @@ export type ChannelEventHandler<T extends SessionEvent["type"], TCtx = void> = (
  */
 export type ChannelCommitHandler<TCtx = void> = (
   line: CommittedLine,
-  ctx: ChannelEventContext<ChannelContext<TCtx>>,
+  ctx: ChannelEventContext<TCtx & ChannelContinuationOps>,
 ) => void | Promise<void>;
 
 /**
@@ -364,22 +353,25 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     if (userHandler) {
       hasEventHandlers = true;
       eventHandlers[eventType] = (event: SessionEvent, adapterCtx: any) => {
-        const { session, position, scope: _scope, view, ...platformContext } = adapterCtx;
+        const {
+          session: _session,
+          continuation: _continuation,
+          position,
+          scope: _scope,
+          view,
+          ...platformContext
+        } = adapterCtx;
         const channel = {
           ...platformContext,
-          continuation:
-            session?.continuation === undefined
-              ? undefined
-              : {
-                  token: session.continuation.token,
-                  alias: (token: string) => session.continuation?.alias(token),
-                },
+          get continuation() {
+            return adapterCtx.continuation;
+          },
         };
         const ctx: ChannelEventContext<typeof channel> = {
           ...buildCallbackContext(),
           channel,
           position: position ?? { index: 0, line: 0 },
-          view: view ?? currentView(),
+          view: snapshotOf(view ?? currentView()),
         };
         return (
           userHandler as (
@@ -432,23 +424,31 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
 
     createAdapterContext(base): any {
       const state = base.state;
-      const session = base.session;
+      const channel: ChannelContext = {
+        session: base.session,
+        get continuation() {
+          return base.continuation;
+        },
+      };
       const channelCtx = hasContext
-        ? (definition.context as (s: any, session: SessionHandle) => any)(state, session)
+        ? (definition.context as (s: any, channel: ChannelContext) => any)(state, channel)
         : {};
 
       return {
         ...channelCtx,
         state,
         ctx: base.ctx,
-        session,
+        session: channel.session,
+        get continuation() {
+          return channel.continuation;
+        },
       };
     },
 
     async deliver(payload: DeliverPayload, adapterCtx) {
       const replacement = await definition.deliver?.(
         payload as ChannelDelivery<TState>,
-        adapterCtx as TCtx,
+        adapterCtx as TCtx & ChannelContext,
       );
       const delivered = defaultDeliverResult(replacement ?? payload);
       if (delivered === undefined) return undefined;

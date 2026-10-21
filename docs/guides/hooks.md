@@ -85,7 +85,7 @@ interface HookContext extends SessionContext {
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
   /** Where the event sits on the stream: its line, and its index in that line. */
   readonly position: { readonly line: number; readonly index: number };
-  /** The session's tables as of the whole commit the event is in. */
+  /** Immutable session snapshot as of the whole commit the event is in. */
   readonly view: SessionView;
   cancel(): void;
 }
@@ -115,8 +115,9 @@ failed stop, follows the normal
 
 `ctx.view` is the session's state as of the event's whole commit, folded by the same code as
 `eve/events`. Read what changed from the event, and where things stand from the view: for
-example, `ctx.view.calls[event.data.callId]` on a `call.settled` holds the call's capability and
-input as well as its outcome.
+example, `call(ctx.view, event.data.callId)` from `eve/events` on a `call.settled` returns its
+name, kind, input, output, and state. The view has no public tables; queries return immutable
+observations. A retained snapshot stays unchanged after later events.
 
 For `task.started`, `task.ended`, and `child.opened`, `ctx.session.id`
 identifies the session that started the task or opened the subagent session.
@@ -127,27 +128,28 @@ session's next turn. `child.opened` appears when the child session opens.
 
 ### Narrowing tool results
 
-`toolResultFrom` narrows a settled call to a specific authored tool or connection (MCP or OpenAPI) and returns typed output. Pass it the call's row from `ctx.view`, which carries the call's capability and output. Import it from `eve/tools`:
+`toolResultFrom` narrows a settled call to a specific authored tool or connection (MCP or OpenAPI) and returns typed output. Pass it the observation from `call(ctx.view, callId)`, which carries the call's name, kind, state, and output. Import it from `eve/tools`:
 
 ```ts
 import { defineHook } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
+import { call } from "eve/events";
 import getWeather from "../tools/get-weather";
 import linear from "../connections/linear";
 
 export default defineHook({
   events: {
     "call.settled"(event, ctx) {
-      const call = ctx.view.calls[event.data.callId];
+      const observed = call(ctx.view, event.data.callId);
 
       // Authored tool: output is typed as the tool's return type
-      const weather = toolResultFrom(call, getWeather);
+      const weather = toolResultFrom(observed, getWeather);
       if (weather) {
         console.log(weather.output.temperature);
       }
 
       // Connection: output is unknown, toolName is qualified
-      const linearResult = toolResultFrom(call, linear);
+      const linearResult = toolResultFrom(observed, linear);
       if (linearResult) {
         console.log(linearResult.connectionToolName, linearResult.output);
       }
@@ -162,9 +164,10 @@ This works for a mounted extension's tools too — import the tool from the exte
 
 ```ts
 import { search } from "@acme/crm/tools";
+import { call } from "eve/events";
 
 // inside "call.settled":
-const crmSearch = toolResultFrom(ctx.view.calls[event.data.callId], search); // typed; matches crm__search
+const crmSearch = toolResultFrom(call(ctx.view, event.data.callId), search); // typed; matches crm__search
 ```
 
 When one definition is mounted under more than one tool name, for example when a subagent re-exports an extension tool, `toolResultFrom` matches calls from every mounted name.

@@ -82,14 +82,18 @@ export class EvalSessionManager {
   }
 
   async send(message: SendTurnInput["message"], options: SendTurnOptions = {}) {
-    const { session, response } = await this.#client.sessions.create({
+    const { session, delivery } = await this.#client.sessions.create({
       turnPolicy: "queue",
       ...options,
       message,
       signal: options.signal ?? this.#signal,
     });
     const driver = this.#register(session);
-    return await driver.consume(response, message).result();
+    return await driver
+      .consume(delivery.stream({ signal: options.signal ?? this.#signal }), message, {
+        deliveryId: delivery.deliveryId,
+      })
+      .result();
   }
 
   attach(sessionId: string, options?: { readonly startIndex?: number }): EvalSessionDriver {

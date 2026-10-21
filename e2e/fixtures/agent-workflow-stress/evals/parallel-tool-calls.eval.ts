@@ -1,4 +1,4 @@
-import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
+import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
@@ -24,13 +24,12 @@ export default defineEval({
 });
 
 function everyCallReachedBarrier(events: readonly SessionStreamEvent[]): boolean {
-  const view = emptySessionView();
-  foldEvents(view, events);
+  const view = foldEvents(emptySessionView(), events);
 
-  const executions = Object.values(view.calls).flatMap((call) => {
-    if (call.capability.name !== FANOUT_TOOL_NAME || call.outcome !== "completed") return [];
+  const executions = calls(view).flatMap((call) => {
+    if (call.name !== FANOUT_TOOL_NAME || call.outcome !== "completed") return [];
 
-    const output = callOutputSource(view, call.callId)?.output;
+    const output = call.output;
     if (typeof output !== "object" || output === null) return [];
     const { concurrentCallsAtRelease, label } = output as Record<string, unknown>;
     return typeof concurrentCallsAtRelease === "number" && typeof label === "string"

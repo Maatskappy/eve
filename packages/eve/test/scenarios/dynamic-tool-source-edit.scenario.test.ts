@@ -104,13 +104,13 @@ describe("dynamic tool source edits across a restart", () => {
         const created = await client.sessions.create({ message: "Hello." });
         await expect(created.delivery.result()).resolves.toMatchObject({
           interactions: [],
-          status: "waiting",
+          status: "completed",
         });
 
         const waiting = await (
           await created.session.send("Call tools in parallel: alpha_marker, beta_marker")
         ).result();
-        expect(waiting.status).toBe("waiting");
+        expect(waiting.status).toBe("awaiting-input");
         expect(waiting.interactions).toHaveLength(2);
 
         // Edit the callback module while approvals are parked: pad the top of
@@ -147,7 +147,7 @@ describe("dynamic tool source edits across a restart", () => {
             })),
           )
         ).result();
-        expect(resumed.status).toBe("waiting");
+        expect(resumed.status).toBe("completed");
 
         // Pending approvals make the session ineligible for deployment
         // handoff. Each parked call must run its own tool — never the other

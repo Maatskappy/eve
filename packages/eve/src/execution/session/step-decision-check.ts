@@ -13,12 +13,16 @@ export function stepDisagreement(result: DurableStepResult, view: SessionView): 
   const turnId = activeTurn(view)?.turnId;
   const tables = turnId === undefined ? "no-turn" : (waiting(view, turnId)?.on ?? "session");
   const step =
-    result.action === "paused" ? (result.on === "person" ? "person" : "work") : result.action;
+    result.action === "paused"
+      ? result.on === "interaction"
+        ? "interaction"
+        : "work"
+      : result.action;
   const agrees =
-    (step === "person" && tables === "person") ||
+    (step === "interaction" && tables === "interaction") ||
     (step === "work" && tables === "work") ||
     (step === "continue" && tables === "session") ||
-    (step === "parked" && (tables === "no-turn" || tables === "person"));
+    (step === "parked" && (tables === "no-turn" || tables === "interaction"));
   if (agrees) return undefined;
   if (
     result.action === "paused" &&

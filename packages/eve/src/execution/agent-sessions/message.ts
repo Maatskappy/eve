@@ -1,5 +1,9 @@
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { MessageContent, MessagePart } from "#shared/message-content.js";
+import {
+  MAX_MESSAGE_PARTS,
+  type MessageContent,
+  type MessagePart,
+} from "#shared/message-content.js";
 
 /** Workflow messages carry references, not attachment bytes, through durable step inputs. */
 export function normalizeAgentMessage(
@@ -10,7 +14,7 @@ export function normalizeAgentMessage(
       throw new TypeError("ctx.agent().send() requires a non-empty message.");
     return message;
   }
-  if (!Array.isArray(message) || message.length === 0 || message.length > 64) {
+  if (!Array.isArray(message) || message.length === 0 || message.length > MAX_MESSAGE_PARTS) {
     throw new TypeError("ctx.agent().send() requires text or between 1 and 64 text/file parts.");
   }
   const parts = message.map((part: MessagePart<string | URL>): MessagePart<string> & JsonObject => {

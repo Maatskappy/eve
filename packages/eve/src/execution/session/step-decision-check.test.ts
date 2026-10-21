@@ -5,7 +5,7 @@ import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
 
 const fields = { history: [], serializedContext: {}, sessionState: {} as never };
-const paused = (on: "person" | "calls", dispatch = false) =>
+const paused = (on: "interaction" | "calls", dispatch = false) =>
   ({
     action: "paused",
     on,
@@ -37,7 +37,7 @@ describe("stepDisagreement", () => {
         },
       },
     } as never;
-    expect(stepDisagreement(paused("person"), view)).toBe("person-but-session");
+    expect(stepDisagreement(paused("interaction"), view)).toBe("interaction-but-session");
     expect(stepDisagreement(paused("calls", true), view)).toBe("dispatch-deferred");
     const cancel = { callId: "c_1", kind: "eve__task_cancel", taskId: "t_1" } as const;
     expect(

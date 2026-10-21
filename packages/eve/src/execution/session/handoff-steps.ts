@@ -1,6 +1,6 @@
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
-import { openRequests, openSignIns } from "#protocol/session-reader.js";
+import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { holdsHitlRequests } from "#harness/hitl/index.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";

@@ -13,7 +13,7 @@ const IMESSAGE_INSTRUCTIONS = `
 - If they want to update long-term memory, tell them to edit **Settings → Profile** on the web app.`;
 
 function instructionsForChannel(kind: string | undefined, base: string) {
-  if (kind === "sendblue") {
+  if (kind === "channel:sendblue") {
     return `${base}${IMESSAGE_INSTRUCTIONS}`;
   }
   return base;

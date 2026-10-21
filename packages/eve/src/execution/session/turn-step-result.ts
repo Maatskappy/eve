@@ -2,7 +2,7 @@ import { storedProjection } from "#harness/session-machine/view.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import {
   pausedOnCalls,
-  pausedOnPerson,
+  pausedOnInteraction,
   pausedOnTasks,
 } from "#execution/session/pending-turn-state.js";
 import type {
@@ -43,7 +43,7 @@ export function resolveSessionStepResult(
   }
   if (stepResult.held?.kind === "request") {
     const projection = storedProjection(stepResult.session.state);
-    return { action: "paused", ...pausedOnPerson(stepResult.session, projection), ...values };
+    return { action: "paused", ...pausedOnInteraction(stepResult.session, projection), ...values };
   }
   if (stepResult.next !== null) return { action: "continue", ...values };
 

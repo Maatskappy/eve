@@ -82,5 +82,9 @@ export function normalizeSaveMemoryInput(input: SaveMemoryInput | undefined) {
 }
 
 export function isSaveMemoryPending(part: EveToolUIPart) {
-  return part.interaction?.status === "open" && part.interaction.request.kind === "approval";
+  return (
+    part.interaction?.status === "open" &&
+    part.interaction.request.kind === "approval" &&
+    part.interaction.answer === undefined
+  );
 }

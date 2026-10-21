@@ -1,6 +1,11 @@
 import { internalSession } from "#channel/session.js";
 import { parseToolStubs } from "#tool-stubs/rules.js";
-import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/message-content.js";
+import {
+  MAX_MESSAGE_PARTS,
+  type MessageContent,
+  type MessageFilePart,
+  type MessageTextPart,
+} from "#shared/message-content.js";
 
 import type {
   SessionAuthContext,
@@ -452,6 +457,14 @@ function parseMessageField(value: unknown): MessageContent | undefined | Respons
   }
 
   if (value.length === 0) return undefined;
+  if (value.length > MAX_MESSAGE_PARTS)
+    return Response.json(
+      {
+        ok: false,
+        error: `Expected at most ${MAX_MESSAGE_PARTS} message parts. Combine text or reduce attachments.`,
+      },
+      { status: 400 },
+    );
 
   const parts: Array<MessageTextPart | MessageFilePart> = [];
   for (const raw of value) {

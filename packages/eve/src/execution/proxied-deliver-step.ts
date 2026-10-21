@@ -100,7 +100,7 @@ async function routeProxiedDeliver(
     const owned = interactionOwner(tables, row).turnId;
     if (owned !== undefined && tables.turns[owned]?.status === "running") return owned;
     // Detached tasks have no turn owner, but a task-wait can hold the active turn on their prompts.
-    return blocked?.on === "person" &&
+    return blocked?.on === "interaction" &&
       blocked.interactions.some((request) => request.interactionId === row.interactionId)
       ? currentTurn?.turnId
       : undefined;

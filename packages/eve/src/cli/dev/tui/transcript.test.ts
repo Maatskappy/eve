@@ -20,7 +20,6 @@ function project(events: readonly SessionEvent[]) {
   events.forEach((event, index) => conversation.observe(stampTestEvent(event, index)));
   const snapshot: SessionStoreSnapshot = {
     ...conversation.state,
-    view: conversation.view,
     error: undefined,
     events: [],
     session: undefined,

@@ -1,3 +1,4 @@
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
 /** Pure pieces of the transcript projection: tool rows, task lines, and agent steps. */
 
@@ -65,9 +66,9 @@ export interface AgentActivity {
 
 export function taskNeedsApproval(conversation: ConversationState, task: TaskRow): boolean {
   if (
-    Object.values(conversation.view.interactions).some(
+    Object.values(sessionTables(conversation.view).interactions).some(
       (input) =>
-        interactionOwner(conversation.view, input).taskId === task.taskId &&
+        interactionOwner(sessionTables(conversation.view), input).taskId === task.taskId &&
         input.status === "open" &&
         input.request.kind === "approval",
     )
@@ -78,7 +79,7 @@ export function taskNeedsApproval(conversation: ConversationState, task: TaskRow
     agent?.observation.status === "not-followed" ? undefined : agent?.observation.conversation;
   return (
     child !== undefined &&
-    Object.values(child.view.interactions).some(
+    Object.values(sessionTables(child.view).interactions).some(
       (input) => input.status === "open" && input.request.kind === "approval",
     )
   );
@@ -338,8 +339,9 @@ export function taskCallsById(
   conversation: ConversationState,
 ): Map<string, { task: TaskRow; call: CallRow }> {
   const calls = new Map<string, { task: TaskRow; call: CallRow }>();
-  for (const call of Object.values(conversation.view.calls)) {
-    const task = call.taskId === undefined ? undefined : conversation.view.tasks[call.taskId];
+  for (const call of Object.values(sessionTables(conversation.view).calls)) {
+    const task =
+      call.taskId === undefined ? undefined : sessionTables(conversation.view).tasks[call.taskId];
     if (task !== undefined) calls.set(call.callId, { task, call });
   }
   return calls;

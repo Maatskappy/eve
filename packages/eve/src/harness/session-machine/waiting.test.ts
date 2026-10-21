@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
-import { waiting } from "#protocol/session-projection/selectors.js";
+import { openInteractions, waiting } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { announceWaiting } from "#harness/session-machine/waiting.js";
 
@@ -47,10 +47,10 @@ const approval: SessionEvent = {
 };
 
 describe("waiting", () => {
-  it("is undefined while the model runs, and a person once only one can go on", () => {
-    expect(waiting(viewOf(started, [callRequested, approval]), turnId)).toBeUndefined();
+  it("waits on the session while the model runs, and an interaction once only an answer can go on", () => {
+    expect(waiting(viewOf(started, [callRequested, approval]), turnId)).toEqual({ on: "session" });
     expect(waiting(viewOf(started, [callRequested, approval, modelSettled]), turnId)).toMatchObject(
-      { interactions: [{ interactionId: "i_1" }], on: "person" },
+      { interactions: [{ interactionId: "i_1" }], on: "interaction" },
     );
   });
 
@@ -63,7 +63,29 @@ describe("waiting", () => {
     expect(waiting(view, turnId)).toMatchObject({ calls: [{ callId: "c_1" }], on: "work" });
   });
 
-  it("waits on the person signing in for a call their sign-in stopped, until it calls back", () => {
+  it("includes every working task when a task wait parks", () => {
+    const view = viewOf(started, [
+      callRequested,
+      {
+        data: { kind: "agent", name: "helper", startedBy: { callId: "c_1" }, taskId: "t_1" },
+        type: "task.started",
+      },
+      { data: { callId: "c_1", taskId: "t_1" }, type: "call.started" },
+      {
+        data: {
+          callId: "c_wait",
+          capability: { kind: "control", name: "eve__task_wait" },
+          owner: { runId: "run_0" },
+        },
+        type: "call.requested",
+      },
+      { data: { callId: "c_wait" }, type: "call.started" },
+      modelSettled,
+    ]);
+    expect(waiting(view, turnId)).toMatchObject({ on: "work", tasks: [{ taskId: "t_1" }] });
+  });
+
+  it("waits on the interaction signing in for a call until it calls back", () => {
     const signIn: SessionEvent = {
       data: {
         interactionId: "i_github",
@@ -80,7 +102,7 @@ describe("waiting", () => {
     ] as SessionEvent[];
     expect(waiting(viewOf(started, [...stopped, signIn]), turnId)).toMatchObject({
       interactions: [{ interactionId: "i_github" }],
-      on: "person",
+      on: "interaction",
     });
     const calledBack = viewOf(
       started,
@@ -94,10 +116,10 @@ describe("waiting", () => {
         },
       ],
     );
-    expect(waiting(calledBack, turnId)).toBeUndefined();
+    expect(waiting(calledBack, turnId)).toEqual({ on: "session" });
   });
 
-  it("is undefined while a task cancel waits for the session, though the task asked someone", () => {
+  it("waits on the session for a task cancel, though the task asked for input", () => {
     const taskId = "t_1";
     const view = viewOf(
       started,
@@ -146,10 +168,10 @@ describe("waiting", () => {
         },
       ],
     );
-    expect(waiting(view, turnId)).toBeUndefined();
+    expect(waiting(view, turnId)).toEqual({ on: "session" });
   });
 
-  it("is undefined once a delivery the turn hasn't read joins it", () => {
+  it("waits on the session once a delivery the turn hasn't read joins it", () => {
     const view = viewOf(
       started,
       [callRequested, approval, modelSettled],
@@ -162,7 +184,20 @@ describe("waiting", () => {
         },
       ],
     );
-    expect(waiting(view, turnId)).toBeUndefined();
+    expect(waiting(view, turnId)).toEqual({ on: "session" });
+  });
+
+  it("is undefined for unknown and settled turns", () => {
+    expect(waiting(viewOf(started), "missing")).toBeUndefined();
+    const settled = viewOf(started, [
+      modelSettled,
+      {
+        data: { turnId, outcome: "completed" },
+        scope: { turnId },
+        type: "turn.settled",
+      },
+    ]);
+    expect(waiting(settled, turnId)).toBeUndefined();
   });
 });
 
@@ -177,7 +212,7 @@ describe("announceWaiting", () => {
     type: "interaction.opened",
   };
 
-  it("pauses the turn when a step leaves it waiting on a person", () => {
+  it("pauses the turn when a step leaves it waiting on an interaction", () => {
     const before = viewOf(started);
     const after = viewOf(started, [callRequested, approval, modelSettled]);
     expect(announceWaiting(before, after)).toEqual([
@@ -241,8 +276,12 @@ describe("announceWaiting", () => {
     ]);
     expect(waiting(answered, turnId)).toMatchObject({
       interactions: [{ interactionId: "i_2" }],
-      on: "person",
+      on: "interaction",
     });
+    // An admitted answer is not yet a settled interaction while the batch is weighed.
+    expect(
+      openInteractions(answered, { about: { callId: "c_1" } }).map((row) => row.interactionId),
+    ).toEqual(["i_1", "i_2"]);
     expect(announceWaiting(before, answered)).toContainEqual({
       data: { deliveryId: "d_2", outcome: "awaiting-input", turnId },
       type: "delivery.settled",

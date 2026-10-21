@@ -347,12 +347,13 @@ To retain an extension tool's result type in a consumer hook, import its definit
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
 import { toolResultFrom } from "eve/tools";
+import { call } from "eve/events";
 import { search } from "@acme/crm/tools";
 
 export default defineHook({
   events: {
     "call.settled"(event, ctx) {
-      const match = toolResultFrom(ctx.view.calls[event.data.callId], search);
+      const match = toolResultFrom(call(ctx.view, event.data.callId), search);
       if (match) console.log(match.output);
     },
   },

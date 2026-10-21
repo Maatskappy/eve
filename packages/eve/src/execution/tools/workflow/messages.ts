@@ -271,7 +271,7 @@ function isWorkflowToolRunAnswer(value: unknown): value is WorkflowToolRunAnswer
 
 function isPrincipal(value: unknown): value is Principal {
   if (typeof value !== "object" || value === null) return false;
-  const { id, issuer, type } = value as Record<string, unknown>;
+  const { id, type, issuer } = value as Record<string, unknown>;
   return (
     typeof id === "string" &&
     typeof type === "string" &&

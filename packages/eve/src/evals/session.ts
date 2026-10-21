@@ -1,6 +1,12 @@
 import type { Delivery } from "#shared/delivery.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
-import { copyView, foldReceivedEvent, viewOfEvents } from "#protocol/session-projection/fold.js";
+import type { DeliveryOutcome } from "#protocol/session-events/families/delivery.js";
+import type { ErrorInfo } from "#protocol/session-events/envelope.js";
+import {
+  emptySessionView,
+  foldEvents,
+  openInteractions,
+  type SessionView,
+} from "#protocol/session-projection/public-view.js";
 import type { RequestStatus } from "#protocol/session-projection/request-status.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readFile } from "node:fs/promises";
@@ -8,8 +14,6 @@ import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
 import { followClientSession, type ClientSession } from "#client/session.js";
-import { openInteractions } from "#protocol/session-projection/selectors.js";
-import { interaction } from "#protocol/session-reader.js";
 import type {
   ClientSessionState,
   SendTurnInput,
@@ -23,7 +27,7 @@ import type { ChildOpened } from "#protocol/session-events/families/child.js";
 import { failureOf, ResponseSegment, summarizeTurnEvents } from "#client/session-utils.js";
 import { deliveryEvents } from "#client/delivery-events.js";
 import type { Answer } from "#shared/input.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
@@ -60,7 +64,7 @@ export class EveEvalTurnFailedError extends Error {
 
   constructor(turn: EveEvalTurn) {
     const event = turn.events.find((candidate) => failureOf(candidate) !== undefined);
-    const error = event === undefined ? undefined : failureOf(event);
+    const error = turn.error;
     const detail =
       event === undefined || error === undefined
         ? `turn ended with status "${turn.status}"`
@@ -133,7 +137,7 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   get view(): SessionView {
-    return viewOfEvents([...this.#history, ...this.#events]).view;
+    return foldEvents(emptySessionView(), [...this.#history, ...this.#events]);
   }
 
   get transcript(): string {
@@ -370,17 +374,17 @@ export class EvalSessionDriver implements EveEvalSession {
 
   #recordTurn(input: {
     readonly data: unknown;
+    readonly outcome?: DeliveryOutcome;
+    readonly error?: ErrorInfo;
     readonly events: readonly SessionStreamEvent[];
     readonly message: string | undefined;
     readonly sessionId: string;
     readonly sessionEnded: boolean;
-    readonly status: RequestStatus;
+    readonly status: RequestStatus | "working";
   }): EveEvalTurn {
     this.#events.push(...input.events);
     const view = this.view;
-    const interactions = openInteractions(view).flatMap(
-      (row) => interaction(view, row.interactionId) ?? [],
-    );
+    const interactions = openInteractions(view);
     this.#pendingInteractions = input.status === "awaiting-input" ? interactions : [];
 
     const derived = deriveRunFacts(input.events, {
@@ -390,6 +394,8 @@ export class EvalSessionDriver implements EveEvalSession {
     const turn = new EvalTurn({
       collector: this.#collector,
       data: input.data,
+      outcome: input.outcome,
+      error: input.error,
       view,
       sessionEnded: input.sessionEnded,
       derived,
@@ -414,6 +420,8 @@ export class EvalSessionDriver implements EveEvalSession {
     const summary = summarizeTurnEvents(events, deliveryId);
     return this.#recordTurn({
       data: summary.result,
+      outcome: summary.outcome,
+      error: summary.failure,
       events,
       message: summary.message,
       sessionEnded: summary.sessionEnded,
@@ -451,6 +459,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   readonly sessionId: string;
   readonly #completion: Promise<EveEvalTurn>;
   readonly #initialView: SessionView;
+  readonly #earlier: SessionStreamEvent[] = [];
   readonly #events: SessionStreamEvent[] = [];
   readonly #waiters = new Set<LiveEventWaiter>();
   #waitError: Error | undefined;
@@ -482,9 +491,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   }
 
   get view(): SessionView {
-    const view = copyView(this.#initialView);
-    for (const event of this.#events) foldReceivedEvent(view, event);
-    return view;
+    return foldEvents(this.#initialView, [...this.#earlier, ...this.#events]);
   }
 
   async cancel(): Promise<Delivery> {
@@ -558,13 +565,12 @@ class EvalLiveTurn implements EveEvalLiveTurn {
       // delivery settles without one, as an answer routed to a child does.
       const turn = new ResponseSegment();
       const delivery = deliveryId === undefined ? undefined : new ResponseSegment({ deliveryId });
-      const earlier: SessionStreamEvent[] = [];
+      const earlier = this.#earlier;
       const events =
         deliveryId === undefined
           ? source
           : deliveryEvents(source, deliveryId, undefined, (event) => {
               earlier.push(event);
-              foldReceivedEvent(this.#initialView, event);
               observe(event);
             });
       for await (const event of events) {
@@ -632,6 +638,8 @@ interface EvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 class EvalTurn implements EveEvalTurn {
   readonly data: unknown;
+  readonly outcome?: DeliveryOutcome;
+  readonly error?: ErrorInfo;
   readonly view: SessionView;
   readonly sessionEnded: boolean;
   readonly events: readonly SessionStreamEvent[];
@@ -639,7 +647,7 @@ class EvalTurn implements EveEvalTurn {
   readonly reply: string | undefined;
   readonly session: EveEvalSession;
   readonly sessionId: string;
-  readonly status: RequestStatus;
+  readonly status: RequestStatus | "working";
   readonly toolCalls: readonly EveEvalToolCall[];
   readonly #collector: AssertionCollector;
   readonly #derived: EveEvalDerivedFacts;
@@ -648,6 +656,8 @@ class EvalTurn implements EveEvalTurn {
     readonly collector: AssertionCollector;
     readonly view: SessionView;
     readonly sessionEnded: boolean;
+    readonly outcome?: DeliveryOutcome;
+    readonly error?: ErrorInfo;
     readonly data: unknown;
     readonly derived: EveEvalDerivedFacts;
     readonly events: readonly SessionStreamEvent[];
@@ -655,10 +665,12 @@ class EvalTurn implements EveEvalTurn {
     readonly message: string | undefined;
     readonly session: EveEvalSession;
     readonly sessionId: string;
-    readonly status: RequestStatus;
+    readonly status: RequestStatus | "working";
     readonly toolCalls: readonly EveEvalToolCall[];
   }) {
     this.data = input.data;
+    this.outcome = input.outcome;
+    this.error = input.error;
     this.view = input.view;
     this.sessionEnded = input.sessionEnded;
     this.events = input.events;

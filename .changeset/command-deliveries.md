@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Session commands now return serializable, followable `Delivery` receipts, with request statuses distinct from session termination and explicit retryability on `SessionNotActiveError`; answers follow the turn work they resume. Session handles use `id`/`stream()` with one line-indexed `SessionStreamOptions`, `SessionInfo` matches `ctx.session`, client handles are type-only exports, local resets become `newSession()`, eval/CLI results use `reply`/`data`, and `invokeTool` returns call-shaped outcomes.
+Session commands return serializable `Delivery` receipts with reusable, independently abortable `stream()` and `result()` reads; settled results carry the delivery outcome and failure details without retaining an event log. Import shared contracts from `eve/sessions`, query immutable session snapshots through `eve/events`, and use channel context—not session information—for continuation aliasing; client handles remain type-only, local fresh starts use `newSession()`, eval/CLI results use `reply`/`data`, and `invokeTool` returns call-shaped outcomes.

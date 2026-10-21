@@ -5,7 +5,7 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
-import type { SettledCallRow } from "#public/tools/result.js";
+import type { ToolResultSource } from "#public/tools/result.js";
 import { defineTool } from "#tools/definition.js";
 import { sleep } from "#tools/provided/sleep.js";
 import { noReply } from "#tools/provided/no-reply.js";
@@ -114,11 +114,12 @@ describe("toolResultFrom identity for resolved tools", () => {
   });
 });
 
-function toolResult(toolName: string): SettledCallRow {
+function toolResult(toolName: string): ToolResultSource {
   return {
     callId: "call_1",
-    capability: { kind: "tool", name: toolName },
-    outcome: "completed",
+    kind: "tool",
+    name: toolName,
+    state: "completed",
     output: null,
   };
 }

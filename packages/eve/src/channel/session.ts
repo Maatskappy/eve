@@ -1,6 +1,6 @@
 import type { RemoteChildBinding } from "#execution/child-binding.js";
-import type { SessionOperations } from "#shared/session.js";
-export type { SessionOperations } from "#shared/session.js";
+import type { SessionReader } from "#shared/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import { commandDelivery } from "#channel/delivery.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ContextAccessor } from "#context/key.js";
@@ -12,6 +12,7 @@ import {
 import type { MessageContent } from "#shared/message-content.js";
 import type {
   SessionStreamOptions,
+  SessionControlOptions,
   Runtime,
   SessionAuthContext,
   SessionCallback,
@@ -21,6 +22,7 @@ import type {
 import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
   AuthKey,
   ContinuationHookTokensKey,
@@ -28,14 +30,23 @@ import {
   InitiatorAuthKey,
   SessionIdKey,
 } from "#context/keys.js";
-import { type Answer, parseAnswers } from "#shared/input.js";
+import { type Answer, type StrictAnswers, parseAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /** Immutable-ID handle for one exact durable session. */
-export interface Session extends SessionOperations {
+export interface Session extends SessionReader {
+  send(message: MessageContent, options: SessionSendOptions): Promise<Delivery>;
+  respond<const TAnswers extends readonly Answer[]>(
+    answers: StrictAnswers<TAnswers>,
+    options: SessionRespondOptions,
+  ): Promise<Delivery>;
+  cancel(options?: SessionControlOptions & { readonly turnId?: string | null }): Promise<Delivery>;
+  clear(options?: SessionControlOptions): Promise<Delivery>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
+  reset(options?: SessionControlOptions & { readonly reason?: string }): Promise<Delivery>;
   /**
    * Opens the recorded stream. Following it throws `SessionStrandedError`
    * while its owner is stranded; `follow: false` reads recorded history up to
@@ -77,23 +88,6 @@ export type SessionRespondOptions = SessionDeliveryOptions;
 
 interface InternalSessionDeliveryOptions extends SessionDeliveryOptions {
   readonly callback?: SessionCallback;
-}
-
-/**
- * Live handle to the current session, exposed on `ctx.session` to
- * `deliver` and event handlers. The framework hydrates the read-only
- * fields from the active context at step start. A write through
- * `continuation.alias()` selects a new current address and records it so the
- * runtime can add its hook to the session inbox at the next step boundary.
- * Previously claimed addresses remain active.
- */
-export interface SessionHandle {
-  readonly id: string;
-  readonly auth: SessionAuth;
-  readonly continuation?: {
-    readonly token: string;
-    alias(rawToken: string): void;
-  };
 }
 
 export function createSession(
@@ -213,26 +207,19 @@ function createDelivery(metadata: Partial<ChannelDeliverySource>) {
   return createChannelDeliveryMetadata({ channelKind: "http", channelName: "http", ...metadata });
 }
 
-/**
- * Builds a live {@link SessionHandle} backed by the active context
- * accessor. Read-only fields resolve through getters so they reflect
- * any updates made by other handlers within the same step (e.g. the
- * `deliver` hook seeding `AuthKey` before an event handler reads
- * `session.auth`).
- *
- * Used by {@link buildAdapterContext} to populate `ctx.session` on
- * every adapter handler invocation.
- */
-export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
+/** Live metadata and routing authority stay separate, including when auth changes mid-step. */
+export function buildChannelContext(accessor: ContextAccessor): ChannelContext {
   return {
-    get id() {
-      return accessor.get(SessionIdKey) ?? "";
-    },
-    get auth(): SessionAuth {
-      return {
-        current: accessor.get(AuthKey) ?? null,
-        initiator: accessor.get(InitiatorAuthKey) ?? null,
-      };
+    session: {
+      get id() {
+        return accessor.get(SessionIdKey) ?? "";
+      },
+      get auth(): SessionAuth {
+        return {
+          current: accessor.get(AuthKey) ?? null,
+          initiator: accessor.get(InitiatorAuthKey) ?? null,
+        };
+      },
     },
     get continuation() {
       const currentToken = accessor.get(ContinuationTokenKey);

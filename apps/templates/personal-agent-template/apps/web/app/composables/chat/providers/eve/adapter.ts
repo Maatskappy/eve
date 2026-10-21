@@ -34,6 +34,7 @@ function uiPart(part: EveMessagePart): UIMessage["parts"][number] | undefined {
     case "tool":
       return toolPart(part);
     case "interaction":
+      if (part.request.kind === "sign-in") return undefined;
       return toolPart({
         type: "tool",
         callId: part.interactionId,

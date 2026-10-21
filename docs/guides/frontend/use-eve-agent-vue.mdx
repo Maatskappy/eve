@@ -46,7 +46,7 @@ The state fields are computed refs; the commands are ordinary methods:
 
 | Property                                                                                    | Vue shape                                       |
 | ------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `messages`, `previews`, `agents`                                                            | Computed refs for each projected snapshot field |
+| `messages`, `agents`                                                                        | Computed refs for each projected snapshot field |
 | `view`                                                                                      | `ComputedRef<SessionView>`                      |
 | `status`                                                                                    | `ComputedRef<UseEveAgentStatus>`                |
 | `error`                                                                                     | `ComputedRef<Error \| undefined>`               |
@@ -68,14 +68,14 @@ an interaction; its response rows and eventual settlement are authoritative.
 ```vue
 <script setup lang="ts">
 import { computed } from "vue";
-import { interaction, openInteractions } from "eve/events";
+import { openInteractions } from "eve/events";
 import { useEveAgent } from "eve/vue";
 
 const { view, status, respond } = useEveAgent();
 const pendingRequests = computed(() =>
-  openInteractions(view.value)
-    .flatMap((row) => interaction(view.value, row.interactionId) ?? [])
-    .filter((item) => item.request.kind !== "sign-in" && item.answer === undefined),
+  openInteractions(view.value).filter(
+    (item) => item.request.kind !== "sign-in" && item.answer === undefined,
+  ),
 );
 </script>
 

@@ -570,7 +570,7 @@ const response = await reviewer.send("Review the deployment plan for security ri
   outputSchema: z.object({ findings: z.array(z.string()) }),
   signal: ctx.abortSignal,
 });
-const { data, message, status } = await response.result();
+const { data, reply, status } = await response.result();
 ```
 
 Set `model` when the workflow should run a local child with a different AI Gateway model. The
@@ -633,15 +633,15 @@ A message sent while the session's turn is running joins that turn, and its resp
 that turn's result. If the turn ends before the agent reads the message, the message starts the next
 turn instead, and its response resolves with that turn's result. The responses of earlier messages
 that are still waiting resolve with the same result. A message sent while the session is idle starts
-the next turn, and the session keeps its conversation between turns. `result()` returns the
-client's `MessageResult` fields, plus `error` when the turn failed:
+the next turn, and the session keeps its conversation between turns. `result()` returns:
 
-| Field     | Description                                                                                                                                                                                                         |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`    | The structured value, when the turn requested `outputSchema`.                                                                                                                                                       |
-| `message` | The agent's final reply text, when the turn did not request `outputSchema`.                                                                                                                                         |
-| `status`  | `"waiting"` when the session waits for its next message, `"completed"` when the session ended with the turn, or `"failed"` when the turn failed. A cancelled turn is `"waiting"` with neither `data` nor `message`. |
-| `error`   | `{ message }` with the reason the turn failed, present only when `status` is `"failed"`.                                                                                                                            |
+| Field          | Description                                                                                               |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `data`         | The structured value, when the turn requested `outputSchema`.                                             |
+| `reply`        | The agent's final reply text, when available.                                                             |
+| `status`       | `"completed"`, `"failed"`, or `"cancelled"`. Completion does not by itself mean the session ended.        |
+| `sessionEnded` | Whether the session ended in the response's final commit.                                                 |
+| `error`        | `{ message }` with the reason the turn failed. Required when `status` is `"failed"` and absent otherwise. |
 
 Every `ctx.agent(name, options?)` call returns a new session that only the workflow run can address.
 The model does not see it; it sees what the tool returns. A local child runs as the caller's principal with the

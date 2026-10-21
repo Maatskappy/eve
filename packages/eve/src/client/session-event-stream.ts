@@ -6,11 +6,11 @@ export interface SessionEventStreamOptions {
   readonly startIndex?: number;
   readonly headers?: Readonly<Record<string, string>>;
   readonly streamReconnectPolicy?: SessionStreamOptions["streamReconnectPolicy"];
-  readonly onEvent: (event: SessionStreamEvent) => void;
+  readonly onEvent: (event: SessionStreamEvent, historical: boolean) => void;
   readonly onError: (error: unknown) => void;
 }
 
-/** One continuously folded transport; commands never consume a second response stream. */
+/** One continuously folded UI transport, independent of explicit Delivery reads. */
 export class SessionEventStream {
   readonly #controller = new AbortController();
   readonly #caughtUp = Promise.withResolvers<void>();
@@ -23,16 +23,20 @@ export class SessionEventStream {
     this.setOptions(options);
     void this.caughtUp.catch(() => {});
     void (async () => {
+      let historical = true;
       try {
         for await (const event of followClientSession(session, {
           signal: this.#controller.signal,
           resolveHeaders: () => this.#headers,
           resolveReconnectPolicy: () => this.#reconnectPolicy,
           startIndex: options.startIndex,
-          onCaughtUp: () => this.#caughtUp.resolve(),
+          onCaughtUp: () => {
+            historical = false;
+            this.#caughtUp.resolve();
+          },
         })) {
           if (this.#controller.signal.aborted) return;
-          options.onEvent(event);
+          options.onEvent(event, historical);
           if (event.type === "session.ended") break;
         }
         this.#caughtUp.resolve();

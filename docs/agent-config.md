@@ -195,7 +195,7 @@ fails the turn.
   return per-model values from the handler.
 
 The `session.started` runtime identity does not include a model id for a
-dynamic agent. Each public `step.started` event reports the concrete `modelId`
+dynamic agent. Each `model.started` event reports the concrete `modelId`
 selected for that model call.
 
 ## Reasoning effort

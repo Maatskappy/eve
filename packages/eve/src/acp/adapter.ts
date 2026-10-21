@@ -125,7 +125,7 @@ export class EveAcpAdapter {
       new Client({
         auth: options.auth,
         headers: options.headers,
-        host: options.serverUrl,
+        baseUrl: options.serverUrl,
         redirect: "manual",
       });
   }

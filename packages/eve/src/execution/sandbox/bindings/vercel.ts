@@ -619,7 +619,7 @@ function createHandle(input: {
         createOptions: input.createOptions,
         loadDeleteSandboxModule: input.loadDeleteSandboxModule,
         sandbox,
-        signal: options?.abortSignal,
+        signal: options?.signal,
       });
     },
     async onSandboxStop() {
@@ -645,7 +645,7 @@ function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSan
         cwd: options.workingDirectory ?? WORKSPACE_ROOT,
         detached: true,
         env: options.env,
-        signal: options.abortSignal,
+        signal: options.signal,
       });
       return adaptMultiplexedCommandToSandboxProcess({
         command,
@@ -657,14 +657,14 @@ function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSan
     },
     async writeFile(options: SandboxWriteFileOptions) {
       const bytes = await streamToBuffer(options.content);
-      const path = await resolveVercelWritePath(sandbox, options.path, options.abortSignal);
-      await sandbox.writeFiles([{ content: bytes, path }], { signal: options.abortSignal });
+      const path = await resolveVercelWritePath(sandbox, options.path, options.signal);
+      await sandbox.writeFiles([{ content: bytes, path }], { signal: options.signal });
     },
     async removePath(options: SandboxRemovePathOptions) {
       await sandbox.fs.rm(options.path, {
         force: options.force,
         recursive: options.recursive,
-        signal: options.abortSignal,
+        signal: options.signal,
       });
     },
   };

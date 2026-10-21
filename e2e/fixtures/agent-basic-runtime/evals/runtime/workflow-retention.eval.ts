@@ -18,7 +18,7 @@ export default defineEval({
       const readHistory = () =>
         t.target.fetch(`${sessionPath}/stream?follow=false&startIndex=0`, {
           headers,
-          signal: t.signal,
+          signal: t.abortSignal,
         });
       const live = await readHistory();
       await t.require(live.status, equals(200));
@@ -27,7 +27,7 @@ export default defineEval({
       const reset = await t.target.fetch(`${sessionPath}/reset`, {
         headers,
         method: "POST",
-        signal: t.signal,
+        signal: t.abortSignal,
       });
       await t.require(reset.status, equals(202));
       await reset.body?.cancel();
@@ -54,7 +54,7 @@ export default defineEval({
         } catch (error) {
           // A purge can interrupt a read after the server commits its 200 response.
           if (!(error instanceof TypeError)) throw error;
-          t.signal.throwIfAborted();
+          t.abortSignal.throwIfAborted();
           continue;
         }
         if (body.trim().length === 0) {

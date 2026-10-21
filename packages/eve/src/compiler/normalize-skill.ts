@@ -71,7 +71,7 @@ export async function compileSkillSource(
         license: definition.license,
         logicalPath: source.logicalPath,
         owner: options.owner,
-        markdown: definition.markdown,
+        content: definition.content,
         metadata:
           definition.metadata === undefined
             ? undefined
@@ -125,7 +125,7 @@ export async function compileSkillSource(
       files: definition.files,
       license: definition.license,
       logicalPath: source.logicalPath,
-      markdown: definition.markdown,
+      content: definition.content,
       metadata:
         definition.metadata === undefined
           ? undefined
@@ -150,7 +150,7 @@ function compileSkillPackageSource(
     license: source.license,
     logicalPath: source.logicalPath,
     owner,
-    markdown: source.markdown,
+    content: source.content,
     metadata:
       source.metadata === undefined
         ? undefined

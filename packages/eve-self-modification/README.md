@@ -9,7 +9,7 @@ eve add eve/self-modification
 The command creates `agent/extensions/self-modification/extension.ts`:
 
 ```ts
-import selfModification from "eve/self-modification/local";
+import selfModification from "eve/extensions/self-modification/local";
 
 export default selfModification({
   // model: "provider/model",

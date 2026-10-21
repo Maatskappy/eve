@@ -22,7 +22,6 @@ export {
   type TelegramEventContext,
   type TelegramHandle,
   type TelegramInboundResult,
-  type TelegramInboundResultOrPromise,
   type TelegramReceiveTarget,
 } from "#public/channels/telegram/telegramChannel.js";
 
@@ -31,7 +30,6 @@ export {
   type TelegramApiOptions,
   type TelegramApiResponse,
   type TelegramBotToken,
-  type TelegramCredentials,
   type TelegramEphemeralMessageParameters,
   type TelegramFetch,
   type TelegramMessageBody,

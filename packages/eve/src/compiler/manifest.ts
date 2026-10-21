@@ -692,7 +692,7 @@ const compiledSkillBaseFields = {
   deferred: z.boolean().optional(),
   description: z.string(),
   license: z.string().optional(),
-  markdown: z.string(),
+  content: z.string(),
   metadata: z.record(z.string(), z.string()).optional(),
   sourceId: z.string(),
   logicalPath: z.string(),

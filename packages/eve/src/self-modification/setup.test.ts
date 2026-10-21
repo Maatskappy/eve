@@ -21,7 +21,7 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
   return runInNewContext(
     source
       .replace('import { getToken } from "@vercel/connect";', "")
-      .replace('import selfModification from "eve/self-modification/remote";', "")
+      .replace('import selfModification from "eve/extensions/self-modification/remote";', "")
       .replace("export default ", ""),
     {
       getToken,
@@ -34,14 +34,14 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
 describe("self-modification setup", () => {
   it("recognizes the current local mount without migrating retired configuration", () => {
     expect(renderSelfModificationConfig()).toContain(
-      'import selfModification from "eve/self-modification/local";',
+      'import selfModification from "eve/extensions/self-modification/local";',
     );
     expect(renderSelfModificationConfig()).toContain('// model: "provider/model"');
     expect(classifySelfModificationConfig(renderSelfModificationConfig())).toBe("local");
     expect(
       classifySelfModificationConfig(
         renderSelfModificationConfig().replace(
-          '"eve/self-modification/local"',
+          '"eve/extensions/self-modification/local"',
           '"eve/self-modification"',
         ),
       ),
@@ -66,7 +66,9 @@ describe("self-modification setup", () => {
     expect(source).toContain('directory: "apps/support"');
     expect(source).toContain('target: { branch: "release/production" }');
     expect(source).toContain('import { getToken } from "@vercel/connect"');
-    expect(source).toContain('import selfModification from "eve/self-modification/remote"');
+    expect(source).toContain(
+      'import selfModification from "eve/extensions/self-modification/remote"',
+    );
     expect(source).not.toContain("deployed: {");
     expect(source).toContain('return await getToken("github/selfmod-acme-agents"');
     expect(source).toContain("async resolve({ capability, repository })");

@@ -5,7 +5,7 @@ import { equals } from "eve/evals/expect";
 export default defineEval({
   description: "Cancelled inspection does not prevent an agent's first chat.",
   async test(t) {
-    const client = new Client({ host: t.target.url });
+    const client = new Client({ baseUrl: t.target.url });
     // Keep the harness's authorization for both local and deployed targets.
     client.fetch = (path, init) => t.target.fetch(path, init);
     const controller = new AbortController();

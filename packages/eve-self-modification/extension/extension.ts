@@ -1,1 +1,1 @@
-export { default } from "eve/self-modification/local";
+export { default } from "eve/extensions/self-modification/local";

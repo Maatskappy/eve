@@ -10,7 +10,7 @@ import type { TurnPolicy } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ToolStub } from "#tool-stubs/types.js";
-export type { HealthResult } from "#client/health-schema.js";
+export type { HealthResult } from "#client/health-types.js";
 
 export type {
   AgentInfoChannelEntry,
@@ -31,7 +31,7 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
-} from "./agent-info-schema.js";
+} from "./agent-info-types.js";
 
 /**
  * Static credential value or per-request credential resolver.
@@ -78,7 +78,7 @@ export interface ClientOptions {
    * Base URL of the eve agent server. Query parameters are included on every
    * request; request-specific parameters override parameters with the same name.
    */
-  readonly host: string;
+  readonly baseUrl: string;
 
   /**
    * Authentication configuration. The client resolves credentials before each

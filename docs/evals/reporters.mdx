@@ -11,15 +11,15 @@ Reporters attach in two places. Declare them in `evals.config.ts` to observe **e
 
 ## Braintrust
 
-`Braintrust(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
+`braintrustReporter(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
   judge: { model: "typesafe-ai/jev" },
-  reporters: [Braintrust({ projectName: "weather-agent" })],
+  reporters: [braintrustReporter({ projectName: "weather-agent" })],
 });
 ```
 
@@ -27,10 +27,10 @@ Need a destination for only some evals? Attach it per eval instead:
 
 ```ts title="evals/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
-import { Braintrust } from "eve/evals/reporters";
+import { braintrustReporter } from "eve/evals/reporters";
 
 export default defineEval({
-  reporters: [Braintrust({ projectName: "weather-agent" })],
+  reporters: [braintrustReporter({ projectName: "weather-agent" })],
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
     t.succeeded();
@@ -46,14 +46,14 @@ Braintrust needs its SDK installed in the app and credentials in the environment
 
 ## Datadog
 
-`Datadog(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
+`datadogReporter(...)` uploads eval assertion scores to a Datadog LLM Observability Experiment. Put one instance in the config so it covers the whole run:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
-import { Datadog } from "eve/evals/reporters";
+import { datadogReporter } from "eve/evals/reporters";
 
 export default defineEvalConfig({
-  reporters: [Datadog({ projectName: "weather-agent" })],
+  reporters: [datadogReporter({ projectName: "weather-agent" })],
 });
 ```
 
@@ -69,7 +69,7 @@ Datadog needs `dd-trace` installed in the app and Datadog credentials in the env
 
 ## JUnit
 
-`JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
+`junitReporter({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
 
 ```bash
 eve eval --strict --junit .eve/junit.xml

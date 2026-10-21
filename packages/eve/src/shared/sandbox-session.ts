@@ -6,7 +6,7 @@ export interface SandboxRunOptions {
   workingDirectory?: string;
   /** Per-command environment overrides; avoids embedding credentials in command strings. */
   env?: Record<string, string>;
-  abortSignal?: AbortSignal;
+  signal?: AbortSignal;
 }
 
 /** Result of a completed sandbox command. */
@@ -31,7 +31,7 @@ export interface SandboxProcess {
 /** Options for reading a file; relative paths resolve from `/workspace`. */
 export interface SandboxReadFileOptions {
   path: string;
-  abortSignal?: AbortSignal;
+  signal?: AbortSignal;
 }
 
 /** Options for reading all bytes of a file. */
@@ -47,7 +47,7 @@ export interface SandboxReadTextFileOptions extends SandboxReadFileOptions {
 interface WriteOptions<T> {
   path: string;
   content: T;
-  abortSignal?: AbortSignal;
+  signal?: AbortSignal;
 }
 
 /** Writes a byte stream, creating parent directories and overwriting existing content. */
@@ -63,7 +63,7 @@ export interface SandboxWriteTextFileOptions extends WriteOptions<string> {
 
 /** Removes a path; relative paths resolve from `/workspace`. */
 export interface SandboxRemovePathOptions {
-  readonly abortSignal?: AbortSignal;
+  readonly signal?: AbortSignal;
   readonly force?: boolean;
   readonly path: string;
   readonly recursive?: boolean;

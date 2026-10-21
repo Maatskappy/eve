@@ -351,7 +351,10 @@ export async function handleInteractionPost(
       });
       const slackCtx: SlackInteractionContext = {
         ...bindSlackSessionOperations({
-          address: slackContinuationToken(interaction.channelId, interaction.threadTs),
+          address: slackContinuationToken({
+            channelId: interaction.channelId,
+            threadTs: interaction.threadTs,
+          }),
           defaultAuth: buildSlackAuthContext({
             channelId: interaction.channelId,
             installationTeamId: interaction.installationTeamId,
@@ -504,7 +507,7 @@ async function dispatchBlockAnswers(input: {
   const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx
-        .from(slackContinuationToken(channelId, threadTs))
+        .from(slackContinuationToken({ channelId, threadTs }))
         .respond(input.submission.answers, {
           auth: result.auth,
           state: withSlackResponder(undefined, input.submission.user.id),
@@ -599,7 +602,7 @@ async function openFreeformModal(input: {
   const channelId = decoded?.route?.channelId ?? input.interaction.channelId;
   const threadTs = decoded?.route?.threadTs ?? input.interaction.threadTs;
   const metadata: HitlFreeformModalMetadata = {
-    continuationToken: slackContinuationToken(channelId, threadTs),
+    continuationToken: slackContinuationToken({ channelId: channelId, threadTs: threadTs }),
     channelId,
     installationTeamId: input.interaction.installationTeamId,
     messageChannelId: input.interaction.channelId,

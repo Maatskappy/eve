@@ -40,7 +40,7 @@ async function read(input: { readonly startIndex: number; readonly follow?: bool
   const positions: number[] = [];
   for await (const { position } of followStreamLines({
     follow: input.follow,
-    host: "https://eve.test",
+    baseUrl: "https://eve.test",
     path: "/eve/v1/session/s/stream",
     resolveHeaders: async () => new Headers(),
     startIndex: input.startIndex,

@@ -4,12 +4,8 @@ import { interaction, type Interaction } from "#protocol/session-reader.js";
 import type { Delivery } from "#shared/delivery.js";
 import { optionStyle } from "#channel/interaction-prompts.js";
 import { type ConversationState } from "#client/conversation-state.js";
-import {
-  attachEveAgentStore,
-  detachEveAgentStore,
-  EveAgentStore,
-} from "#client/eve-agent-store.js";
-import { isAbortError } from "#client/eve-agent-store-helpers.js";
+import { attachSessionStore, detachSessionStore, SessionStore } from "#client/session-store.js";
+import { isAbortError } from "#client/session-store-helpers.js";
 import { formatStrandedSessionNotice } from "./stranded-session.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
@@ -410,7 +406,7 @@ function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
 export class EveTUIRunner {
   readonly #client: Client;
   /** Owns the conversation's sessions, root stream, turns, and subagent streams. */
-  readonly #store: EveAgentStore;
+  readonly #store: SessionStore;
   /** The terminal's presentation facts, folded from the store's events. */
   readonly #renderer: AgentTUIRenderer;
   readonly #diagnostics?: DevDiagnostics;
@@ -490,7 +486,7 @@ export class EveTUIRunner {
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     if (options.diagnostics !== undefined) this.#diagnostics = options.diagnostics;
     this.#renderer = createRenderer(options);
-    this.#store = new EveAgentStore({
+    this.#store = new SessionStore({
       client: options.client,
       followAgents: true,
     });
@@ -624,7 +620,7 @@ export class EveTUIRunner {
     if (this.#lifecycle?.signal.aborted === true) onStop();
     else this.#lifecycle?.signal.addEventListener("abort", onStop, { once: true });
     const unsubscribe = this.#store.subscribe(() => this.#renderSnapshot());
-    attachEveAgentStore(this.#store);
+    attachSessionStore(this.#store);
     try {
       await this.#run();
     } catch (error) {
@@ -635,7 +631,7 @@ export class EveTUIRunner {
       this.#authProbeAbort.abort();
       this.#inputController?.abort();
       unsubscribe();
-      detachEveAgentStore(this.#store);
+      detachSessionStore(this.#store);
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint

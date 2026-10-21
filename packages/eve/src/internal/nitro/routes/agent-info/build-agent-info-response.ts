@@ -156,7 +156,7 @@ export function buildAgentInfoResponse(
         ...toOwnedSource(manifest, skill),
         description: skill.description,
         license: skill.license,
-        markdown: skill.markdown,
+        markdown: skill.content,
         metadata: skill.metadata,
         name: skill.name,
       })),

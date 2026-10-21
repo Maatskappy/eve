@@ -43,7 +43,7 @@ export function createEvalContext(deps: {
 
     // Run context.
     context: deps.setupContext,
-    signal: deps.signal,
+    abortSignal: deps.signal,
     target: deps.target,
     log: deps.log,
     sleep: (ms) => sleep(ms, deps.signal),

@@ -3,7 +3,6 @@ import {
   isMicrosandboxPlatformSupported,
 } from "#execution/sandbox/bindings/local.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import type { MicrosandboxSandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
@@ -15,7 +14,10 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export interface DefaultSandboxEnvironmentOptions {
   readonly docker?: DockerSandboxEnvironmentOptions;
-  readonly justBash?: JustBashSandboxCreateOptions;
+  readonly justBash?: {
+    readonly autoInstall?: boolean;
+    readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
+  };
   readonly microsandbox?: MicrosandboxSandboxCreateOptions;
   readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
   readonly vercel?: VercelSandboxCreateOptions;
@@ -39,6 +41,14 @@ export function defineDefaultSandboxProvider(probes: DefaultSandboxProbes) {
   return {
     name: "default",
     environment(options: DefaultSandboxEnvironmentOptions = {}): SandboxEnvironment<undefined> {
+      if (
+        options.justBash &&
+        Object.keys(options.justBash).some((key) => key !== "autoInstall" && key !== "prepare")
+      ) {
+        throw new Error(
+          "DefaultSandbox justBash settings support autoInstall and prepare only. Use JustBashSandbox.environment() for customCommands or filesystem.",
+        );
+      }
       if (probes.isDeployedOnVercel()) {
         return withoutOpenOptions(
           createDefaultVercelEnvironment(withPreparation(options.vercel, options.prepare)),

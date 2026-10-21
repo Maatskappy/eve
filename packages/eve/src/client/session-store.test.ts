@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  detachEveAgentStore,
-  EveAgentStore,
-  type EveAgentStoreInit,
-} from "#client/eve-agent-store.js";
+  detachSessionStore,
+  SessionStore,
+  type SessionStoreInit,
+} from "#client/session-store.js";
 import { testTurnFacts } from "#internal/testing/events.js";
 import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 import {
@@ -14,14 +14,14 @@ import {
 } from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
-const stores: EveAgentStore[] = [];
-function store(options: EveAgentStoreInit = {}) {
-  const result = new EveAgentStore({ host: "https://eve.test", ...options });
+const stores: SessionStore[] = [];
+function store(options: SessionStoreInit = {}) {
+  const result = new SessionStore({ host: "https://eve.test", ...options });
   stores.push(result);
   return result;
 }
 afterEach(() => {
-  for (const current of stores.splice(0)) detachEveAgentStore(current);
+  for (const current of stores.splice(0)) detachSessionStore(current);
   vi.restoreAllMocks();
 });
 
@@ -100,7 +100,7 @@ function agent(onPost?: (deliveryId: string, path: string) => Promise<void> | vo
   });
   return { append, log, reads, posts, cancellations };
 }
-function texts(current: EveAgentStore) {
+function texts(current: SessionStore) {
   return current.snapshot.messages.map(
     (message) =>
       `${message.role}: ${message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")}`,
@@ -108,7 +108,7 @@ function texts(current: EveAgentStore) {
 }
 const initialSession = { sessionId: "session_1", streamIndex: 0 };
 
-describe("EveAgentStore acceptance and observation", () => {
+describe("SessionStore acceptance and observation", () => {
   it("resolves a send at acceptance, then observes its turn on the one session stream", async () => {
     const server = agent();
     const current = store();
@@ -253,7 +253,7 @@ describe("EveAgentStore acceptance and observation", () => {
   });
 });
 
-describe("EveAgentStore Stop during submission", () => {
+describe("SessionStore Stop during submission", () => {
   it.each([undefined, initialSession])(
     "waits for the submitted delivery's turn before cancelling (session: %j)",
     async (savedSession) => {
@@ -415,7 +415,7 @@ describe("EveAgentStore Stop during submission", () => {
   });
 });
 
-describe("EveAgentStore committed snapshots", () => {
+describe("SessionStore committed snapshots", () => {
   it("reports a mid-line stream failure without exposing the unfinished line", async () => {
     const server = agent();
     const current = store();
@@ -472,7 +472,7 @@ describe("EveAgentStore committed snapshots", () => {
   });
 });
 
-describe("EveAgentStore with followIdle disabled", () => {
+describe("SessionStore with followIdle disabled", () => {
   it("reopens the stream from the folded line cursor on the next send", async () => {
     const server = agent();
     const current = store({ followIdle: false });

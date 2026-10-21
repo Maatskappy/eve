@@ -22,7 +22,7 @@ describe("Client.sessions", () => {
         { status: 202 },
       );
     });
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const created = await client.sessions.create();
     expectTypeOf(created).toEqualTypeOf<CreatedIdleClientSession>();
@@ -99,7 +99,7 @@ describe("Client.sessions", () => {
         .catch(() => "");
       return response;
     });
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
     const { delivery, session } = await client.sessions.create({
       message: "Return a structured answer.",
       outputSchema: { type: "object", properties: { answer: { type: "string" } } },
@@ -143,7 +143,7 @@ describe("Client.sessions", () => {
           { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
         );
       });
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const input: SendTurnInput<{ answer: string }> = { message: "hello" };
     const created = await client.sessions.create(input);
@@ -167,7 +167,7 @@ describe("Client.sessions", () => {
         { status: 202 },
       );
     });
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const session = client.sessions.attach("wrun_A");
     expect(requests).toHaveLength(0);

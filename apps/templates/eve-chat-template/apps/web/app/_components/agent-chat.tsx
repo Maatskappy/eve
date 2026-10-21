@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClientSessionState, EveAgentStoreSnapshot, SessionStreamEvent } from "eve/client";
+import type { ClientSessionState, SessionStoreSnapshot, SessionStreamEvent } from "eve/client";
 import { activity, interaction, type Interaction } from "eve/events";
 import type { EveMessage } from "eve/react";
 import { useEveAgent } from "eve/react";
@@ -123,7 +123,7 @@ export function AgentChatSession({
   }, []);
 
   const persistSnapshot = useCallback(
-    async (snapshot: EveAgentStoreSnapshot) => {
+    async (snapshot: SessionStoreSnapshot) => {
       const chatId = activeChatIdRef.current;
 
       if (!viewer || !chatId) return;
@@ -220,7 +220,7 @@ export function AgentChatSession({
     .map(toPendingAuthorization);
   const isWaitingForAuthorization = pendingAuthorizations.length > 0;
 
-  const latestSnapshotRef = useRef<EveAgentStoreSnapshot>(agent);
+  const latestSnapshotRef = useRef<SessionStoreSnapshot>(agent);
   latestSnapshotRef.current = agent;
   // Save phase boundaries, not each progress or optimistic-only update. Commands resolve on
   // acceptance; a pause or completed catch-up is observed through shared state.

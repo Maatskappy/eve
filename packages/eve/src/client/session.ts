@@ -48,7 +48,7 @@ interface FollowSessionOptions extends SessionStreamOptions {
  * configuration without depending on the full {@link Client} class.
  */
 export interface ClientSessionContext {
-  readonly host: string;
+  readonly baseUrl: string;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
@@ -221,7 +221,7 @@ export class ClientSession implements SessionOperations<
   /**
    * The session an agent run opened, as this session's stream linked it.
    * Pass a `child.opened` event from this session, then follow the child
-   * with `stream()`; reads use this session's host and credentials, for local
+   * with `stream()`; reads use this session's base URL and credentials, for local
    * and remote agents alike.
    */
   agent(opened: ChildOpened): ClientAgentSession {
@@ -303,7 +303,7 @@ export class ClientSession implements SessionOperations<
     return followStreamIterable({
       onCaughtUp: input.onCaughtUp,
       follow: input.follow,
-      host: this.#context.host,
+      baseUrl: this.#context.baseUrl,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
       path: createEveSessionStreamRoutePath(this.#state.sessionId),
       redirect: this.#context.redirect,
@@ -352,7 +352,7 @@ async function postCreateSession(
   const headers = await context.resolveHeaders(options.headers);
   const body = options.stubs === undefined ? undefined : JSON.stringify({ stubs: options.stubs });
   if (body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.host, EVE_SESSION_ROUTE_PATH), {
+  const response = await fetch(createClientUrl(context.baseUrl, EVE_SESSION_ROUTE_PATH), {
     body,
     headers,
     method: "POST",
@@ -389,7 +389,7 @@ async function postTurn(
 
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
-  const response = await fetch(createClientUrl(context.host, path), {
+  const response = await fetch(createClientUrl(context.baseUrl, path), {
     body: JSON.stringify(body),
     headers,
     method: "POST",

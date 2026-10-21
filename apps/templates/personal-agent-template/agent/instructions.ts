@@ -25,20 +25,20 @@ export default defineDynamic({
       const userId = ctx.session.auth.current?.principalId;
       if (!userId || userId.startsWith("eve:")) {
         return defineInstructions({
-          markdown: instructionsForChannel(ctx.channel.kind, BASE_INSTRUCTIONS),
+          content: instructionsForChannel(ctx.channel.kind, BASE_INSTRUCTIONS),
         });
       }
 
       const context = await fetchUserContext(userId);
       if (!context) {
         return defineInstructions({
-          markdown: instructionsForChannel(ctx.channel.kind, BASE_INSTRUCTIONS),
+          content: instructionsForChannel(ctx.channel.kind, BASE_INSTRUCTIONS),
         });
       }
 
       const userBlock = buildUserContextPrompt(context);
       return defineInstructions({
-        markdown: instructionsForChannel(
+        content: instructionsForChannel(
           ctx.channel.kind,
           `${BASE_INSTRUCTIONS}\n\n---\n\n${userBlock}`,
         ),

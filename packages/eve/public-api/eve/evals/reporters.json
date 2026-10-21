@@ -1,14 +1,14 @@
 [
-  "Braintrust",
   "BraintrustReporterConfig",
-  "Console",
   "ConsoleReporterConfig",
-  "Datadog",
   "DatadogReporterConfig",
   "EvalReporter",
   "EveEvalCompleteContext",
   "EveEvalSessionStartEvent",
   "EveEvalStartEvent",
-  "JUnit",
-  "JUnitReporterConfig"
+  "JUnitReporterConfig",
+  "braintrustReporter",
+  "consoleReporter",
+  "datadogReporter",
+  "junitReporter"
 ]

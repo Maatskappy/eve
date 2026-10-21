@@ -1,3 +1,4 @@
+import { normalizeSkillDefinition } from "#internal/authored-definition/core.js";
 import type { ModelMessage } from "ai";
 
 import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
@@ -65,11 +66,6 @@ interface DynamicSkillUpdate {
   readonly skills: readonly MaterializableSkillPackage[];
 }
 
-interface DynamicSkillResolution {
-  readonly resolver: ResolvedDynamicSkillResolver;
-  readonly named: readonly { name: string; entry: SkillPackageDefinition }[];
-}
-
 interface SandboxSkillPackage {
   readonly revision: string;
   readonly skill: MaterializableSkillPackage;
@@ -79,7 +75,7 @@ function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillM
   return {
     deferred: skill.deferred === true ? true : undefined,
     description: skill.description,
-    markdown: skill.markdown,
+    markdown: skill.content,
     name: skill.name,
     ...(skill.files.length > 1 ? { revision: skillPackageRevision(skill) } : {}),
   };
@@ -165,7 +161,7 @@ export async function resolveDynamicSkills(input: {
       if (handler === undefined) return null;
 
       const rawResult = await handler(event.fact, resolveCtx);
-      if (rawResult === null || rawResult === undefined) return { resolver, named: [] };
+      if (rawResult === null || rawResult === undefined) return { resolver, skills: [] };
 
       let entries: Record<string, SkillPackageDefinition>;
       let isSingle: boolean;
@@ -178,7 +174,18 @@ export async function resolveDynamicSkills(input: {
       }
 
       const named = qualifyDynamicSkillNames(resolver, isSingle, entries);
-      return { resolver, named } satisfies DynamicSkillResolution;
+      return {
+        resolver,
+        skills: named.map(({ name, entry }) =>
+          normalizeSkillPackage({
+            ...normalizeSkillDefinition(
+              entry,
+              `Dynamic skill resolver "${resolver.logicalPath}" returned an invalid skill "${name}".`,
+            ),
+            name,
+          }),
+        ),
+      } satisfies DynamicSkillUpdate;
     }),
   );
 
@@ -190,12 +197,7 @@ export async function resolveDynamicSkills(input: {
       continue;
     }
     if (outcome.value === null) continue;
-    updates.push({
-      resolver: outcome.value.resolver,
-      skills: outcome.value.named.map(({ name, entry }) =>
-        normalizeSkillPackage({ ...entry, name }),
-      ),
-    });
+    updates.push(outcome.value);
   }
 
   if (updates.length === 0) return;

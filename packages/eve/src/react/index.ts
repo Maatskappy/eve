@@ -1,7 +1,7 @@
 export {
   useEveAgent,
   type PrepareSend,
-  type UseEveAgentHelpers,
+  type UseEveAgentReturn,
   type UseEveAgentOptions,
   type UseEveAgentSnapshot,
   type UseEveAgentStatus,

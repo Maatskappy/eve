@@ -149,7 +149,7 @@ https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applic
 
 - **Credentials.** Vercel Connect authenticates callers with your project's Vercel OIDC token, which other hosts don't have, so give the relay the bot token directly. The agent can keep using Connect.
 - **URL.** The relay can't read `VERCEL_PROJECT_PRODUCTION_URL`, so pass the agent's URL as `url`.
-- **Auth.** The route's default auth accepts only your Vercel project's own runtime. Use a shared secret instead: `basic()` from `eve/agents/auth` signs the relay's requests, and `httpBasic()` on `gateway.auth` checks them.
+- **Auth.** The route's default auth accepts only your Vercel project's own runtime. Use a shared secret instead: `httpBasic()` from `eve/agents/auth` signs the relay's requests, and `httpBasic()` from `eve/channels/auth` on `gateway.auth` checks them.
 
 Generate a long random secret, for example with `openssl rand -hex 32`, and set it as `DISCORD_RELAY_SECRET` on both the agent's Vercel project and the relay's host. On the agent:
 
@@ -172,13 +172,13 @@ export default discordChannel({
 On the relay, set `DISCORD_BOT_TOKEN` to the token from **Bot** → **Reset Token** in the Discord Developer Portal, and `EVE_URL` to the agent's production URL:
 
 ```ts title="relay/main.ts"
-import { basic } from "eve/agents/auth";
+import { httpBasic } from "eve/agents/auth";
 import { experimental_runDiscordGatewayRelay } from "eve/channels/discord/gateway";
 
 await experimental_runDiscordGatewayRelay({
   // Reads DISCORD_BOT_TOKEN when `credentials` is omitted.
   url: process.env.EVE_URL,
-  auth: basic({ username: "discord-relay", password: process.env.DISCORD_RELAY_SECRET! }),
+  auth: httpBasic({ username: "discord-relay", password: process.env.DISCORD_RELAY_SECRET! }),
 });
 ```
 

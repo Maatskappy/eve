@@ -1,9 +1,9 @@
-import type { EveAgentStore, EveAgentStoreSnapshot } from "eve/client";
+import type { SessionStore, SessionStoreSnapshot } from "eve/client";
 
 /** Waits on the frontend's own stream, not another reader's progress or HTTP acceptance. */
 export async function waitForStore(
-  store: EveAgentStore,
-  matches: (snapshot: EveAgentStoreSnapshot) => boolean,
+  store: SessionStore,
+  matches: (snapshot: SessionStoreSnapshot) => boolean,
   signal?: AbortSignal,
 ): Promise<void> {
   const waiting = AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])]);

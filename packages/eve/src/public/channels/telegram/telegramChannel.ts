@@ -1,3 +1,5 @@
+import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
+export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
@@ -24,7 +26,6 @@ import {
   telegramContinuationToken,
   type TelegramApiOptions,
   type TelegramApiResponse,
-  type TelegramCredentials,
   type TelegramMessageBody,
   type TelegramMessageResult,
 } from "#public/channels/telegram/api.js";
@@ -69,11 +70,7 @@ import {
   stateFromTelegramMessage,
   telegramContinuationTokenFromState,
 } from "#public/channels/telegram/state.js";
-import {
-  verifyTelegramRequest,
-  type TelegramWebhookSecretToken,
-  type TelegramWebhookVerifier,
-} from "#public/channels/telegram/verify.js";
+import { verifyTelegramRequest } from "#public/channels/telegram/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { telegramInstrumentation } from "#public/channels/telegram/audience.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -117,11 +114,6 @@ export interface TelegramChannelState extends TelegramHitlState {
 }
 
 /** Telegram channel credentials. `webhookVerifier` is a custom inbound webhook verifier for forwarded webhooks. */
-export interface TelegramChannelCredentials extends TelegramCredentials {
-  /** Webhook secret token configured via setWebhook. Falls back to `TELEGRAM_WEBHOOK_SECRET_TOKEN` when neither this nor `webhookVerifier` is set. */
-  readonly webhookSecretToken?: TelegramWebhookSecretToken;
-  readonly webhookVerifier?: TelegramWebhookVerifier;
-}
 
 /** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` resumes an existing thread; `initialMessage` posts a seed message and starts a new thread from it. The two are mutually exclusive: supplying both throws. */
 export interface TelegramReceiveTarget {
@@ -142,7 +134,6 @@ export type TelegramInboundResult = {
 } | null;
 
 /** Sync or async {@link TelegramInboundResult}. */
-export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
 type TelegramEventHandler<T extends SessionEvent["type"]> = (
   event: ChannelEventOf<T>,
@@ -187,7 +178,7 @@ export interface TelegramChannelConfig {
   readonly onMessage?: (
     ctx: TelegramContext,
     message: TelegramMessage,
-  ) => TelegramInboundResultOrPromise;
+  ) => TelegramInboundResult | Promise<TelegramInboundResult>;
   /** Override the default webhook route path (`/eve/v1/telegram`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */

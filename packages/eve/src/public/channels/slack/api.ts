@@ -59,7 +59,13 @@ export type SlackBotToken = string | ((context: SlackBotTokenContext) => string 
  * may be empty for threadless sessions; the channel auto-anchors on its
  * first post.
  */
-export function slackContinuationToken(channelId: string, threadTs: string): string {
+export function slackContinuationToken({
+  channelId,
+  threadTs,
+}: {
+  readonly channelId: string;
+  readonly threadTs: string;
+}): string {
   return `${channelId}:${threadTs}`;
 }
 

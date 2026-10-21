@@ -2,10 +2,10 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { Client } from "#client/client.js";
 import type {
-  EveAgentStoreCallbacks,
-  EveAgentStoreInit,
-  EveAgentStoreSnapshot,
-} from "#client/eve-agent-store-state.js";
+  SessionStoreCallbacks,
+  SessionStoreInit,
+  SessionStoreSnapshot,
+} from "#client/session-store-state.js";
 import { StreamDelivery, type Delivery } from "#client/delivery.js";
 import { deliveryEvents } from "#client/delivery-events.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
@@ -21,25 +21,25 @@ import {
   assertExclusiveTurnInput,
   isAbortError,
   waitWithSignal,
-} from "#client/eve-agent-store-helpers.js";
+} from "#client/session-store-helpers.js";
 import { activeTurn, failure, idle } from "#protocol/session-projection/selectors.js";
 import { openSignIns } from "#protocol/session-reader.js";
 import { toError } from "#shared/errors.js";
 import type { SendTurnPayload } from "#client/types.js";
 
 export type {
-  EveAgentStoreCallbacks,
-  EveAgentStoreInit,
-  EveAgentStoreSnapshot,
-  EveAgentStoreStatus,
+  SessionStoreCallbacks,
+  SessionStoreInit,
+  SessionStoreSnapshot,
+  SessionStoreStatus,
   PrepareSend,
-} from "#client/eve-agent-store-state.js";
+} from "#client/session-store-state.js";
 
-const detachStore = Symbol("detachEveAgentStore");
-const attachStore = Symbol("attachEveAgentStore");
+const detachStore = Symbol("detachSessionStore");
+const attachStore = Symbol("attachSessionStore");
 
 /** An observable durable session. Commands resolve on acceptance; only its stream changes its lifecycle. */
-export class EveAgentStore {
+export class SessionStore {
   readonly #client: Client | undefined;
   readonly #autoPrewarm: boolean;
   readonly #followChildStreams: boolean;
@@ -52,19 +52,19 @@ export class EveAgentStore {
   readonly #pending = new Set<Promise<string | undefined>>();
   readonly #accepted = new Set<string>();
   #attached = false;
-  #callbacks: EveAgentStoreCallbacks = {};
+  #callbacks: SessionStoreCallbacks = {};
   #controller = new AbortController();
   #creation: Promise<Delivery | undefined> | undefined;
   #resumePromise: Promise<void> | undefined;
   #session: ClientSession | undefined;
   #error: Error | undefined;
   #events: readonly SessionStreamEvent[];
-  #snapshot: EveAgentStoreSnapshot;
+  #snapshot: SessionStoreSnapshot;
   #inLine = false;
   #posting = 0;
   #finishes = 0;
 
-  constructor(init: EveAgentStoreInit) {
+  constructor(init: SessionStoreInit) {
     this.#autoPrewarm = init.prewarm ?? false;
     this.#followChildStreams = init.followAgents ?? false;
     this.#followIdle = init.followIdle ?? true;
@@ -75,7 +75,7 @@ export class EveAgentStore {
         new Client({
           auth: init.auth,
           headers: init.headers,
-          host: init.host ?? "",
+          baseUrl: init.baseUrl ?? "",
         }));
     this.#conversationClient = new ConversationClient(() => this.#publish());
     this.#events = (init.initialEvents ?? []).filter((event) =>
@@ -96,11 +96,11 @@ export class EveAgentStore {
     this.#snapshot = this.#createSnapshot();
   }
 
-  get snapshot(): EveAgentStoreSnapshot {
+  get snapshot(): SessionStoreSnapshot {
     return this.#snapshot;
   }
 
-  setCallbacks(callbacks: EveAgentStoreCallbacks): void {
+  setCallbacks(callbacks: SessionStoreCallbacks): void {
     this.#callbacks = callbacks;
   }
 
@@ -504,7 +504,7 @@ export class EveAgentStore {
     this.#publish();
   }
 
-  #createSnapshot(): EveAgentStoreSnapshot {
+  #createSnapshot(): SessionStoreSnapshot {
     const data = this.#conversationClient.conversation;
     const { view } = data;
     return {
@@ -543,11 +543,11 @@ export class EveAgentStore {
 }
 
 /** @internal Detaches local transport without cancelling durable server work. */
-export function detachEveAgentStore(store: EveAgentStore): void {
+export function detachSessionStore(store: SessionStore): void {
   store[detachStore]();
 }
 
 /** @internal Starts mount-scoped session work after the framework commits. */
-export function attachEveAgentStore(store: EveAgentStore): void {
+export function attachSessionStore(store: SessionStore): void {
   store[attachStore]();
 }

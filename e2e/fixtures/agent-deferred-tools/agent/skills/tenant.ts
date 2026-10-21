@@ -7,7 +7,7 @@ export default defineDynamic({
       "tenant-playbook": defineSkill({
         description: "The tenant's escalation playbook for billing disputes.",
         deferred: true,
-        markdown: [
+        content: [
           "# Tenant playbook",
           "",
           "Escalate disputes over $500.",

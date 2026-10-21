@@ -93,7 +93,7 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
   const switchCases = `${httpCase}${channelCases}`;
   const credentialErrorMessage = `Self-modification could not obtain a GitHub credential from Vercel Connect for ${values.connector}. Install and attach the configured GitHub connector to this Vercel project, install the managed GitHub App for the configured repository, then retry.`;
   const body = `import { getToken } from "@vercel/connect";
-import selfModification from "eve/self-modification/remote";
+import selfModification from "eve/extensions/self-modification/remote";
 
 export default selfModification({
   source: {

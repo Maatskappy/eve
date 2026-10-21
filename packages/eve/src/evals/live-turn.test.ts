@@ -52,7 +52,7 @@ function watch(events: readonly SessionEvent[]) {
       headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
     }),
   );
-  const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+  const manager = new EvalSessionManager({ client: new Client({ baseUrl: "https://eve.test" }) });
   return manager.attach("session_1", { startIndex: 0 }).watch();
 }
 
@@ -80,7 +80,7 @@ describe("EveEvalLiveTurn", () => {
           headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
         }),
       );
-    const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+    const manager = new EvalSessionManager({ client: new Client({ baseUrl: "https://eve.test" }) });
     const turn = await manager.attach("session_1").send("Queued message.");
     expect(turn.reply).toBe("Queued reply.");
     expect(turn.status).toBe("completed");
@@ -141,7 +141,7 @@ describe("EveEvalLiveTurn", () => {
           },
         ]),
       );
-    const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+    const manager = new EvalSessionManager({ client: new Client({ baseUrl: "https://eve.test" }) });
     const session = manager.attach("session_1");
     await session.nextTurn();
     expect(session.pendingInteractions.map((row) => row.interactionId)).toEqual([
@@ -172,7 +172,7 @@ describe("EveEvalLiveTurn", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(response(first))
       .mockResolvedValueOnce(response([...first.slice(afterTurn), ...second]));
-    const manager = new EvalSessionManager({ client: new Client({ host: "https://eve.test" }) });
+    const manager = new EvalSessionManager({ client: new Client({ baseUrl: "https://eve.test" }) });
     const session = manager.attach("session_1");
     expect(session.id).toBe("session_1");
     expect(fetch).not.toHaveBeenCalled();

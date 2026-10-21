@@ -1,6 +1,6 @@
 import type { ConversationState } from "#client/conversation-state.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
-import type { EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
+import type { SessionStoreSnapshot } from "#client/session-store.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { SessionPreviews, SessionView } from "#protocol/session-projection/tables.js";
 import { isTaskAdmissionRefused } from "#protocol/task-tools.js";
@@ -129,7 +129,7 @@ export interface AgentTUIConversationView {
 }
 
 export function conversationView(
-  snapshot: EveAgentStoreSnapshot,
+  snapshot: SessionStoreSnapshot,
   data: TuiSessionData,
   /** Replaces a failure's harness hint with a surface-local fix. */
   failureHint?: (error: ErrorInfo) => string | undefined,
@@ -152,6 +152,6 @@ export function conversationView(
   };
 }
 
-export function isWorking(status: EveAgentStoreSnapshot["status"]): boolean {
+export function isWorking(status: SessionStoreSnapshot["status"]): boolean {
   return status === "busy" || status === "resuming";
 }

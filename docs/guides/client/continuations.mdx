@@ -93,7 +93,7 @@ await save("research", research.state);
 await save("support", support.state);
 ```
 
-The shared `Client` owns host, auth, headers, and redirect policy. Each
+The shared `Client` owns the base URL, auth, headers, and redirect policy. Each
 `ClientSession` owns its fixed ID and stream cursor.
 
 ## Reconnect an existing stream

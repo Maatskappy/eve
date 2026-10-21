@@ -61,7 +61,7 @@ describe("resolveDynamicInstructions", () => {
   it("stores session-scoped instructions on durable key", async () => {
     const ctx = createCtx();
     const resolver = createResolver("context", ["session.started"], () =>
-      defineInstructions({ markdown: "You are a helpful assistant." }),
+      defineInstructions({ content: "You are a helpful assistant." }),
     );
 
     await resolveDynamicInstructions({
@@ -82,7 +82,7 @@ describe("resolveDynamicInstructions", () => {
   it("stores turn-scoped instructions on turn durable key", async () => {
     const ctx = createCtx();
     const resolver = createResolver("context", ["turn.started"], () =>
-      defineInstructions({ markdown: "Turn context." }),
+      defineInstructions({ content: "Turn context." }),
     );
 
     await resolveDynamicInstructions({
@@ -157,7 +157,7 @@ describe("resolveDynamicInstructions", () => {
 
   it("skips resolvers that do not match the event type", async () => {
     const ctx = createCtx();
-    const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
+    const handler = vi.fn(() => defineInstructions({ content: "nope" }));
     const resolver = createResolver("context", ["session.started"], handler);
 
     await resolveDynamicInstructions({
@@ -234,10 +234,10 @@ describe("resolveDynamicInstructions", () => {
   it("unions messages from different resolver slugs", async () => {
     const ctx = createCtx();
     const r1 = createResolver("a", ["turn.started"], () =>
-      defineInstructions({ markdown: "From A." }),
+      defineInstructions({ content: "From A." }),
     );
     const r2 = createResolver("b", ["turn.started"], () =>
-      defineInstructions({ markdown: "From B." }),
+      defineInstructions({ content: "From B." }),
     );
 
     await resolveDynamicInstructions({
@@ -257,7 +257,7 @@ describe("resolveDynamicInstructions", () => {
     const ctx = createCtx();
     let version = "v1";
     const resolver = createResolver("context", ["turn.started"], () =>
-      defineInstructions({ markdown: version }),
+      defineInstructions({ content: version }),
     );
 
     await resolveDynamicInstructions({
@@ -387,7 +387,7 @@ describe("resolveDynamicInstructions", () => {
     const ctx = createCtx();
     let enabled = true;
     const resolver = createResolver("context", ["turn.started"], () =>
-      enabled ? defineInstructions({ markdown: "Instructions." }) : null,
+      enabled ? defineInstructions({ content: "Instructions." }) : null,
     );
 
     await resolveDynamicInstructions({
@@ -414,7 +414,7 @@ describe("resolveDynamicInstructions", () => {
   it("session instructions survive step boundary (durable)", async () => {
     const ctx = createCtx();
     const resolver = createResolver("context", ["session.started"], () =>
-      defineInstructions({ markdown: "Session context." }),
+      defineInstructions({ content: "Session context." }),
     );
 
     await resolveDynamicInstructions({
@@ -436,10 +436,10 @@ describe("resolveDynamicInstructions", () => {
   it("session + turn instructions are ordered session first", async () => {
     const ctx = createCtx();
     const sessionResolver = createResolver("session-ctx", ["session.started"], () =>
-      defineInstructions({ markdown: "Session." }),
+      defineInstructions({ content: "Session." }),
     );
     const turnResolver = createResolver("turn-ctx", ["turn.started"], () =>
-      defineInstructions({ markdown: "Turn." }),
+      defineInstructions({ content: "Turn." }),
     );
 
     await resolveDynamicInstructions({
@@ -464,7 +464,7 @@ describe("resolveDynamicInstructions", () => {
   it("stores durable messages that survive serialization", async () => {
     const ctx = createCtx();
     const resolver = createResolver("ctx", ["session.started"], () =>
-      defineInstructions({ markdown: "Durable." }),
+      defineInstructions({ content: "Durable." }),
     );
 
     await resolveDynamicInstructions({

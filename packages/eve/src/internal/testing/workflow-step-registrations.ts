@@ -13,7 +13,6 @@ import {
   WORKFLOW_VIRTUAL_ENTRY_ID,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
@@ -45,11 +44,6 @@ export async function bundleWorkflowStepRegistrations(input: {
   const chunk = await buildSingleRolldownChunk(`step registrations bundle for "${input.outfile}"`, {
     cwd: input.workingDir,
     input: WORKFLOW_VIRTUAL_ENTRY_ID,
-    // Optional runtime packages (the just-bash sandbox engine and its
-    // native codecs) resolve lazily against the application install at
-    // run time; inlining them would drag platform-specific `.node`
-    // binaries into the step bundle.
-    external: isWorkflowStepExternalPackage,
     platform: "node",
     plugins: [
       createWorkflowVirtualEntryPlugin(virtualEntrySource),
@@ -87,10 +81,4 @@ export async function bundleWorkflowStepRegistrations(input: {
   });
   await mkdir(dirname(input.outfile), { recursive: true });
   await atomicWriteFile(input.outfile, chunk.code);
-}
-
-function isWorkflowStepExternalPackage(source: string): boolean {
-  return WORKFLOW_STEP_EXTERNAL_PACKAGES.some(
-    (packageName) => source === packageName || source.startsWith(`${packageName}/`),
-  );
 }

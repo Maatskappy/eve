@@ -21,7 +21,7 @@ Mount it only for agents whose sandbox runs the desktop. The tool schema is larg
 
 ## Sandbox bootstrap
 
-Install the desktop and driver in the environment's `prepare` callback, then start them after `open()` in `defineSandbox()`. Computer use requires an apt-based Linux image with root or passwordless sudo; it cannot run on the `just-bash` provider.
+Install the desktop and driver in the environment's `prepare` callback, then start them after `open()` in `defineSandbox()`. Computer use requires an apt-based Linux image with root or passwordless sudo, such as a Vercel or Docker sandbox. Do not use it with the host sandbox, which would install the desktop on your machine.
 
 ```ts
 // agent/sandbox.ts

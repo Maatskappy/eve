@@ -19,8 +19,8 @@ to use it.
 
 Prerequisites: Node.js 24 or newer, pnpm 12, and [uv](https://docs.astral.sh/uv/).
 The data command uses Python 3.13 through uv. No Docker daemon or warehouse
-account is needed for the local database; the agent's default workspace uses
-just-bash. Model calls require an AI Gateway credential or Vercel project OIDC.
+account is needed for the local database; during `eve dev` the agent's sandbox
+runs commands on your machine through the host sandbox. Model calls require an AI Gateway credential or Vercel project OIDC.
 
 ```bash
 pnpm install

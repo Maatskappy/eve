@@ -3,9 +3,9 @@ const PRUNED_LOCAL_SANDBOX_MODULE_ID = "\0eve-pruned-local-sandbox-providers";
 const PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID = "\0eve-pruned-local-sandbox-provider-constructors";
 const PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID = "\0eve-pruned-optional-engine-install";
 const DEFAULT_PROVIDER_SOURCE_RE = /(?:^|[/\\#])sandbox[/\\]providers[/\\]default\.(?:js|ts)$/;
-const LOCAL_BINDING_SOURCE_RE = /[/\\]bindings[/\\](?:docker|host|just-bash|local)\.(?:js|ts)$/;
+const LOCAL_BINDING_SOURCE_RE = /[/\\]bindings[/\\](?:docker|host|local)\.(?:js|ts)$/;
 const LOCAL_PROVIDER_SOURCE_RE =
-  /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|host|just-bash)\.(?:js|ts)$/;
+  /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|host)\.(?:js|ts)$/;
 const OPTIONAL_ENGINE_INSTALL_SOURCE_RE =
   /[/\\]internal[/\\]application[/\\]optional-package-install\.(?:js|ts)$/;
 
@@ -21,7 +21,7 @@ interface BundlerPluginShape {
 
 /**
  * Creates the bundler plugin that prunes the local sandbox providers
- * (Docker, host, just-bash) from hosted Nitro server bundles.
+ * (Docker, host) from hosted Nitro server bundles.
  * Stubs both the aggregate local facade and individual provider bindings so
  * framework default selection cannot retain local engine implementations.
  */
@@ -68,7 +68,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
           "}",
           'export const DockerSandbox = { name: "docker", environment: pruned, dockerfile: pruned, image: pruned };',
           'export const HostSandbox = { name: "host", environment: pruned };',
-          'export const JustBashSandbox = { name: "just-bash", environment: pruned };',
           "",
         ].join("\n");
       }
@@ -82,15 +81,12 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
         "}",
         "export const createDockerSandboxProvider = pruned;",
         "export const createHostSandboxProvider = pruned;",
-        "export const createJustBashSandboxProvider = pruned;",
         'export const DOCKER_PROVIDER_NAME = "docker";',
         'export const DOCKER_TEMPLATE_IMAGE_REPOSITORY = "eve-sandbox-template";',
         'export const HOST_PROVIDER_NAME = "host";',
-        'export const JUST_BASH_PROVIDER_NAME = "just-bash";',
         "export const isLinuxDockerDaemonAvailableSync = () => false;",
         "export const pruneDockerSandboxTemplates = pruned;",
         "export const pruneHostSandboxTemplates = pruned;",
-        "export const pruneJustBashSandboxTemplates = pruned;",
         "export const pruneLocalSandboxTemplates = pruned;",
         "export const pruneLocalSandboxTemplatesInBackground = pruned;",
         "export const stopDevelopmentSandboxResources = pruned;",

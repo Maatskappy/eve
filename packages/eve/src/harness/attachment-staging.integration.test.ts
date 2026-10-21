@@ -1138,7 +1138,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     const stagedFile = (stagedResult!.output as { value: { data: { url: URL } }[] }).value[0]!;
     const stagedPath = decodeSandboxRef(stagedFile.data.url).path;
 
-    // A follow-up turn on another replica: the just-bash session root lives
+    // A follow-up turn on another replica: the host session directory lives
     // on the replica that staged the file, so resuming the sandbox throws.
     const lost = mockSandbox({ id: "sbx_lost" });
     const hydrated = await runtime.runAsSession(
@@ -1146,7 +1146,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
         sandboxAccess: {
           ...lost.access,
           async get() {
-            throw new Error('just-bash session root "/tmp/sessions/lost" no longer exists.');
+            throw new Error('HostSandbox directory "/tmp/sessions/lost" does not exist.');
           },
         },
       },

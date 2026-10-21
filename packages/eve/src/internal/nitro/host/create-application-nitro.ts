@@ -39,10 +39,6 @@ import {
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createExternalDependencyOutputCheckPlugin } from "#internal/nitro/host/external-dependency-output-check-plugin.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
-import {
-  createOptionalEngineDependencyPlugin,
-  OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
-} from "#internal/nitro/host/optional-engine-dependency-plugin.js";
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
 import type {
@@ -79,11 +75,7 @@ const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 // the agent. eve bundles its own runtime and never builds through the host's Vite.
 const EVE_NITRO_BUILDER = "rolldown";
 
-const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
-  "docker",
-  "host",
-  ...Object.keys(OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME),
-]);
+const LOCAL_SANDBOX_BACKEND_NAMES = new Set(["docker", "host"]);
 
 function resolveWorkflowAliases(): Record<string, string> {
   const aliases: Record<string, string> = {};
@@ -107,10 +99,7 @@ function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
   return manifest.channelRoutes.effective.some((entry) => entry.method === "WEBSOCKET");
 }
 
-function collectHostedTraceDependencies(
-  preparedHost: PreparedApplicationHost,
-  configuredOptionalEnginePackages: readonly string[],
-): string[] {
+function collectHostedTraceDependencies(preparedHost: PreparedApplicationHost): string[] {
   const extensionExternalDependencies = new Set(
     collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
   );
@@ -121,13 +110,6 @@ function collectHostedTraceDependencies(
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    // Optional engine packages (just-bash) join the
-    // externalize-and-trace path only when the compiled sandbox config
-    // selects their backend — the app's opt-in. Otherwise
-    // createOptionalEngineDependencyPlugin pins them as plain externals
-    // so a resolvable-but-unrequested install adds nothing to hosted
-    // output.
-    ...configuredOptionalEnginePackages,
     ...configuredExternalDependencies,
     ...[...extensionExternalDependencies].map((dependencyName) => `${dependencyName}*`),
   ]);
@@ -588,16 +570,6 @@ function createApplicationNitroBundlerConfiguration(
   })
     ? createCompiledSandboxProviderPrunePlugin()
     : null;
-  const configuredOptionalEnginePackages: string[] = [];
-  const unconfiguredOptionalEnginePackages: string[] = [];
-  for (const [providerName, packageName] of Object.entries(
-    OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
-  )) {
-    (configuredBackendNames.has(providerName)
-      ? configuredOptionalEnginePackages
-      : unconfiguredOptionalEnginePackages
-    ).push(packageName);
-  }
   const extensionScopePlugin = createExtensionScopePlugin(
     [
       preparedHost.compileResult.manifest,
@@ -616,7 +588,6 @@ function createApplicationNitroBundlerConfiguration(
   const nitroBundlerPlugins = [
     options.development ? null : createDevelopmentRuntimePrunePlugin(),
     compiledSandboxProviderPrunePlugin,
-    createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
     options.development
       ? null
@@ -639,10 +610,7 @@ function createApplicationNitroBundlerConfiguration(
   };
   // Nitro inherits rollupConfig in its Rolldown builder, concatenating plugin arrays.
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
-  const tracedAppDependencies = collectHostedTraceDependencies(
-    preparedHost,
-    configuredOptionalEnginePackages,
-  );
+  const tracedAppDependencies = collectHostedTraceDependencies(preparedHost);
   const tracedAppDependencyPaths = resolveExtensionExternalDependencyPaths(extensionMounts);
 
   return {

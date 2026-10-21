@@ -493,9 +493,8 @@ async function compiledModuleEntrypointsExist({ compiledRoot, modules }) {
 
 /**
  * Removes top-level entries under `compiledRoot` that no configured module
- * claims, so output for vendored packages that were since removed (for
- * example `just-bash`) does not linger on incremental dev machines and get
- * copied into `dist/`.
+ * claims, so output for vendored packages that were since removed does not
+ * linger on incremental dev machines and get copied into `dist/`.
  */
 async function pruneStaleCompiledEntries({ compiledRoot, modules }) {
   const expected = new Set(["_chunks", ".vendor-stamp.json", ".vendor-lock"]);

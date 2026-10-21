@@ -5,8 +5,8 @@ import type { SandboxProviderHandle, SandboxProviderRuntime } from "#shared/sand
 /*
  * A keyed tool session has no end, so nothing ever runs its sandbox's
  * session-end cleanup. Only eve's bindings whose kept sandboxes stay bounded
- * opt in: Vercel's saved filesystems expire, and just-bash keeps only files on
- * the local disk. The marker stays internal so the public provider API is
+ * opt in: Vercel's saved filesystems expire, and HostSandbox keeps only files
+ * on the local disk. The marker stays internal so the public provider API is
  * unchanged.
  */
 
@@ -38,7 +38,7 @@ export class ToolSessionSandboxUnsupportedError extends Error {
     super(
       `Sandbox provider "${providerName}" cannot keep a sandbox between invokeTool calls, ` +
         "so a call with a key cannot open one. Call without a key for a sandbox that lasts " +
-        "one call, or use Vercel Sandbox or just-bash.",
+        "one call, or use Vercel Sandbox or HostSandbox.",
     );
     this.name = "ToolSessionSandboxUnsupportedError";
   }

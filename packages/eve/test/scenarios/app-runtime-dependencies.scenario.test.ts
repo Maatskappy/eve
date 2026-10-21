@@ -1,15 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  resolveInstalledPackageInfo,
-  resolvePackageRoot,
-} from "../../src/internal/application/package.js";
+import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -19,7 +15,6 @@ vi.mock("../../src/internal/nitro/host/vercel-build-prewarm.js", () => ({
 }));
 
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
-const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = {
   skipSandboxPrewarm: false,
@@ -609,9 +604,8 @@ describe("app runtime dependency tracing", () => {
     );
 
     expect(workflowServerSource).toContain("[Unprintable QuickJS value]");
-    // The generated JavaScript sandbox runtime ships bundled inline, never traced — and
-    // these apps do not declare the optional just-bash engine, so its
-    // quickjs dependency must not sneak into the trace either.
+    // The generated JavaScript sandbox runtime ships bundled inline, never traced, so
+    // its quickjs dependency must not sneak into the trace either.
     expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
     expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
     expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("run");
@@ -619,79 +613,6 @@ describe("app runtime dependency tracing", () => {
     expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
     expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
   }, 60_000);
-
-  it("includes the optional just-bash engine in hosted output only when the sandbox config selects it", async () => {
-    async function createMinimalApp(input: {
-      justBashEngine: boolean;
-      label: string;
-    }): Promise<string> {
-      const appRoot = await createScratchDirectory(`eve-optional-engine-${input.label}-`);
-      await mkdir(join(appRoot, "agent"), { recursive: true });
-      await writeFile(
-        join(appRoot, "package.json"),
-        `${JSON.stringify(
-          {
-            name: `optional-engine-${input.label}-test`,
-            private: true,
-            type: "module",
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      await writeFile(
-        join(appRoot, "agent", "agent.ts"),
-        ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
-      );
-      await writeFile(join(appRoot, "agent", "instructions.md"), "Optional engine tracing.\n");
-
-      if (input.justBashEngine) {
-        // The compiled sandbox config is the opt-in signal. Authored
-        // modules resolve `eve/sandbox` through the app's node_modules,
-        // so link the workspace package into the scratch app.
-        await mkdir(join(appRoot, "node_modules"), { recursive: true });
-        await symlink(EVE_PACKAGE_ROOT, join(appRoot, "node_modules", "eve"), "dir");
-        await writeFile(
-          join(appRoot, "agent", "sandbox.ts"),
-          [
-            'import { defineSandbox } from "eve/sandbox";',
-            'import { JustBashSandbox } from "eve/sandbox/just-bash";',
-            "",
-            "export const environment = JustBashSandbox.environment();",
-            "export default defineSandbox(() => environment.open());",
-            "",
-          ].join("\n"),
-        );
-      }
-      return appRoot;
-    }
-
-    // No just-bash sandbox config: the engine package resolves in this
-    // workspace (it is an eve devDependency), but resolvability is not
-    // opt-in — nothing of just-bash may reach the hosted output.
-    const dockerOutputDir = await buildApplication(
-      await createMinimalApp({ justBashEngine: false, label: "docker" }),
-      DEPLOYABLE_BUILD_OPTIONS,
-    );
-    const dockerTraced = await readTracedServerPackageJson(dockerOutputDir);
-    expect(dockerTraced.dependencies).not.toHaveProperty("just-bash");
-    expect(dockerTraced.dependencies).not.toHaveProperty("quickjs-emscripten");
-    expect(existsSync(join(dockerOutputDir, "server", "node_modules", "just-bash"))).toBe(false);
-    const dockerEntries = await readdir(join(dockerOutputDir, "server"), {
-      recursive: true,
-    });
-    expect(dockerEntries.filter((entry) => entry.includes("just-bash"))).toEqual([]);
-
-    // Sandbox config selects the engine: the opt-in. The package is
-    // externalized and traced so the output stays self-contained.
-    const justBashOutputDir = await buildApplication(
-      await createMinimalApp({ justBashEngine: true, label: "just-bash" }),
-      DEPLOYABLE_BUILD_OPTIONS,
-    );
-    const justBashTraced = await readTracedServerPackageJson(justBashOutputDir);
-    expect(justBashTraced.dependencies).toHaveProperty("just-bash");
-    expect(existsSync(join(justBashOutputDir, "server", "node_modules", "just-bash"))).toBe(true);
-  }, 120_000);
 
   it("traces additional hosted build dependencies configured in agent.ts", async () => {
     const appRoot = await createScratchDirectory("eve-app-build-trace-dep-build-");

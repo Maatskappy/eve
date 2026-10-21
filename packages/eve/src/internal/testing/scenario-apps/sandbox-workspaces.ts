@@ -3,7 +3,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 /**
  * Scenario-tier descriptor exercising the per-sandbox workspace-folder
  * convention: `agent/sandbox/workspace/**` contents are materialized into
- * `/workspace/**` inside the sandbox at runtime.
+ * the sandbox workspace root at runtime.
  */
 export const SANDBOX_WORKSPACES_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {

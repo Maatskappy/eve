@@ -12,10 +12,8 @@ describe("self-modification authored runtime boundary", () => {
         fileURLToPath(new URL(`./extension/subagents/agent/${entry}.ts`, import.meta.url)),
       );
 
-      expect(code).not.toContain("node-liblzma");
-      expect(code).not.toContain("@mongodb-js/zstd");
-      expect(code).not.toContain("createJustBashSandboxBackend");
-      expect(code).not.toContain("loadJustBashModule");
+      expect(code).not.toContain("createHostSandboxProvider");
+      expect(code).not.toContain("openHostSandboxHandle");
       if (entry === "sandbox") {
         expect(code).toContain('from "eve/self-modification/sandbox"');
       } else {

@@ -63,7 +63,6 @@ export default mcpChannel({
 export default askQuestion();
 `,
   },
-  dependencies: { "just-bash": "3.4.2" },
   installDependencies: true,
   name: "mcp-agent-channel",
 };

@@ -152,9 +152,6 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  *     `braintrust`) — consumers provide the install.
  *   - Runtime dependencies (`nitro`, `undici`) — resolved at
  *     runtime against the eve installation.
- *   - Optional peer dependency (`just-bash`) — the opt-in local sandbox
- *     engine; resolved lazily against the consumer's install and never
- *     bundled with eve.
  *
  * `#compiled/*` is also external (handled separately) so the vendored
  * dependency tree under `dist/src/compiled/**` resolves at runtime via
@@ -165,7 +162,6 @@ const EXTERNAL_PACKAGES = new Set([
   "@sveltejs/kit",
   "ai",
   "braintrust",
-  "just-bash",
   "next",
   "nitro",
   "react",

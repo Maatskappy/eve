@@ -106,8 +106,8 @@ interface RawStreams {
  * code and output. A slower command keeps running in the sandbox as its own
  * process group, writing to files the model reads with later commands, and
  * the call returns its output so far with `status: "running"`. Sandboxes that
- * cannot run background processes, such as `just-bash`, run every command to
- * completion.
+ * cannot run background processes, such as a JavaScript shell interpreter, run
+ * every command to completion.
  *
  * Both stdout and stderr are tail-truncated to keep the end of the output
  * (where errors and final results typically appear) within the shared
@@ -180,7 +180,7 @@ async function runCommand(
 
 /**
  * Only a real `bash` evaluates the launcher, so interpreters without
- * background processes, such as `just-bash`, run the command directly.
+ * background processes run the command directly.
  */
 function launchCommand(command: string, directory: string): string {
   return [

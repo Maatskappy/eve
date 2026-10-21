@@ -44,11 +44,10 @@ test("bootstraps the selected source before a native agent starts", async () => 
     commands[2].args[1],
     /AI_AGENT=claude EVE_INIT_PACKAGE_SPEC=.* eve init \. --model openai\/gpt-5\.5/u,
   );
-  assert.match(commands[3].args[1], /npm install --save-dev --save-exact just-bash@3\.1\.0/u);
-  assert.match(commands[4].args[1], /mkdir -p agent\/lib/u);
-  assert.match(commands[5].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
-  assert.match(commands[6].args[1], /npm run typecheck && npm run build/u);
-  assert.match(commands[7].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
+  assert.match(commands[3].args[1], /mkdir -p agent\/lib/u);
+  assert.match(commands[4].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
+  assert.match(commands[5].args[1], /npm run typecheck && npm run build/u);
+  assert.match(commands[6].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
   assert.deepEqual(Object.keys(writes[1]), ["/workspace/agent/lib/inventory-openapi.ts"]);
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
 });

@@ -14,7 +14,6 @@ describe("relocated production applications", () => {
     const workspace = await scenarioApp({
       name: "relocated-production",
       installDependencies: true,
-      dependencies: { "just-bash": "3.1.0" },
       files: {
         "pnpm-workspace.yaml": "packages:\n  - apps/*\n  - packages/*\n",
         "apps/service/package.json": JSON.stringify({
@@ -32,9 +31,9 @@ describe("relocated production applications", () => {
           "---\ndescription: Probe the sandbox.\n---\nProbe content.",
         "apps/service/agent/sandbox/sandbox.ts": [
           'import { defineSandbox } from "eve/sandbox";',
-          'import { JustBashSandbox } from "eve/sandbox/just-bash";',
+          'import { HostSandbox } from "eve/sandbox/host";',
           'import { marker } from "@/marker";',
-          "export const environment = JustBashSandbox.environment({",
+          "export const environment = HostSandbox.environment({",
           "  prepare: async (sandbox) => {",
           "    const result = await sandbox.run({ command: `echo ${marker}` });",
           '    if (result.stdout.trim() !== "app-bootstrap") throw new Error("Wrong app alias");',

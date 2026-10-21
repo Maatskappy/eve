@@ -68,7 +68,7 @@ export default withEve(config);
         "agent/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
 import { defineSandboxProvider } from "eve/sandbox/provider";
 import { DockerSandbox } from "eve/sandbox/docker";
-import { JustBashSandbox } from "eve/sandbox/just-bash";
+import { HostSandbox } from "eve/sandbox/host";
 import { Drive, VercelSandbox } from "eve/sandbox/vercel";
 
 const custom = defineSandboxProvider({
@@ -94,7 +94,7 @@ async function verifyMutableNetworkCapability() {
 }
 void verifyMutableNetworkCapability;
 void DockerSandbox.image("ghcr.io/acme/agent:latest");
-void JustBashSandbox.environment();
+void HostSandbox.environment({ root: "." });
 
 export default defineSandbox(() => environment.open());
 `,
@@ -105,7 +105,7 @@ export default defineSandbox(() => environment.open());
       "src/public/sandbox/index.ts",
       "src/public/sandbox/provider.ts",
       "src/public/sandbox/docker.ts",
-      "src/public/sandbox/just-bash.ts",
+      "src/public/sandbox/host.ts",
       "src/public/sandbox/vercel.ts",
     ],
     name: "lets tsc typecheck sandbox environments from nested subpath imports",
@@ -119,8 +119,8 @@ export default defineSandbox(() => environment.open());
       "./sandbox/docker": {
         types: "./dist/src/public/sandbox/docker.d.ts",
       },
-      "./sandbox/just-bash": {
-        types: "./dist/src/public/sandbox/just-bash.d.ts",
+      "./sandbox/host": {
+        types: "./dist/src/public/sandbox/host.d.ts",
       },
       "./sandbox/vercel": {
         types: "./dist/src/public/sandbox/vercel.d.ts",

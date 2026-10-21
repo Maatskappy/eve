@@ -262,11 +262,6 @@
       "import": "./dist/src/public/sandbox/host.js",
       "default": "./dist/src/public/sandbox/host.js"
     },
-    "./sandbox/just-bash": {
-      "types": "./dist/src/public/sandbox/just-bash.d.ts",
-      "import": "./dist/src/public/sandbox/just-bash.js",
-      "default": "./dist/src/public/sandbox/just-bash.js"
-    },
     "./sandbox/vercel": {
       "types": "./dist/src/public/sandbox/vercel.d.ts",
       "import": "./dist/src/public/sandbox/vercel.js",
@@ -643,7 +638,6 @@
     "jose": "6.2.3",
     "js-yaml": "4.3.2",
     "jsonc-parser": "3.3.1",
-    "just-bash": "3.1.0",
     "just-secrets": "0.0.2",
     "marked": "catalog:",
     "next": "catalog:",
@@ -666,8 +660,7 @@
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
-    "dd-trace": "^6.13.0",
-    "just-bash": "^3.1.0"
+    "dd-trace": "^6.13.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
@@ -680,9 +673,6 @@
       "optional": true
     },
     "dd-trace": {
-      "optional": true
-    },
-    "just-bash": {
       "optional": true
     }
   },

@@ -31,7 +31,7 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineTool } from "#tools/definition.js";
-import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
@@ -109,7 +109,7 @@ async function createPreparedHost(
     {
       logicalPath: "sandbox.ts",
       loadNamespace: async () => {
-        const environment = JustBashSandbox.environment();
+        const environment = HostSandbox.environment();
         return { environment, default: defineSandbox(() => environment.open()) };
       },
     },
@@ -755,19 +755,6 @@ describe("application Nitro creation", () => {
     expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
       1,
     );
-  });
-
-  it("traces only the configured sandbox engine and leaves other dependencies to Nitro", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-    const { createProductionApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = await createPreparedHost();
-
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
-
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["just-bash"]);
   });
 
   it("includes the workflow sandbox runtime plugin only for generated-program tools", async () => {

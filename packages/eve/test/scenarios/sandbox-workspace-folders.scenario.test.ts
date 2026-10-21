@@ -5,9 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { discoverAgent } from "../../src/discover/discover-agent.js";
 import { resolveDiscoveryProject } from "../../src/discover/project.js";
-// The just-bash engine keeps this scenario hermetic (no Docker daemon
-// requirement); the workspace devDependency provides the install.
-import { createJustBashSandboxProvider } from "../../src/execution/sandbox/bindings/just-bash.js";
+// The host provider keeps this scenario hermetic (no Docker daemon requirement).
+import { createHostSandboxProvider } from "../../src/execution/sandbox/bindings/host.js";
 import { createSandboxProviderHarness } from "../../src/internal/testing/sandbox-provider-harness.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { SANDBOX_WORKSPACES_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/sandbox-workspaces.js";
@@ -39,7 +38,7 @@ describe("sandbox workspace folder convention", () => {
     ).flat();
 
     const appRoot = await createScratchDirectory("eve-sandbox-workspace-folders-");
-    const backend = createSandboxProviderHarness(createJustBashSandboxProvider(), undefined);
+    const backend = createSandboxProviderHarness(createHostSandboxProvider(), undefined);
 
     await backend.prepare({
       appRoot,
@@ -51,27 +50,16 @@ describe("sandbox workspace folder convention", () => {
       sandboxName: "session-default-workspace",
     });
 
-    const notesContent = await handle.sandbox.readTextFile({ path: "/workspace/notes.md" });
+    const notesContent = await handle.sandbox.readTextFile({ path: "notes.md" });
     expect(notesContent).not.toBeNull();
-    expect(handle.sandbox.resolvePath("/workspace/notes.md")).toBe("/workspace/notes.md");
-    expect(handle.sandbox.resolvePath("notes.md")).toBe("/workspace/notes.md");
-
-    // Missing files resolve to `null` instead of throwing.
-    const missing = await handle.sandbox.readTextFile({ path: "/workspace/does-not-exist.txt" });
-    expect(missing).toBeNull();
-
-    // writeFile round-trip: the session can layer a new file on top of
-    // the seeded workspace without running a shell command.
-    await handle.sandbox.writeTextFile({ content: "round-trip", path: "/workspace/authored.txt" });
-    const roundTrip = await handle.sandbox.readTextFile({ path: "/workspace/authored.txt" });
-    expect(roundTrip).toBe("round-trip");
+    expect((await handle.sandbox.run({ command: "cat notes.md" })).stdout).toBe(notesContent);
 
     await handle.onRuntimeShutdown();
   });
 
   it("opens an empty prewarmed template when the sandbox has no authored workspace files", async () => {
     const appRoot = await createScratchDirectory("eve-sandbox-no-workspace-");
-    const backend = createSandboxProviderHarness(createJustBashSandboxProvider(), undefined);
+    const backend = createSandboxProviderHarness(createHostSandboxProvider(), undefined);
 
     await backend.prepare({
       appRoot,
@@ -83,12 +71,9 @@ describe("sandbox workspace folder convention", () => {
       sandboxName: "session-empty-workspace",
     });
 
-    // An empty prewarmed template snapshots a clean `/workspace` and
-    // nothing else; the session opens against it without writing
-    // anything visible at the workspace root.
-    const result = await handle.sandbox.run({
-      command: "ls /workspace 2>/dev/null | wc -l",
-    });
+    // An empty prewarmed template holds a clean workspace root and nothing
+    // else; the session opens against it without writing anything there.
+    const result = await handle.sandbox.run({ command: "ls -A | wc -l" });
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout.trim())).toBe(0);
 

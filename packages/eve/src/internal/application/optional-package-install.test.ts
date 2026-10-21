@@ -274,7 +274,8 @@ describe("loadOptionalEnginePackage", () => {
           appRoot,
           packageName,
           autoInstall: true,
-          ignoredOptionalDependencies: packageName === "just-bash" ? ["node-liblzma"] : undefined,
+          ignoredOptionalDependencies:
+            packageName === "second-engine" ? ["node-liblzma"] : undefined,
           missingMessage: `missing ${packageName}`,
           importModule: async () => {
             throw new Error("missing");
@@ -286,18 +287,18 @@ describe("loadOptionalEnginePackage", () => {
         });
       const first = load("/workspace/apps/one", "example-engine").catch((error: unknown) => error);
       await vi.waitFor(() => expect(children).toHaveLength(1));
-      const second = load("/workspace/apps/two", "just-bash");
+      const second = load("/workspace/apps/two", "second-engine");
       await flushMicrotasks();
       expect(children).toHaveLength(1);
       expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
       installed.add("example-engine");
       children[0]!.emit("close", firstFails ? 1 : 0);
       await vi.waitFor(() => expect(children).toHaveLength(2));
-      installed.add("just-bash");
+      installed.add("second-engine");
       children[1]!.emit("close", 0);
       if (firstFails) expect(await first).toBeInstanceOf(Error);
       else expect(await first).toBe("example-engine");
-      await expect(second).resolves.toBe("just-bash");
+      await expect(second).resolves.toBe("second-engine");
       expect(
         vi
           .mocked(mkdir)
@@ -322,7 +323,7 @@ describe("loadOptionalEnginePackage", () => {
     const loads = ["/independent-one", "/independent-two"].map((appRoot) =>
       loadOptionalEnginePackage({
         appRoot,
-        packageName: "just-bash",
+        packageName: "example-engine",
         autoInstall: true,
         missingMessage: "missing",
         importModule: async () => {
@@ -455,7 +456,7 @@ describe("installPackageIntoProject", () => {
     const packages = ["@mongodb-js/zstd", "node-liblzma"];
     await installPackageIntoProject({
       appRoot: "/repo/app",
-      packageName: "just-bash",
+      packageName: "example-engine",
       ignoredOptionalDependencies: packages,
     });
     expect(ensurePnpmOptionalDependencyDefaults).toHaveBeenCalledWith("/repo/app", packages);
@@ -467,7 +468,7 @@ describe("installPackageIntoProject", () => {
   it("does not write pnpm configuration for another package manager", async () => {
     await installPackageIntoProject({
       appRoot: "/repo/app",
-      packageName: "just-bash",
+      packageName: "example-engine",
       ignoredOptionalDependencies: ["node-liblzma"],
     });
     expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
@@ -481,7 +482,7 @@ describe("installPackageIntoProject", () => {
     await expect(
       installPackageIntoProject({
         appRoot: "/repo/app",
-        packageName: "just-bash",
+        packageName: "example-engine",
         ignoredOptionalDependencies: ["node-liblzma"],
       }),
     ).rejects.toThrow("Unsupported policy");
@@ -498,11 +499,11 @@ describe("installPackageIntoProject", () => {
     await expect(
       installPackageIntoProject({
         appRoot: "/repo/app",
-        packageName: "just-bash",
+        packageName: "example-engine",
         ignoredOptionalDependencies: ["node-liblzma"],
       }),
     ).rejects.toThrow("exit 1");
-    expect(consoleInfo).not.toHaveBeenCalledWith('[eve:dev] installed "just-bash".');
+    expect(consoleInfo).not.toHaveBeenCalledWith('[eve:dev] installed "example-engine".');
   });
 
   it("uses the project's package manager", async () => {

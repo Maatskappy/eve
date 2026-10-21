@@ -98,8 +98,8 @@ function sandboxes(options: { readonly startGate?: Promise<void> } = {}) {
 
 /**
  * A provider whose `start` is an upsert on the session id, opted into tool
- * sessions as Vercel Sandbox and just-bash are. Each open hands out its own
- * handle over the shared sandbox, as just-bash runs one interpreter per
+ * sessions as Vercel Sandbox and HostSandbox are. Each open hands out its own
+ * handle over the shared sandbox, as HostSandbox tracks its commands per
  * handle; `released` records which handles a call let go of, and `stopped`
  * and `shutdown` which were stopped through the sandbox API or at server
  * shutdown.

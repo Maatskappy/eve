@@ -21,8 +21,8 @@ import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
  * ```
  *
  * The Docker provider honors only the coarse `"allow-all"` and
- * `"deny-all"` policies. just-bash environments do not expose
- * `setNetworkPolicy` because their network policy is fixed at sandbox creation.
+ * `"deny-all"` policies. HostSandbox environments do not expose
+ * `setNetworkPolicy` because they run directly on the host network.
  */
 export type SandboxNetworkPolicy = Vercel.NetworkPolicy;
 

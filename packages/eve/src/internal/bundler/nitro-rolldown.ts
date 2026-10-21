@@ -119,9 +119,9 @@ export async function buildWithNitroRolldown(
   });
 }
 
-// Unlike the Nitro host build, whose dependency graph deliberately leaves
-// optional imports such as `just-bash` unresolved, these bundles inline their
-// dependencies, so an unresolved import there only fails once the bundle loads.
+// Unlike the Nitro host build, whose dependency graph deliberately leaves some
+// optional imports unresolved, these bundles inline their dependencies, so an
+// unresolved import there only fails once the bundle loads.
 function onRolldownBuildLog(
   level: string,
   log: unknown,

@@ -18,6 +18,7 @@ import {
   readAgentInfoRouteResponse,
   readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
+  readRouteSessionIdReserver,
 } from "#internal/nitro/routes/channel-route-context.js";
 import { EVE_SESSION_ID_HEADER, EVE_STREAM_CONTROL_VERSION_QUERY } from "#protocol/message.js";
 import { legacyTaskInputRoute } from "#execution/legacy-remote-agent/protocol.js";
@@ -309,6 +310,25 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           }
         }
 
+        const createSession = readRouteSessionCreator(args);
+        if (createSession === undefined) {
+          return Response.json(
+            { error: "Session creation requires internal channel dispatch context.", ok: false },
+            { status: 500 },
+          );
+        }
+        // Reserved before onMessage so the creating message sees the same id as follow-ups.
+        let sessionId: string | undefined;
+        try {
+          sessionId = await readRouteSessionIdReserver(args)?.();
+        } catch (error) {
+          const errorId = logError(log, "session-id reservation failed", error);
+          return Response.json(
+            { error: "Failed to create the session.", errorId, ok: false },
+            { status: 500 },
+          );
+        }
+
         const messageResult =
           body.message === undefined
             ? {
@@ -325,15 +345,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                     : { operationId: body.operationId },
                 message: body.message,
                 request: req,
+                sessionId,
               });
         if (messageResult instanceof Response) return messageResult;
-        const createSession = readRouteSessionCreator(args);
-        if (createSession === undefined) {
-          return Response.json(
-            { error: "Session creation requires internal channel dispatch context.", ok: false },
-            { status: 500 },
-          );
-        }
 
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
@@ -361,6 +375,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 callback: body.callback,
                 legacyRemoteAgentCaller: body.legacyRemoteAgentCaller,
                 continuationToken: operationToken,
+                sessionId,
                 initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
                 input: attachClientContext(
                   {

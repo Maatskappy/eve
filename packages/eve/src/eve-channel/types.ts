@@ -69,7 +69,11 @@ export interface EveHandle {
   /** Replay-stable identity of a trusted remote-subagent create operation. */
   readonly invocation?: { readonly operationId: string };
   readonly request: Request;
-  /** Existing runtime session id for follow-up requests. */
+  /**
+   * Id of the session this message runs in. A message that creates a session
+   * gets the id before the session exists, and it equals the id that later
+   * follow-ups receive.
+   */
   readonly sessionId?: string;
 }
 

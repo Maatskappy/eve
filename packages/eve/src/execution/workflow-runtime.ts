@@ -52,6 +52,7 @@ import {
 } from "#execution/session-event-stream.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
 import { walkCauseChain } from "#shared/errors.js";
+import { createUlid } from "#shared/ulid.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
@@ -220,6 +221,9 @@ export function createWorkflowRuntime(config: {
         attributes: normalizeEveAttributes(attributes),
       };
       if (retention !== undefined) startOptions.experimental_retention = retention;
+      if (input.sessionId !== undefined) {
+        startOptions.world = withReservedRunId(await getWorld(), input.sessionId);
+      }
       run = await startWorkflowOnDeployment(
         workflowEntryReference,
         [workflowInput],
@@ -561,6 +565,36 @@ export async function hasRunEnded(runId: string): Promise<boolean> {
     if (isInactiveCommandTarget(error)) return true;
     throw error;
   }
+}
+
+const RUN_ID_PREFIX = "wrun_";
+
+/**
+ * Mints the id the next session will have, before it exists, so a route can
+ * hand it to authored code that runs ahead of creation. Pass it back as
+ * `RunInput.sessionId`. The World mints it as it would at start, so
+ * World-specific metadata (such as the Vercel region) is unchanged.
+ */
+export async function reserveSessionId(): Promise<string> {
+  const world = await getWorld();
+  return `${RUN_ID_PREFIX}${world.createRunId?.() ?? createUlid()}`;
+}
+
+type WorkflowWorld = Awaited<ReturnType<typeof getWorld>>;
+
+/** `start()` mints run ids through `World.createRunId`; this pins the next one. */
+function withReservedRunId(world: WorkflowWorld, sessionId: string): WorkflowWorld {
+  if (!sessionId.startsWith(RUN_ID_PREFIX)) {
+    throw new Error(`Reserved session id must start with "${RUN_ID_PREFIX}": ${sessionId}`);
+  }
+  const reservedRunId = sessionId.slice(RUN_ID_PREFIX.length);
+  return new Proxy(world, {
+    get(target, property) {
+      if (property === "createRunId") return () => reservedRunId;
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 /** Starts a workflow on the deployment executing this call. */

@@ -15,6 +15,9 @@ export type RouteSessionCreator = (
   input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
 ) => Promise<RunHandle>;
 
+/** Mints the id a later {@link RouteSessionCreator} call takes as `sessionId`. */
+export type RouteSessionIdReserver = () => Promise<string>;
+
 export type RemoteAgentStreamHeadersResolver = (input: {
   readonly name: string;
   readonly resolverId?: string;
@@ -26,6 +29,7 @@ const homeRouteMetadataKey = "__eveHomeRouteMetadata";
 const routeChannelNameKey = "__eveRouteChannelName";
 const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
+const routeSessionIdReserverKey = "__eveRouteSessionIdReserver";
 const skillFileSourceKey = "__eveSkillFileSource";
 
 type InternalRouteArgs = RouteHandlerArgs & {
@@ -34,6 +38,7 @@ type InternalRouteArgs = RouteHandlerArgs & {
   [routeChannelNameKey]?: string;
   [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
+  [routeSessionIdReserverKey]?: RouteSessionIdReserver;
   [skillFileSourceKey]?: SkillFileSource;
 };
 
@@ -93,6 +98,22 @@ export function attachRouteSessionCreator<TArgs extends RouteHandlerArgs>(
 export function readRouteSessionCreator(args: RouteHandlerArgs): RouteSessionCreator | undefined {
   const routeArgs: InternalRouteArgs = args;
   return routeArgs[routeSessionCreatorKey];
+}
+
+export function attachRouteSessionIdReserver<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  reserveSessionId: RouteSessionIdReserver,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[routeSessionIdReserverKey] = reserveSessionId;
+  return args;
+}
+
+export function readRouteSessionIdReserver(
+  args: RouteHandlerArgs,
+): RouteSessionIdReserver | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[routeSessionIdReserverKey];
 }
 
 export function attachRemoteAgentStreamHeadersResolver<TArgs extends RouteHandlerArgs>(

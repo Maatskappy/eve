@@ -441,6 +441,11 @@ export interface RunInput {
   /** Optional stable identity of the initial delivery, scoped to this logical session. */
   readonly idempotencyKey?: string;
   /**
+   * Id from `reserveSessionId()` for the run to take. Without an
+   * `idempotencyKey`, the returned handle carries this id.
+   */
+  readonly sessionId?: string;
+  /**
    * @internal Set by the server after it authorizes tool stubs.
    * Local subagents match rules qualified by their full path, such as researcher/list_tasks.
    * The root session tracks positions per rule; subagent sessions at the same path

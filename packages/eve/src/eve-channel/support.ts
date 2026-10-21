@@ -180,17 +180,13 @@ export async function resolveOnMessage(input: {
 
   let result: EveMessageResult;
   try {
-    const base: EveHandle = {
+    const eve: { -readonly [K in keyof EveHandle]: EveHandle[K] } = {
       caller: input.auth,
       clientContext: input.clientContext,
       request: input.request,
     };
-    const eve: EveHandle =
-      input.sessionId === undefined
-        ? input.invocation === undefined
-          ? base
-          : { ...base, invocation: input.invocation }
-        : { ...base, sessionId: input.sessionId };
+    if (input.invocation !== undefined) eve.invocation = input.invocation;
+    if (input.sessionId !== undefined) eve.sessionId = input.sessionId;
     const ctx: EveMessageContext = { eve };
     result = await handler(ctx, input.message);
     if (result === null || result === undefined) {

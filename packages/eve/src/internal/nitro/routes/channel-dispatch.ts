@@ -21,8 +21,10 @@ import {
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
+  attachRouteSessionIdReserver,
   attachSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
+import { reserveSessionId } from "#execution/workflow-runtime.js";
 import {
   type NitroArtifactsConfig,
   resolveNitroCompiledArtifactsSource,
@@ -313,6 +315,7 @@ async function buildRouteArgs(
         requestId,
       }),
   );
+  attachRouteSessionIdReserver(args, reserveSessionId);
   attachSkillFileSource(args, agent.skillFiles);
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);

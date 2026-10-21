@@ -3,7 +3,10 @@ import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.j
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachRouteSessionCreator,
+  attachRouteSessionIdReserver,
+} from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
@@ -158,6 +161,37 @@ describe("eve ID-addressed session routes", () => {
     );
     expect(rejected.status).toBe(400);
     expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives onMessage the id of the session the message creates", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "wrun_R",
+    });
+    const args = attachRouteSessionIdReserver(
+      attachRouteSessionCreator(createArgs(), createSession),
+      async () => "wrun_R",
+    );
+    let seenSessionId: string | undefined;
+
+    const response = await route("POST", "/eve/v1/session", {
+      auth: none(),
+      onMessage(ctx) {
+        seenSessionId = ctx.eve.sessionId;
+        return { auth: null };
+      },
+    })(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({ message: "hello" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(202);
+    expect(seenSessionId).toBe("wrun_R");
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "wrun_R" }));
   });
 
   it("continues a remote-agent trace for callback sessions", async () => {

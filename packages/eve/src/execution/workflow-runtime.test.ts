@@ -14,6 +14,7 @@ import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
+  reserveSessionId,
   waitForCommandHookOwner,
   waitForSessionInbox,
   sessionTimeoutWorkflowReference,
@@ -612,6 +613,31 @@ describe("createWorkflowRuntime#createSession", () => {
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
     expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("starts the session on an id the World reserved ahead of time", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    let minted = 0;
+    getWorldMock.mockResolvedValue({ ...world, createRunId: () => `REGION${++minted}` });
+    // Mirrors @workflow/core start(): the run id is `wrun_` plus the World's createRunId().
+    startMock.mockImplementation(
+      async (_workflow, _args, options: { world: { createRunId(): string } }) => ({
+        runId: `wrun_${options.world.createRunId()}`,
+      }),
+    );
+
+    const sessionId = await reserveSessionId();
+    const handle = await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      sessionId,
+    });
+
+    expect(sessionId).toBe("wrun_REGION1");
+    expect(handle.sessionId).toBe("wrun_REGION1");
   });
 
   it("returns an MCP invocation without checking continuation ownership", async () => {

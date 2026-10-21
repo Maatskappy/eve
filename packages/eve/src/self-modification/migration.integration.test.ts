@@ -42,7 +42,7 @@ it("rejects the retired layout with mount guidance without deleting authored fil
     writeConfig: vi.fn(),
   };
   await expect(prepareLocalSelfModificationSetup(contexts.prepare, operations)).rejects.toThrow(
-    /agent\/subagents\/self-modification.*eve\/self-modification\/local/,
+    /agent\/subagents\/self-modification.*eve\/extensions\/self-modification\/local/,
   );
   expect(await readFile(join(directory, "notes.md"), "utf8")).toBe(notes);
   expect(operations.writeConfig).not.toHaveBeenCalled();

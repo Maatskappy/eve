@@ -75,6 +75,54 @@ function folded(lines: readonly StoredLine[], retention?: "operational") {
 }
 
 describe("the shared fold", () => {
+  it("keeps the first introduction, valid status update, and terminal for a retained delivery", () => {
+    const view = folded([
+      {
+        at,
+        facts: [
+          { type: "session.started", data: {} },
+          { type: "delivery.admitted", data: { deliveryId: "d", source: { channel: "first" } } },
+          {
+            type: "turn.started",
+            data: { turnId: "turn_0", cause: { deliveryId: "d" }, follows: null },
+          },
+        ],
+      },
+      {
+        at,
+        facts: [
+          { type: "delivery.admitted", data: { deliveryId: "d", source: { channel: "repeated" } } },
+          { type: "delivery.consumed", data: { deliveryId: "d", turnId: "turn_0", parts: [] } },
+        ],
+      },
+      {
+        at,
+        facts: [
+          { type: "delivery.consumed", data: { deliveryId: "d", turnId: "turn_1", parts: [] } },
+          { type: "turn.settled", data: { turnId: "turn_0", outcome: "completed" } },
+          { type: "delivery.settled", data: { deliveryId: "d", outcome: "handled" } },
+        ],
+      },
+      {
+        at,
+        facts: [
+          { type: "delivery.settled", data: { deliveryId: "d", outcome: "failed" } },
+          { type: "delivery.admitted", data: { deliveryId: "d", source: { channel: "late" } } },
+        ],
+      },
+    ]);
+
+    expect(view.deliveries.d).toMatchObject({
+      source: { channel: "first" },
+      introducedAt: 0,
+      consumedAt: 1,
+      turnId: "turn_0",
+      status: "settled",
+      outcome: "handled",
+      closedAt: 2,
+    });
+  });
+
   it("exposes no active work after a degraded session end, without inventing row settlements", () => {
     const view = folded(turnLines(0, { opensSession: true }).slice(0, 2));
     foldLines(

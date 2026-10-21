@@ -3,7 +3,6 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDevelopmentGenerationArtifactsSource } from "#internal/nitro/host/artifacts-config.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import {
@@ -12,7 +11,10 @@ import {
   type SandboxSelectorContext,
 } from "#shared/sandbox-environment.js";
 
-import { getRuntimeCompiledArtifactsSandboxAppRoot } from "#runtime/compiled-artifacts-source.js";
+import {
+  createDevelopmentRuntimeCompiledArtifactsSource,
+  getRuntimeCompiledArtifactsSandboxAppRoot,
+} from "#runtime/compiled-artifacts-source.js";
 import {
   getLocalDevCapability,
   installLocalDevCapabilityEnvironment,
@@ -37,9 +39,10 @@ describe("local self-modification sandbox", () => {
       serverUrl: "http://127.0.0.1:3000",
     });
     try {
-      // ensure.ts opens sandboxes at this root; the instructions name the capability's root.
+      // Every dev generation source comes from this helper, and ensure.ts opens sandboxes
+      // at its sandbox app root; the instructions name the capability's root.
       const sandboxAppRoot = getRuntimeCompiledArtifactsSandboxAppRoot(
-        createDevelopmentGenerationArtifactsSource({ appRoot, runtimeAppRoot: snapshotRoot }),
+        createDevelopmentRuntimeCompiledArtifactsSource({ appRoot, runtimeAppRoot: snapshotRoot }),
       );
       const environment = getBoundSandboxEnvironment(defineSelfModificationSandbox());
       expect(environment?.provider).toBe("host");

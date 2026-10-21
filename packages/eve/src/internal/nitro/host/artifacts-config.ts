@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createDevelopmentRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { resolveDevelopmentRuntimeArtifactsPointerPath } from "#internal/nitro/dev-runtime-artifacts.js";
 import type {
   DevelopmentNitroArtifactsConfig,
@@ -20,12 +20,13 @@ export function createDevelopmentGenerationArtifactsSource(input: {
   readonly configuredWorld?: AgentWorkflowWorldDefinition;
   readonly runtimeAppRoot: string;
 }) {
-  return createDiskRuntimeCompiledArtifactsSource(input.runtimeAppRoot, {
+  return createDevelopmentRuntimeCompiledArtifactsSource({
+    appRoot: input.appRoot,
     durableReference: usesParentDevelopmentWorkflowWorld(input.configuredWorld)
       ? "development-generation"
       : undefined,
     moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
-    sandboxAppRoot: input.appRoot,
+    runtimeAppRoot: input.runtimeAppRoot,
   });
 }
 

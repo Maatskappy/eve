@@ -57,6 +57,25 @@ export function createBundledRuntimeCompiledArtifactsSource(
 }
 
 /**
+ * Creates the source for a dev runtime generation, which loads artifacts from
+ * a snapshot under `runtimeAppRoot`. Sandboxes still open at the authored
+ * `appRoot`, the directory eve dev reports as the app root, so host sandbox
+ * paths and local self-modification name the developer's real files.
+ */
+export function createDevelopmentRuntimeCompiledArtifactsSource(input: {
+  readonly appRoot: string;
+  readonly durableReference?: "development-generation";
+  readonly moduleMapLoaderPath?: string;
+  readonly runtimeAppRoot: string;
+}): RuntimeDiskCompiledArtifactsSource {
+  return createDiskRuntimeCompiledArtifactsSource(input.runtimeAppRoot, {
+    durableReference: input.durableReference,
+    moduleMapLoaderPath: input.moduleMapLoaderPath,
+    sandboxAppRoot: input.appRoot,
+  });
+}
+
+/**
  * Creates the disk-backed compiled-artifact source for one authored app root.
  */
 export function createDiskRuntimeCompiledArtifactsSource(

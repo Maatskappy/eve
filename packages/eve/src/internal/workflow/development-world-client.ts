@@ -32,7 +32,7 @@ import {
   type DevelopmentWorldCall,
   type DevelopmentWorldOperation,
 } from "#internal/workflow/development-world-protocol.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createDevelopmentRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
@@ -216,12 +216,13 @@ function createQueueHandler(
       const result = await withDevelopmentWorkflowGeneration(
         {
           generationId,
-          source: createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot, {
+          source: createDevelopmentRuntimeCompiledArtifactsSource({
+            appRoot,
             durableReference: "development-generation",
             moduleMapLoaderPath: resolvePackageSourceFilePath(
               "src/internal/authored-module-map-loader.ts",
             ),
-            sandboxAppRoot: appRoot,
+            runtimeAppRoot,
           }),
         },
         async () =>

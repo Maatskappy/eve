@@ -1,6 +1,6 @@
 import {
   createBundledRuntimeCompiledArtifactsSource,
-  createDiskRuntimeCompiledArtifactsSource,
+  createDevelopmentRuntimeCompiledArtifactsSource,
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
@@ -44,10 +44,11 @@ export function resolveNitroCompiledArtifactsSource(
       readDevelopmentRuntimeArtifactsSnapshotRoot(config.devRuntimeArtifactsPointerPath) ??
       config.appRoot;
 
-    return createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot, {
+    return createDevelopmentRuntimeCompiledArtifactsSource({
+      appRoot: config.appRoot,
       durableReference: config.durableArtifactsReference,
       moduleMapLoaderPath: config.moduleMapLoaderPath,
-      sandboxAppRoot: config.appRoot,
+      runtimeAppRoot,
     });
   }
 

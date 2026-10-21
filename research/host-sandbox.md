@@ -139,52 +139,72 @@ describes only the engine and eve owns the contract:
 
 ```ts
 defineSandboxBackend<Options>({
-  name: "just-bash",
-  workspaceRoot: "/workspace", // or (ctx, options) => string
-  directoryTemplate?: true,
-  keyedToolSessions?: true,
+  name: "just-bash", // [a-z0-9-]; host, docker, vercel are reserved
+  workspaceRoot: "/workspace",
   open(ctx, options): Promise<{ instance; created?: boolean }>, // find-or-create
-  find?(ctx, options): Promise<instance | undefined>, // resume; undefined => gone
+  find(ctx, options): Promise<instance | undefined>, // required unless directoryTemplate
   remove?(ctx, options): Promise<void>, // idempotent; default rm ctx.directory
+  directoryTemplate?: true,
 });
 // instance: exec -> { stdout, stderr, exitCode } | { stdout, stderr, exited, kill },
 //           readFile -> bytes | string | null, writeFile(path, bytes),
-//           removePath? (default rm via exec), stop?, dispose?
-// ctx: key (name-safe, per app storage path and session id), directory
-//      (eve-owned per-session dir), session, resolveProjectPath.
+//           removePath? (default rm via exec), stop?
+// ctx: key (name-safe, per app directory and session), directory (eve-owned
+//      per-session dir), session.
 ```
 
 `environment()` accepts the backend's options plus `prepare`. eve seeds a sandbox
 only when `open` reports `created`: workspace files under `workspaceRoot`,
 authored skills at the sandbox's resolved skill root, then `prepare`; on failure
 it stops and removes the sandbox so a later open cannot reconnect to it
-half-seeded. Every open refreshes authored skills through the marker described
-under [Modes](#modes). eve injects `AI_AGENT=eve`, normalizes buffered and
-streaming exec (killing streaming commands on abort), maps `stop()` to stop,
-delete, and shutdown and `dispose()` to keyed tool-session release, and throws
-`SandboxSessionGoneError` when `find` returns `undefined` (or, without `find`,
-when `ctx.directory` is missing). `defineSandboxProvider` stays for full control
-such as snapshots and network policies, and `SandboxSessionGoneError` stays
-exported for those providers. `createSandboxSession` never shipped and is gone.
+half-seeded. Seeding runs after `open` returns, so another process can use a
+sandbox it opened mid-seed; backends that run several eve processes against one
+engine add a lock. Every open refreshes authored skills through the marker
+described under [Modes](#modes). eve injects `AI_AGENT=eve`, normalizes buffered
+and streaming exec (killing streaming commands on abort), and maps `stop()` to
+stop, delete, and shutdown.
+
+Resume calls `find`. When it returns `undefined`, eve calls `remove` before
+throwing `SandboxSessionGoneError`, so a partly removed sandbox (such as a host
+session whose workspace alone was deleted) cannot survive into the next start.
+Without `find`, only a `directoryTemplate` backend can resume: it reopens a
+template copy while `ctx.directory` exists, so no resume path returns an
+unseeded sandbox. A state whose key differs from the current one, because the
+app moved, is also gone. `defineSandboxProvider` stays for full control such as
+remote sandboxes, snapshots, and network policies, and `SandboxSessionGoneError`
+stays exported for those providers.
 
 `directoryTemplate` is the one opt-in for directory-backed engines: eve seeds
 and prepares a template directory once per build and copies it
 (copy-on-write where supported) into `ctx.directory` before the first open.
 Without it, `prepare` would run per session, a regression for `HostSandbox`
-and the former just-bash provider, which both cached it per template.
+and the former just-bash provider, which both cached it per template. The
+template key covers the workspace and skill resources and the `sandbox.ts`
+revision, not the options: hashing arbitrary option objects breaks on cycles
+and misses functions. The revision hashes only `sandbox.ts`, so edits to files it
+imports need the template directory cleared; hashing the bundled sandbox module
+instead would close that gap.
+
+Backends are for engines on the machine running eve. Docker bakes resources
+into its template image and Vercel into a snapshot, but a backend without
+`directoryTemplate` seeds new sandboxes from the build's files under
+`.eve/sandbox-cache/<name>/`, and `ctx.key` includes the app's absolute path
+so VM and container names stay unique per app. Carrying resources into the
+runtime would lift that limit at the cost of core changes; the docs state
+"build and run on the same machine" instead.
 
 `HostSandbox` is built from two internal backend definitions over the same
 core: per-session mode uses `directoryTemplate` and reports a missing
 workspace as gone; shared-root mode has no template, so eve writes no
 workspace files into the author's directory, and its `find` rejects with the
-plain missing-root error. Process groups, job kills, env filtering,
-`EVE_SANDBOX_SKILL_ROOT`, and `EVE_SANDBOX_JOB_ROOT` stay in the host
-instance; it needs no host-specific backend surface. The just-bash guide's
-backend runs in the `agent-mcp` e2e fixture so CI exercises it.
-
-A backend keeps its prepared files under the app's
-`.eve/sandbox-cache/<name>/`, so it builds and runs on the same machine, as the
-local providers already did.
+plain missing-root error. It uses internal-only extensions: a workspace root
+derived from the session, the app root for `.env` filtering, keyed
+tool-session support, and a per-instance `dispose` for releasing a keyed call.
+Process groups, job kills, env filtering, `EVE_SANDBOX_SKILL_ROOT`, and
+`EVE_SANDBOX_JOB_ROOT` stay in the host instance. On Windows its `prepare` is a
+no-op and opening fails with the WSL/Docker message. The just-bash guide's
+backend runs in the `agent-tools-sandbox` e2e fixture, behind a subagent with
+its own sandbox, so CI exercises it.
 
 ## Commands and environment
 

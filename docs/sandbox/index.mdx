@@ -176,151 +176,151 @@ Each call sends the same bytes for the same file, so the model still sees attach
 
 eve offers two ways to add a sandbox engine:
 
-- **Sandbox backends:** define one with `defineSandboxBackend()` when your engine can open, find, and remove a sandbox for a session. You describe only the engine; eve provides sessions, seeding, preparation, and cleanup.
-- **Full-control providers:** define one with `defineSandboxProvider()` when you need to own templates, snapshots, or network policies.
+- **Sandbox backends:** define one with `defineSandboxBackend()` for an engine that runs on the machine running eve, such as a local VM, container, or shell runtime. You describe how to open, find, and remove a sandbox for a session; eve provides sessions, seeding, preparation, and cleanup. Backends keep each build's files under the app's `.eve/sandbox-cache/<name>/` directory, so build and run the app on the same machine.
+- **Full-control providers:** define one with `defineSandboxProvider()` for anything else, such as remote sandboxes, snapshots, network policies, or state that must survive a move to another machine.
 
 ### Sandbox backends
 
-A backend opens its engine's sandbox for a session and returns an instance that runs commands and reads and writes files:
+A backend opens its engine's sandbox for a session and returns an instance that runs commands and reads and writes files. This example wraps Acme VM, a hypothetical engine that runs microVMs on the same machine:
 
 ```ts
 import { defineSandboxBackend, type SandboxBackendInstance } from "eve/sandbox/provider";
+import { AcmeVm, type AcmeVmHandle } from "acme-vm";
 
-export const AcmeSandbox = defineSandboxBackend<{ image?: string }>({
-  name: "acme",
-  workspaceRoot: "/workspace",
-  async open(ctx, options) {
-    // Returns the sandbox with this name, or atomically creates it.
-    const { sandbox, created } = await acme.getOrCreate({ image: options.image, name: ctx.key });
-    return { created, instance: adaptAcmeSandbox(sandbox) };
-  },
-  async find(ctx) {
-    const sandbox = await acme.find(ctx.key);
-    return sandbox === undefined ? undefined : adaptAcmeSandbox(sandbox);
-  },
-  remove: (ctx) => acme.deleteIfExists(ctx.key),
-});
-
-function adaptAcmeSandbox(sandbox: AcmeRemote): SandboxBackendInstance {
+function adapt(vm: AcmeVmHandle): SandboxBackendInstance {
   return {
-    exec: ({ command, cwd, env }) => sandbox.run(command, { cwd, env }),
-    readFile: (path) => sandbox.readFileOrNull(path),
-    writeFile: (path, content) => sandbox.writeFile(path, content),
-    stop: () => sandbox.stop(),
+    exec: ({ command, cwd, env }) => vm.run(command, { cwd, env }),
+    readFile: (path) => vm.readFileOrNull(path),
+    writeFile: (path, content) => vm.writeFile(path, content),
+    stop: () => vm.stop(),
   };
 }
+
+export const AcmeVmSandbox = defineSandboxBackend<{ image?: string }>({
+  name: "acme-vm",
+  workspaceRoot: "/workspace",
+  async open(ctx, options) {
+    // Returns the VM with this name, or atomically creates it.
+    const { created, vm } = await AcmeVm.findOrCreate({
+      image: options.image ?? "ubuntu:24.04",
+      name: ctx.key,
+    });
+    return { created, instance: adapt(vm) };
+  },
+  async find(ctx) {
+    const vm = await AcmeVm.find(ctx.key);
+    return vm === undefined ? undefined : adapt(vm);
+  },
+  remove: (ctx) => AcmeVm.removeIfExists(ctx.key),
+});
 ```
 
 The definition describes the engine:
 
-- `name` names the provider and its cache directory, using lowercase letters, digits, and hyphens.
+- `name` names the provider and its cache directory, using lowercase letters, digits, and hyphens. `host`, `docker`, and `vercel` belong to built-in providers.
 - `workspaceRoot` is the absolute path where commands start and relative paths resolve. eve writes the agent's workspace files under it.
 - `open(ctx, options)` finds or creates the session's sandbox. Concurrent calls for one session, even from separate processes, must end up with the same sandbox. Return `created: true` when this call created it.
-- `find(ctx, options)` finds the existing sandbox when eve resumes a session, or returns `undefined` when it no longer exists. Without `find`, eve reopens with `open()` while `ctx.directory` exists.
+- `find(ctx, options)` finds the existing sandbox when eve resumes a session. Return `undefined` when it no longer exists: eve calls `remove()` to clear what is left, then starts the session over with a fresh sandbox. `find()` is required unless the backend sets `directoryTemplate`.
 - `remove(ctx, options)` removes the session's sandbox and must succeed when nothing exists. Without it, eve deletes `ctx.directory`.
-- `directoryTemplate: true` prepares a template directory once per build and copies it into each new session's `ctx.directory` before `open()`. Use it for engines whose whole state lives in that directory.
-- `keyedToolSessions: true` lets [MCP tool sessions](/docs/channels/mcp#tool-sessions) keep the sandbox between `invokeTool` calls with a `key`. Nothing removes those sandboxes, so enable it only when they stay cheap.
+- `directoryTemplate: true` prepares a template directory once per build and copies it into each new session's `ctx.directory` before `open()`. Use it for engines whose whole state lives in that directory. Without `find()`, eve reopens the session with `open()` while `ctx.directory` exists. eve rebuilds the template when the workspace files, the skills, or `agent/sandbox/sandbox.ts` change. Editing a file that `sandbox.ts` imports does not rebuild it, so delete `.eve/sandbox-cache/<name>/templates/` after such a change.
 
-Every hook receives `ctx` with the session's `key`, a stable name made of lowercase letters, digits, and hyphens that is unique per app and session, so it can name a container or VM. `ctx.directory` is the session's directory under the app's `.eve/sandbox-cache/<name>/sessions/`, `ctx.session` is the session, and `ctx.resolveProjectPath()` resolves paths against the app root.
+Every hook receives `ctx` with the session's `key`, a stable name made of lowercase letters, digits, and hyphens that is unique per app directory and session, so it can name a container or VM. `ctx.directory` is the session's directory under the app's `.eve/sandbox-cache/<name>/sessions/`, and `ctx.session` is the session. Because the key includes the app's absolute path, moving the app directory makes eve treat existing sandboxes as gone and create new ones; remove the old ones with your engine's tools.
 
-The instance's `exec()` returns `{ stdout, stderr, exitCode }` once the command finishes, or `{ stdout, stderr, exited, kill }` to stream output; eve calls `kill()` when the command's signal aborts. Output can be strings or bytes. `readFile()` returns `null` when the file does not exist, and `writeFile()` creates parent directories. `removePath()` defaults to running `rm` through `exec()`. eve calls `stop()` for `sandbox.stop()`, `sandbox.delete()`, and server shutdown, and `dispose()` after a keyed tool-session call.
+The instance's `exec()` returns `{ stdout, stderr, exitCode }` once the command finishes, or `{ stdout, stderr, exited, kill }` to stream output; eve calls `kill()` when the command's signal aborts. Output can be strings or bytes. `readFile()` returns `null` when the file does not exist, and `writeFile()` creates parent directories. `removePath()` defaults to running `rm` through `exec()`. eve calls `stop()` for `sandbox.stop()`, `sandbox.delete()`, and server shutdown.
 
 eve provides the rest of the provider contract:
 
-- **Seeding:** when `open()` reports a created sandbox, eve writes the workspace files and skill packages through `writeFile()`, then runs the environment's `prepare` option, which every backend accepts. If that fails, eve removes the sandbox so a later open creates it again. With `directoryTemplate`, eve does this once in the template instead.
-- **Rebuilds:** an existing sandbox keeps its files, and eve replaces its authored skills with the current build's.
-- **Commands:** every command gets `AI_AGENT=eve` plus the `env` eve passes for it.
-- **Lifecycle:** eve stops the sandbox for `sandbox.stop()` and server shutdown, and removes it for `sandbox.delete()` and at session end. When `find()` returns `undefined`, eve starts the session over with a fresh sandbox.
-
-A backend keeps its prepared files and templates under the app's `.eve/sandbox-cache/<name>/` directory, so build and run the app on the same machine.
+- **Seeding:** when `open()` reports a created sandbox, eve writes the workspace files and skill packages through `writeFile()`, then runs the environment's `prepare` option, which every backend accepts. If any of that fails, eve stops and removes the sandbox so a later open creates it again. With `directoryTemplate`, eve does this once in the template instead.
+- **Concurrent opens:** eve seeds after `open()` returns, so another eve process that opens the same sandbox in the meantime can use it before seeding finishes. If several eve processes share one engine, hold a lock, such as a file lock, around `open()` and the first use of the sandbox.
+- **Rebuilds:** an existing sandbox keeps its files, and eve replaces its authored skills with the current build's on the next open.
+- **Commands:** every command gets `AI_AGENT=eve` plus the `env` eve passes for it. On every open, eve runs one command that reads `$HOME` to find the skill directory.
+- **Lifecycle:** eve stops the sandbox for `sandbox.stop()` and server shutdown, stops and removes it for `sandbox.delete()`, and removes it at session end.
 
 ### Full-control providers
 
-`defineSandboxProvider()` from `eve/sandbox/provider` gives you the whole provider contract. The five generic parameters describe environment options, live options, the prepared artifact, minimal serialized session state, and the provider-specific sandbox session type:
+`defineSandboxProvider()` from `eve/sandbox/provider` exposes the whole provider contract: you prepare a JSON-serializable artifact, start and resume sandboxes, and clean up at session end. The handle's `sandbox` must implement the full `SandboxSession` surface; eve does not build it for you. This example assumes Acme's SDK returns sandboxes that already implement it:
 
 ```ts
 import type { SandboxSession } from "eve/sandbox";
-import { defineSandboxProvider } from "eve/sandbox/provider";
+import {
+  defineSandboxProvider,
+  type SandboxProviderHandle,
+  SandboxSessionGoneError,
+} from "eve/sandbox/provider";
+import { acme, type AcmeRemoteSandbox } from "acme-sdk";
+
+const createHandle = (sandbox: AcmeRemoteSandbox): SandboxProviderHandle => ({
+  sandbox,
+  onRuntimeShutdown: async () => {},
+  onSandboxDelete: () => sandbox.destroy(),
+  onSandboxStop: () => sandbox.stop(),
+});
+// The session id alone names the sandbox, so every caller finds the same one.
+const sandboxName = (sessionId: string) => `eve-${sessionId}`;
 
 export const AcmeSandbox = defineSandboxProvider<
   { image: string; prepare?: (sandbox: SandboxSession) => Promise<void> },
   { networkPolicy?: "allow-all" | "deny-all" },
-  { templateId: string },
-  { name: string; version: 1 },
-  SandboxSession
+  { snapshotId: string },
+  { name: string; version: 1 }
 >({
   name: "acme",
   environment(options) {
-    const client = createAcmeClient(options);
-    // The session key alone names the sandbox, so every caller finds the same one.
-    const sandboxName = (sessionId: string) => `eve-${sessionId}`;
-
     return {
-      async onSessionEnd(ctx, state, { reason }) {
-        // `state` is null when the session never recorded it, for example when
-        // only a subagent that shares the sandbox opened it.
-        await client.deleteIfExists({ name: state?.name ?? sandboxName(ctx.session.id), reason });
-      },
-
       async prepare(ctx) {
-        const temporary = await client.createTemporary({
-          files: await ctx.files.list(),
-          resources: ctx.resources,
+        const files = (ctx.resources.workspace?.files ?? []).map((file) => ({
+          content: file.content,
+          path: `/workspace/${file.relativePath}`,
+        }));
+        const snapshot = await acme.snapshot({
+          files,
+          image: options.image,
+          setup: options.prepare,
         });
-        const sandbox = adaptAcmeSandbox(temporary);
-        await options?.prepare?.(sandbox);
-        return { templateId: (await temporary.capture()).id };
+        return { snapshotId: snapshot.id };
       },
-
       async start(ctx, liveOptions, artifact) {
         const name = sandboxName(ctx.session.id);
-        // Returns the sandbox with this name, or atomically creates it with these options.
-        const remote = await client.getOrCreate({
+        // Returns the sandbox with this name, or atomically creates it from the snapshot.
+        const sandbox = await acme.getOrCreate({
           name,
           networkPolicy: liveOptions?.networkPolicy,
-          templateId: artifact.templateId,
+          snapshotId: artifact.snapshotId,
         });
-        return { handle: createHandle(remote), state: { name, version: 1 } };
+        return { handle: createHandle(sandbox), state: { name, version: 1 } };
       },
-
-      async resume(_ctx, artifact, state) {
-        const remote = await client.resume({ name: state.name, templateId: artifact.templateId });
-        return createHandle(remote);
+      async resume(_ctx, _artifact, state) {
+        const sandbox = await acme.find(state.name);
+        if (sandbox === undefined) {
+          throw new SandboxSessionGoneError(`Acme sandbox "${state.name}" no longer exists.`);
+        }
+        return createHandle(sandbox);
+      },
+      async onSessionEnd(ctx, state) {
+        // `state` is null when the session never recorded it, for example when
+        // only a subagent that shares the sandbox opened it.
+        await acme.deleteIfExists(state?.name ?? sandboxName(ctx.session.id));
       },
     };
   },
 });
 ```
 
-`prepare()` returns the complete JSON-serializable artifact.
+The generic parameters describe environment options, live options, the prepared artifact, minimal serialized session state, and an optional provider-specific sandbox session type. `prepare()` returns the complete JSON-serializable artifact.
 
 `start()` must be an idempotent upsert keyed by `ctx.session.id`: return the live sandbox for that key when one exists, and create it otherwise. eve can call `start()` for one key more than once, from different processes and deployments, and concurrently. A subagent that shares its parent's sandbox can open it before the parent does, and two processes can race to create it. Derive the sandbox's identity from the key, plus a provider-level namespace such as a project or account when names would otherwise collide. Never derive it from the open options or the artifact, which can differ between callers and deployments; apply them only when `start()` creates the sandbox. eve persists the minimal JSON-compatible state `start()` returns. Process restarts call `resume()` with only the current context, that state, and the target deployment's exact artifact.
 
 `onSessionEnd()` is required. eve calls it for every owning durable session that reaches a completed, expired, or failed terminal outcome, including sessions with no recorded sandbox state. A failed step or process loss can create a sandbox before its state is checkpointed, so the last checkpoint cannot establish that no sandbox exists. The hook receives the session context, the persisted provider state or `null`, and a `reason` of `"completed"`, `"expired"`, or `"failed"`. Delete whatever exists under `ctx.session.id` without depending on a live handle, and find it from the key when the state is `null`. The hook must succeed when nothing exists and must be idempotent: eve retries the cleanup step and logs an exhausted failure without replacing the session's terminal outcome. A subagent that shares its parent's sandbox does not call the hook, because cleanup belongs to the parent. An `invokeTool` call without a key also calls `onSessionEnd()` when the call ends if it requested sandbox access, including an initialization attempt that failed.
 
-Provider handles implement `onSandboxStop()`, `onRuntimeShutdown()`, and `onSandboxDelete()`. These handle-level methods cover authored stop or delete calls and process shutdown; `onSessionEnd()` is the single provider hook for durable terminal session cleanup. eve does not delete a sandbox whose initialization failed: the next access runs the selector against it again, and session end removes it.
+Provider handles implement `onSandboxStop()`, `onRuntimeShutdown()`, and `onSandboxDelete()`. These handle-level methods cover authored stop or delete calls and process shutdown; `onSessionEnd()` is the single provider hook for durable terminal session cleanup. When the initialization that `defineSandbox()` runs after `open()` fails, eve does not delete the sandbox: the next access runs the selector against it again, and session end removes it.
 
 Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and does not recreate it, because initialization that `defineSandbox()` runs after `open()` would not run again.
 
-When the native sandbox no longer exists, throw `SandboxSessionGoneError` from `eve/sandbox/provider` in `resume()`. eve then clears the session's provider state and reruns the selector, whose `start()` creates a fresh sandbox, as after `sandbox.delete()`. Any other error from `resume()` leaves the state in place, so every sandbox call in that session fails with that error until the session ends:
-
-```ts
-import { SandboxSessionGoneError } from "eve/sandbox/provider";
-
-async function resume(_ctx: unknown, _artifact: unknown, state: { name: string }) {
-  const remote = await client.find(state.name);
-  if (remote === undefined) {
-    throw new SandboxSessionGoneError(`Acme sandbox "${state.name}" no longer exists.`);
-  }
-  return createHandle(remote);
-}
-```
-
-A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
+When the native sandbox no longer exists, throw `SandboxSessionGoneError` from `resume()`, as the example does. eve then clears the session's provider state and reruns the selector, whose `start()` creates a fresh sandbox, as after `sandbox.delete()`. Any other error from `resume()` leaves the state in place, so every sandbox call in that session fails with that error until the session ends.
 
 Preparation discovers authored files through `ctx.files`; core keeps project layout and artifact storage keys private. Keep provider SDK values behind the provider. `environment.open()` preserves the provider's sandbox capability type, while the heterogeneous runtime registry erases it to eve's common session surface.
 
-A handle's `sandbox` must implement the full `SandboxSession` surface. eve passes paths to it unresolved, and `sandbox.resolvePath()` declares the sandbox's workspace root: relative paths resolve from it, and `resolvePath(".")` is the directory that `glob`, `grep`, attachment staging, and error messages use. Return `null` from `readFile()` when the file does not exist.
+The handle's `sandbox.resolvePath()` declares the sandbox's workspace root: relative paths resolve from it, and `resolvePath(".")` is the directory that `glob`, `grep`, attachment staging, and error messages use. `readFile()` returns `null` when the file does not exist.
 
 ### Skill directory
 

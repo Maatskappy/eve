@@ -39,7 +39,6 @@ export const JustBashSandbox = defineSandboxBackend<JustBashOptions>({
   workspaceRoot: "/workspace",
   // eve prepares one template directory per build and copies it into each session's directory.
   directoryTemplate: true,
-  keyedToolSessions: true,
   async open(ctx, options) {
     // eve stages PDFs up to 20 MiB, past just-bash's default 10 MB read limit.
     const root = new ReadWriteFs({ maxFileReadSize: Number.MAX_SAFE_INTEGER, root: ctx.directory });
@@ -55,7 +54,7 @@ export const JustBashSandbox = defineSandboxBackend<JustBashOptions>({
       instance: {
         exec: ({ command, cwd, env, signal }) =>
           bash.exec(command, { cwd, env: { ...env }, signal }),
-        readFile: (path) => fs.readFileBuffer(path).catch(() => null),
+        readFile: async (path) => ((await fs.exists(path)) ? await fs.readFileBuffer(path) : null),
         async writeFile(path, content) {
           await fs.mkdir(posix.dirname(path), { recursive: true });
           await fs.writeFile(path, content);
@@ -86,11 +85,10 @@ export default defineSandbox(() => environment.open());
 
 The provider describes only the just-bash shell. eve's [sandbox backend contract](/docs/sandbox#sandbox-backends) does the rest:
 
-- **Template:** with `directoryTemplate`, eve prepares one template directory per build under `.eve/sandbox-cache/just-bash/templates/` in your app. It writes `agent/sandbox/workspace/` files under `/workspace` and skill packages under `/home/agent/.agents/skills`, then runs the environment's `prepare` function there.
+- **Template:** with `directoryTemplate`, eve prepares one template directory per build under `.eve/sandbox-cache/just-bash/templates/` in your app. It writes `agent/sandbox/workspace/` files under `/workspace` and skill packages under `/home/agent/.agents/skills`, then runs the environment's `prepare` function there. eve rebuilds the template when those files or `agent/sandbox/sandbox.ts` change. Editing `agent/lib/just-bash.ts` alone does not rebuild it, so delete `.eve/sandbox-cache/just-bash/templates/` after changing the provider.
 - **Sessions:** each eve session gets its own directory under `.eve/sandbox-cache/just-bash/sessions/`, passed to `open()` as `ctx.directory`. eve copies the template into it the first time the session opens, so existing sessions keep their files after a rebuild. A rebuild still replaces the session's authored skills.
 - **Paths:** the session directory is the root of the just-bash filesystem. Commands start in `/workspace`, relative paths resolve from it, and `$HOME` is `/home/agent`.
 - **Cleanup:** `sandbox.delete()` and session end delete the session directory. If the directory was removed outside eve, eve starts the session over with a fresh copy of the template.
-- **Keyed tool sessions:** `keyedToolSessions` lets [MCP tool sessions](/docs/channels/mcp#tool-sessions) keep a session directory between `invokeTool` calls with a `key`. eve never removes those directories.
 - **Environment:** every command gets `AI_AGENT=eve` plus the `env` eve passes for that command.
 
 ## Add custom commands

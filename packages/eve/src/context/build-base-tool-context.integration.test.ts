@@ -39,7 +39,7 @@ function acmeProvider() {
   const resume = vi.fn(openHandle);
   const environment = defineSandboxProvider<undefined, undefined, null, null, AcmeSandboxSession>({
     name: "acme",
-    environment: () => ({ prepare: async () => null, resume, start }),
+    environment: () => ({ onSessionEnd: async () => {}, prepare: async () => null, resume, start }),
   }).environment();
   const registry: RuntimeSandboxRegistry = {
     sandbox: {

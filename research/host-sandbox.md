@@ -170,6 +170,19 @@ auto-install scenario, and the docs page (permanently redirected to
 `/sandbox/host`). `SandboxProviderHost.loadOptionalPackage` stays because it is
 part of the public extension contract.
 
+## Known limitations
+
+- A `bash` command that expands `$HOME` itself sees the real home directory;
+  only eve's file tools map `$HOME/.agents/skills` to the session skill root.
+- Sessions that share a `root` share its files and can overwrite each other.
+- Commands run detached in their own process group, so they outlive an eve
+  process that exits without shutting down (for example after `kill -9`).
+- The model learns the absolute workspace root at its first sandbox call, not
+  from the system prompt.
+- Fixtures that hardcode `/workspace` or need the eve base image (Python,
+  `/home/vercel-sandbox`) pin `DockerSandbox` off Vercel instead of moving to
+  the development default.
+
 ## Breaking changes
 
 - `eve/sandbox/just-bash` and `DefaultSandbox.environment({ justBash })` are

@@ -58,7 +58,11 @@ function createFakeAccess(
         async setNetworkPolicy() {},
         async removePath() {},
         resolvePath(path: string) {
-          return options.pathResolver ? options.pathResolver(path) : path;
+          return options.pathResolver
+            ? options.pathResolver(path)
+            : path.startsWith("/")
+              ? path
+              : `/workspace/${path}`;
         },
         async run({ command }: { command: string }) {
           if (command === HOME_PROBE_COMMAND) {

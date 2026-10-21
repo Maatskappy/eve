@@ -12,6 +12,14 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it selects [Docker](/docs/sandbox/docker) when a Docker daemon is reachable and falls back to [just-bash](/docs/sandbox/just-bash) otherwise.
+`DefaultSandbox` picks one provider when the environment is created:
+
+1. On Vercel, [Vercel Sandbox](/docs/sandbox/vercel).
+2. During `eve dev` and `eve eval`, the [host sandbox](/docs/sandbox/host), which runs commands on your machine in a per-session directory without isolation.
+3. Otherwise, [Docker](/docs/sandbox/docker) when a Docker daemon is reachable.
+
+When none of these apply, for example `eve start` on a server without Docker, `eve build` still succeeds, but opening the sandbox fails with an error that names the available choices. Start Docker, deploy to Vercel, or select a provider explicitly in `agent/sandbox/sandbox.ts`. eve never selects the host sandbox in production; to run commands directly on a server, use `HostSandbox.environment()` explicitly.
+
+The `prepare` option applies to whichever provider `DefaultSandbox` selects. The `docker` and `vercel` options apply only when that provider is selected.
 
 Use a provider directly when you need its image, VM, network, compute, or mount options.

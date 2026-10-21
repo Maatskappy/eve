@@ -90,7 +90,7 @@ This adds conversation text as context to the replacement session.
 
 ## Select a sandbox provider
 
-The default sandbox environment selects Docker when a Docker daemon is reachable and falls back to just-bash otherwise. You can select one explicitly or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
+The default sandbox environment selects Docker when a Docker daemon is reachable. Without Docker, the build succeeds but the first sandbox access fails with an error that lists the available providers. You can select one explicitly, including `HostSandbox.environment()` to run commands directly on the server without isolation, or implement a custom provider with `defineSandboxProvider()` for your container, virtual machine, or isolation service.
 
 Don’t select `VercelSandbox.environment()` unless the self-hosted process should create hosted Vercel sandboxes. See [Sandbox](../../sandbox) for provider configuration and selection order.
 

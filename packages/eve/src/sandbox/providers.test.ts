@@ -3,15 +3,36 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { defineDefaultSandboxProvider } from "#sandbox/providers/default.js";
 import { DockerSandbox, HostSandbox, VercelSandbox } from "#sandbox/providers.js";
+import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSessionFor } from "#shared/sandbox-session.js";
 
 describe("sandbox providers", () => {
-  it("implements default selection through the provider contract", () => {
+  it("selects Vercel when deployed, the host in development, then Docker", () => {
+    const select = (probes: { vercel: boolean; development: boolean; docker: boolean }) =>
+      defineDefaultSandboxProvider({
+        isDeployedOnVercel: () => probes.vercel,
+        isDevelopment: () => probes.development,
+        isDockerAvailable: () => probes.docker,
+      }).environment().provider;
+
+    expect(select({ vercel: true, development: true, docker: true })).toBe("vercel");
+    expect(select({ vercel: false, development: true, docker: true })).toBe("host");
+    expect(select({ vercel: false, development: false, docker: true })).toBe("docker");
+  });
+
+  it("prepares without a provider but fails to open with the available choices", async () => {
     const environment = defineDefaultSandboxProvider({
-      isDeployedOnVercel: () => true,
+      isDeployedOnVercel: () => false,
+      isDevelopment: () => false,
       isDockerAvailable: () => false,
     }).environment();
-    expect(environment.provider).toBe("vercel");
+    const { implementation } = getSandboxEnvironmentRuntime(environment);
+    const context = {} as Parameters<typeof implementation.start>[0];
+
+    await expect(implementation.prepare({} as never)).resolves.toEqual({});
+    await expect(implementation.start(context, undefined, {})).rejects.toThrow(
+      /Start Docker, deploy to Vercel to use Vercel Sandbox.*HostSandbox\.environment\(\)/,
+    );
   });
   it("exposes image and Dockerfile constructors only for local image providers", () => {
     expect(DockerSandbox.image("example.test/agent@sha256:abc").provider).toBe("docker");

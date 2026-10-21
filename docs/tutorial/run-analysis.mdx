@@ -3,19 +3,19 @@ title: "Run Analysis"
 description: "Part 4 of the Build an Agent tutorial. Seed the sample database schema into the sandbox workspace, then compute and chart beyond SQL."
 ---
 
-SQL tells the analytics assistant the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for. It's an isolated bash environment with a `/workspace` filesystem, and every agent gets exactly one.
+SQL tells the analytics assistant the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for. It's a bash environment with its own workspace directory, and every agent gets exactly one.
 
 This takes two pieces. First seed reference files the model can read, then compute against them.
 
 ## Seed the schema into the workspace
 
-Mount the sample database schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
+Mount the sample database schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the sandbox's workspace root, the directory where its commands start.
 
 ```text
 agent/sandbox/
   workspace/
-    schema.sql        ← lands at /workspace/schema.sql
-    notes/grain.md    ← lands at /workspace/notes/grain.md
+    schema.sql        ← lands at schema.sql in the workspace root
+    notes/grain.md    ← lands at notes/grain.md in the workspace root
 ```
 
 ```sql
@@ -29,36 +29,40 @@ Top-level workspace entries get advertised to the model automatically, so it kno
 
 ## Install the chart dependencies
 
-Python needs a sandbox that runs real binaries. For local development, start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. The `just-bash` fallback cannot run Python or install packages; installing Python on your laptop does not add it to the sandbox. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container yet.
+Without a sandbox definition, `npm run dev` uses the [host sandbox](../sandbox/host), which runs commands directly on your laptop. The chart setup installs system packages, so this chapter runs it in a container instead: start a Docker-compatible daemon and run `docker info` to verify it is reachable before restarting `npm run dev`. You can [continue to the next chapter](./remember-definitions) if you do not want to set up a local container yet.
 
-The default eve images for Docker and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
+The default eve images for Docker and Vercel Sandbox include Python, but not matplotlib. Add this definition alongside `workspace/` to use Docker locally and Vercel Sandbox after deployment, and to install matplotlib in a virtual environment. It uses the same environment for installation and chart execution, without changing the system Python:
 
 ```ts title="agent/sandbox/sandbox.ts"
-import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+import { defineSandbox, type SandboxSession } from "eve/sandbox";
+import { DockerSandbox } from "eve/sandbox/docker";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
-export const environment = DefaultSandbox.environment({
-  prepare: async (sandbox) => {
-    const commands = [
-      "sudo apt-get update && sudo apt-get install -y python3 python3-venv",
-      "python3 -m venv /workspace/.venv",
-      "/workspace/.venv/bin/python -m pip install matplotlib==3.10.8",
-      "/workspace/.venv/bin/python -c \"import matplotlib.pyplot; print('Chart dependencies ready')\"",
-    ];
-    for (const command of commands) {
-      const result = await sandbox.run({ command });
-      if (result.exitCode !== 0) {
-        throw new Error(
-          `Chart setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
-        );
-      }
+async function prepare(sandbox: SandboxSession) {
+  const commands = [
+    "sudo apt-get update && sudo apt-get install -y python3 python3-venv",
+    "python3 -m venv /workspace/.venv",
+    "/workspace/.venv/bin/python -m pip install matplotlib==3.10.8",
+    "/workspace/.venv/bin/python -c \"import matplotlib.pyplot; print('Chart dependencies ready')\"",
+  ];
+  for (const command of commands) {
+    const result = await sandbox.run({ command });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Chart setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
+      );
     }
-  },
-});
+  }
+}
+
+export const environment = process.env.VERCEL
+  ? VercelSandbox.environment({ prepare })
+  : DockerSandbox.environment({ prepare });
 
 export default defineSandbox(() => environment.open());
 ```
 
-Preparation runs when eve builds the sandbox template, and sessions inherit the installed environment. The first build needs network access to Ubuntu package repositories and PyPI. Keep the default network policy while following this example; a custom `deny-all` or allow-list policy must permit these downloads during preparation. The same definition uses Vercel Sandbox after deployment to Vercel.
+Preparation runs when eve builds the sandbox template, and sessions inherit the installed environment. The first build needs network access to Ubuntu package repositories and PyPI. Keep the default network policy while following this example; a custom `deny-all` or allow-list policy must permit these downloads during preparation.
 
 Restart `npm run dev` after adding the definition. Before asking for a chart, send this message in the TUI:
 
@@ -217,9 +221,9 @@ This example caps charts at 1 MiB because tool outputs are persisted with sessio
 
 ## Secrets stay out of the sandbox
 
-The sandbox doesn't inherit your app's `process.env`. Secrets you pass explicitly through an environment or per-call `env` option are available inside the sandbox. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
+Docker and Vercel sandboxes don't inherit your app's `process.env`. Secrets you pass explicitly through an environment or per-call `env` option are available inside the sandbox. The host sandbox is different: its commands inherit the environment you started `npm run dev` with, except values loaded from `.env` files. The `run_sql` tool and sample database run in your app. You pass only the query results to the chart tool; the sandbox does not need database credentials.
 
-The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
+This chapter's definition runs the sandbox in a local Docker container during `eve dev` and on Vercel Sandbox after deployment. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
 
 → Next: [Remember definitions](./remember-definitions)
 

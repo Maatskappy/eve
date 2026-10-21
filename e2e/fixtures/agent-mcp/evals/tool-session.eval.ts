@@ -53,7 +53,7 @@ async function callTool(
 }
 
 export default defineEval({
-  description: `Two MCP tool calls with one tool-session key share a sandbox: the second reads the ${NOTE_PATH} the first wrote.`,
+  description: `Two MCP tool calls with one tool-session key share a sandbox: a shell command in the second reads the ${NOTE_PATH} the first wrote through the file API.`,
   timeoutMs: 240_000,
 
   async test(t) {

@@ -1,29 +1,54 @@
 import { isLinuxDockerDaemonAvailableSync } from "#execution/sandbox/bindings/local.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 import { DockerSandbox } from "#sandbox/providers/docker.js";
-import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
 import { createDefaultVercelEnvironment } from "#sandbox/providers/vercel.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
+import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export interface DefaultSandboxEnvironmentOptions {
   readonly docker?: DockerSandboxEnvironmentOptions;
-  readonly justBash?: JustBashSandboxCreateOptions;
   readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
   readonly vercel?: VercelSandboxCreateOptions;
 }
 
 export interface DefaultSandboxProbes {
   readonly isDeployedOnVercel: () => boolean;
+  readonly isDevelopment: () => boolean;
   readonly isDockerAvailable: () => boolean;
 }
 
 const SANDBOX_PROVIDER_PROBES: DefaultSandboxProbes = {
   isDeployedOnVercel: () => Boolean(process.env.VERCEL),
+  isDevelopment: isEveDevEnvironment,
   isDockerAvailable: () => isLinuxDockerDaemonAvailableSync(),
 };
+
+const NO_SANDBOX_PROVIDER_MESSAGE =
+  "DefaultSandbox found no sandbox provider: this process is not deployed on Vercel, is not " +
+  "running under `eve dev` or `eve eval`, and cannot reach a Docker daemon. Start Docker, deploy " +
+  "to Vercel to use Vercel Sandbox, or choose a provider in agent/sandbox/sandbox.ts. To run " +
+  "commands directly on this machine without isolation, use " +
+  '`HostSandbox.environment()` from "eve/sandbox/host".';
+
+// Preparation is a no-op so builds succeed on any host; only opening fails.
+const UnavailableSandbox = defineSandboxProvider({
+  name: "default",
+  environment: () => ({
+    async prepare() {
+      return {};
+    },
+    async resume() {
+      throw new Error(NO_SANDBOX_PROVIDER_MESSAGE);
+    },
+    async start() {
+      throw new Error(NO_SANDBOX_PROVIDER_MESSAGE);
+    },
+  }),
+});
 
 export const DefaultSandbox = defineDefaultSandboxProvider(SANDBOX_PROVIDER_PROBES);
 
@@ -36,12 +61,15 @@ export function defineDefaultSandboxProvider(probes: DefaultSandboxProbes) {
           createDefaultVercelEnvironment(withPreparation(options.vercel, options.prepare)),
         );
       }
+      if (probes.isDevelopment()) {
+        return HostSandbox.environment(withPreparation({}, options.prepare));
+      }
       if (probes.isDockerAvailable()) {
         return withoutOpenOptions(
           DockerSandbox.environment(withPreparation(options.docker, options.prepare)),
         );
       }
-      return JustBashSandbox.environment(withPreparation(options.justBash, options.prepare));
+      return UnavailableSandbox.environment();
     },
   };
 }

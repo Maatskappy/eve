@@ -1,4 +1,5 @@
 import { DefaultSandbox, defineSandbox, type SandboxSession } from "eve/sandbox";
+import { DockerSandbox } from "eve/sandbox/docker";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
 /**
@@ -12,13 +13,13 @@ import { VercelSandbox } from "eve/sandbox/vercel";
  * - The selector writes a marker and starts a loopback server once when the
  *   durable session first opens its sandbox.
  *
- * The default environment keeps this fixture portable between local providers
- * and Vercel Sandbox. Both run the published eve
- * base image: GHCR locally and VCR on Vercel. CI sets `EVE_SANDBOX_IMAGE_TAG`
- * to `latest` so release PRs can run before their versioned image exists. The
- * image ships Python, Node, and git; the preparation below assumes
- * that real-binary environment and is not meant to run against the
- * dependency-free `just-bash` fallback.
+ * The fixture runs Docker locally and the default (Vercel Sandbox) environment
+ * on Vercel. Both run the published eve base image: GHCR locally and VCR on
+ * Vercel. CI sets `EVE_SANDBOX_IMAGE_TAG` to `latest` so release PRs can run
+ * before their versioned image exists. The image ships Python, Node, and git,
+ * and the preparation below writes to the image's `/workspace` and sandbox
+ * user home, so the fixture pins Docker instead of the development default
+ * `HostSandbox`.
  *
  * `EVE_TEST_AUTHOR_SNAPSHOT_ID`, when set, overrides the provider with
  * `VercelSandbox.environment({ prepare })` with a snapshot source so the author-snapshot
@@ -141,7 +142,9 @@ const prepareEnvironment = async (sandbox: SandboxSession) => {
 
 export const environment =
   authorSnapshotId === undefined
-    ? DefaultSandbox.environment({ prepare: prepareEnvironment })
+    ? process.env.VERCEL
+      ? DefaultSandbox.environment({ prepare: prepareEnvironment })
+      : DockerSandbox.environment({ prepare: prepareEnvironment })
     : VercelSandbox.environment({
         prepare: prepareEnvironment,
         source: { snapshotId: authorSnapshotId, type: "snapshot" },

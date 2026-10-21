@@ -265,9 +265,8 @@ describe("HostSandbox", () => {
   });
 
   describe("environment", () => {
-    const keys = ["EVE_HOST_FROM_FILE", "EVE_HOST_FROM_SHELL"] as const;
     afterEach(() => {
-      for (const key of keys) delete process.env[key];
+      vi.unstubAllEnvs();
     });
 
     it("inherits the launch environment without values loaded from .env files", async () => {
@@ -276,8 +275,8 @@ describe("HostSandbox", () => {
         join(appRoot, ".env.local"),
         "EVE_HOST_FROM_FILE=file\nEVE_HOST_FROM_SHELL=file\n",
       );
-      process.env.EVE_HOST_FROM_FILE = "file";
-      process.env.EVE_HOST_FROM_SHELL = "shell";
+      vi.stubEnv("EVE_HOST_FROM_FILE", "file");
+      vi.stubEnv("EVE_HOST_FROM_SHELL", "shell");
       const provider = createHostProvider();
       const { sandbox } = await provider.openSession({ appRoot, sandboxName: "session-env" });
 
@@ -288,6 +287,32 @@ describe("HostSandbox", () => {
       });
 
       expect(result.stdout).toBe("unset|shell|eve|call");
+    });
+
+    it("leaves out eve's own runtime variables and model credentials", async () => {
+      const appRoot = await createScratchDirectory("eve-host-env-");
+      const stripped = [
+        "AI_GATEWAY_API_KEY",
+        "EVE_DEV",
+        "EVE_DEV_WORKFLOW_TRANSPORT_SECRET",
+        "EVE_EVALUATION_RUN_ID",
+        "EVE_MODEL_TEAM",
+        "PORT",
+        "VERCEL_OIDC_TOKEN",
+        "WORKFLOW_LOCAL_BASE_URL",
+      ];
+      for (const key of stripped) vi.stubEnv(key, "set");
+      vi.stubEnv("EVE_HOST_KEPT", "kept");
+      const { sandbox } = await createHostProvider().openSession({
+        appRoot,
+        sandboxName: "session-env-strip",
+      });
+
+      const result = await sandbox.run({
+        command: `env | cut -d= -f1 | grep -x -e ${[...stripped, "EVE_HOST_KEPT"].join(" -e ")}`,
+      });
+
+      expect(result.stdout.trim()).toBe("EVE_HOST_KEPT");
     });
   });
 });

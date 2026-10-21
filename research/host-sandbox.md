@@ -128,7 +128,12 @@ itself.
   jobs that handle started.
 - Absolute paths pass through; relative paths resolve from the workspace root.
 - Commands inherit the eve process environment minus variables that eve loaded
-  from `.env*` files, then `AI_AGENT=eve`, then per-call `env`. eve re-reads the
+  from `.env*` files and minus an explicit list of eve-owned names: what eve
+  sets after launch (`EVE_DEV`, `EVE_EVALUATION`, `EVE_BASE_URL`, `PORT`, and
+  the `EVE_DEV_`, `EVE_DEVELOPMENT_`, `EVE_EVALUATION_`, `EVE_MODEL_`, `NITRO_`,
+  `WORKFLOW_` prefixes) plus the agent's model credentials
+  (`AI_GATEWAY_API_KEY`, `VERCEL_OIDC_TOKEN`), which belong to the agent, not
+  the workspace. Then `AI_AGENT=eve`, then per-call `env`. eve re-reads the
   development env files at spawn and drops each key whose current value equals
   the file value. This stays correct across env-file reloads and across the
   dev server's process boundary without new state. A shell-exported variable

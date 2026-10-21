@@ -143,13 +143,43 @@ export async function removeHostSessionDirectory(sessionDirectory: string): Prom
 }
 
 /**
- * The environment eve was launched with, minus the values it loaded from
- * development env files. Re-reading the files at spawn keeps this right across
- * env-file reloads and the dev server's process boundary; a key whose value
- * differs from the file came from the shell and stays.
+ * Variables eve sets for its own runtime after launch, and the model
+ * credentials that belong to the eve agent rather than the workspace.
+ */
+const EVE_RUNTIME_ENV_NAMES = new Set([
+  "AI_GATEWAY_API_KEY",
+  "EVE_BASE_URL",
+  "EVE_DEV",
+  "EVE_EVALUATION",
+  "PORT",
+  "VERCEL_OIDC_TOKEN",
+]);
+const EVE_RUNTIME_ENV_PREFIXES = [
+  "EVE_DEV_",
+  "EVE_DEVELOPMENT_",
+  "EVE_EVALUATION_",
+  "EVE_MODEL_",
+  "NITRO_",
+  "WORKFLOW_",
+];
+
+/**
+ * The environment eve was launched with, minus eve's runtime variables and the
+ * values it loaded from development env files. Re-reading the files at spawn
+ * keeps this right across env-file reloads and the dev server's process
+ * boundary; a key whose value differs from the file came from the shell and
+ * stays.
  */
 function hostEnvironment(environmentRoot: string): NodeJS.ProcessEnv {
   const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (
+      EVE_RUNTIME_ENV_NAMES.has(key) ||
+      EVE_RUNTIME_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
+      delete environment[key];
+    }
+  }
   for (const [key, value] of readDevelopmentEnvironmentValues(environmentRoot)) {
     if (environment[key] === value) delete environment[key];
   }

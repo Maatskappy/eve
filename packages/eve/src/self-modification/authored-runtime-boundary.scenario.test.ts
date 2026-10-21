@@ -13,7 +13,7 @@ describe("self-modification authored runtime boundary", () => {
       );
 
       expect(code).not.toContain("createHostSandboxProvider");
-      expect(code).not.toContain("openHostSandboxHandle");
+      expect(code).not.toContain("openHostSandboxInstance");
       if (entry === "sandbox") {
         expect(code).toContain('from "eve/self-modification/sandbox"');
       } else {

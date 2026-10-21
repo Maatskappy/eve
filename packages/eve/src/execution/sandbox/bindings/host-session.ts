@@ -2,23 +2,21 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { constants, uptime } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
-import { buildSandboxSession, SANDBOX_AGENT_ENV } from "#execution/sandbox/session.js";
-import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
+import type {
+  SandboxBackendContext,
+  SandboxBackendInstance,
+  SandboxBackendProcess,
+} from "#execution/sandbox/backend.js";
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
 import { readDevelopmentEnvironmentValues } from "#shared/development-env-files.js";
-import type { SandboxProviderHandle } from "#shared/sandbox-provider.js";
-import type {
-  SandboxProcess,
-  SandboxSession,
-  SandboxSpawnOptions,
-} from "#shared/sandbox-session.js";
 import { SANDBOX_SKILL_ROOT_ENV } from "#shared/skill-paths.js";
 
 /** Where the `bash` tool keeps a session's background jobs; see `execution/sandbox/bash.ts`. */
 const JOBS_DIRECTORY_NAME = "jobs";
+const SKILLS_DIRECTORY_NAME = "skills";
 
 /**
  * Process groups each session's commands started. A group stays here after its
@@ -27,115 +25,87 @@ const JOBS_DIRECTORY_NAME = "jobs";
  */
 const groupsBySession = new Map<string, Set<number>>();
 
-/** Kills only what one handle started, for releasing a keyed tool-session call. */
-const handleReleases = new WeakMap<SandboxProviderHandle, () => void>();
-
 /**
- * Opens a host session: real `bash` and filesystem, rooted at `workspaceRoot`.
- * Every command runs in its own process group so abort, stop, and delete can
- * kill whatever it started.
+ * Opens a host sandbox instance: real `bash` and filesystem in the session's
+ * directory. Every command runs in its own process group so abort, stop, and
+ * delete can kill whatever it started.
  */
-export async function openHostSandboxHandle(input: {
-  readonly appRoot: string;
-  /** Session-owned directory; deleting the sandbox removes it. */
-  readonly sessionDirectory: string;
-  readonly skillRoot: string;
-  readonly workspaceRoot: string;
-}): Promise<SandboxProviderHandle<SandboxSession>> {
+export async function openHostSandboxInstance(
+  context: SandboxBackendContext,
+): Promise<SandboxBackendInstance> {
   if (process.platform === "win32") {
     throw new Error(
       "HostSandbox requires a POSIX shell and does not run on Windows; use WSL or DockerSandbox.",
     );
   }
-  const environmentRoot = (await findEveProjectRoot(input.appRoot)) ?? input.appRoot;
-  const jobRoot = join(input.sessionDirectory, JOBS_DIRECTORY_NAME);
-  // Groups this handle started that may still run, for release.
-  const handleGroups = new Set<number>();
-  // Every command this handle launched, never pruned: a `bash` tool job records
-  // its launcher's pid, and the launcher exits long before the job.
-  const handleLaunchers = new Set<number>();
-  const resolvePath = (path: string) =>
-    isAbsolute(path) ? path : resolve(input.workspaceRoot, path);
+  const appRoot = context.resolveProjectPath(".");
+  const environmentRoot = (await findEveProjectRoot(appRoot)) ?? appRoot;
+  const sessionDirectory = context.directory;
+  const jobRoot = join(sessionDirectory, JOBS_DIRECTORY_NAME);
+  const skillRoot = join(sessionDirectory, SKILLS_DIRECTORY_NAME);
+  // Groups this instance started that may still run, for release.
+  const instanceGroups = new Set<number>();
+  // Every command this instance launched, never pruned: a `bash` tool job
+  // records its launcher's pid, and the launcher exits long before the job.
+  const instanceLaunchers = new Set<number>();
 
-  const sandbox = buildSandboxSession({
-    resolvePath,
-    async spawn(options) {
-      options.abortSignal?.throwIfAborted();
-      const cwd = resolvePath(options.workingDirectory ?? ".");
+  return {
+    async exec({ command, cwd, env }) {
       if ((await stat(cwd).catch(() => undefined))?.isDirectory() !== true) {
         throw new Error(`HostSandbox working directory "${cwd}" does not exist.`);
       }
-      const child = spawn("bash", ["-c", options.command], {
+      const child = spawn("bash", ["-c", command], {
         cwd,
         detached: true,
         env: {
           ...hostEnvironment(environmentRoot),
-          ...SANDBOX_AGENT_ENV,
-          ...options.env,
+          ...env,
           EVE_SANDBOX_JOB_ROOT: jobRoot,
-          [SANDBOX_SKILL_ROOT_ENV]: input.skillRoot,
+          [SANDBOX_SKILL_ROOT_ENV]: skillRoot,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
       const group = child.pid;
       if (group !== undefined) {
-        sessionGroupSet(input.sessionDirectory).add(group);
-        handleGroups.add(group);
-        handleLaunchers.add(group);
+        sessionGroupSet(sessionDirectory).add(group);
+        instanceGroups.add(group);
+        instanceLaunchers.add(group);
       }
-      return adaptProcess(child, options, () => {
+      return adaptProcess(child, () => {
         if (group === undefined || isGroupAlive(group)) return;
-        groupsBySession.get(input.sessionDirectory)?.delete(group);
-        handleGroups.delete(group);
+        groupsBySession.get(sessionDirectory)?.delete(group);
+        instanceGroups.delete(group);
       });
     },
-    async readFile({ path, abortSignal }) {
+    async readFile(path) {
       try {
-        return bufferToStream(await readFile(path, { signal: abortSignal }));
+        return await readFile(path);
       } catch (error) {
         if (isMissingPathError(error)) return null;
         throw error;
       }
     },
-    async writeFile({ path, content, abortSignal }) {
-      const bytes = await streamToBuffer(content);
+    async writeFile(path, content) {
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, bytes, { signal: abortSignal });
+      await writeFile(path, content);
     },
     async removePath({ path, force, recursive }) {
       await rm(path, { force, recursive });
     },
-  });
-
-  const handle: SandboxProviderHandle<SandboxSession> = {
-    sandbox,
-    async onRuntimeShutdown() {
-      stopHostSessionCommands(input.sessionDirectory);
+    stop() {
+      stopHostSessionCommands(sessionDirectory);
     },
-    async onSandboxDelete() {
-      await removeHostSessionDirectory(input.sessionDirectory);
-    },
-    async onSandboxStop() {
-      stopHostSessionCommands(input.sessionDirectory);
+    // Stops what this instance started, including `bash` tool jobs it launched,
+    // without touching overlapping calls that share the session directory.
+    dispose() {
+      killJobGroups(jobRoot, instanceLaunchers);
+      for (const group of instanceGroups) {
+        killGroup(group);
+        groupsBySession.get(sessionDirectory)?.delete(group);
+      }
+      instanceGroups.clear();
     },
   };
-  handleReleases.set(handle, () => {
-    killJobGroups(jobRoot, handleLaunchers);
-    for (const group of handleGroups) {
-      killGroup(group);
-      groupsBySession.get(input.sessionDirectory)?.delete(group);
-    }
-    handleGroups.clear();
-  });
-  return handle;
-}
-
-/**
- * Stops what one handle started, including `bash` tool jobs it launched,
- * without touching overlapping calls that share the session directory.
- */
-export function releaseHostSandboxHandle(handle: SandboxProviderHandle): void {
-  handleReleases.get(handle)?.();
 }
 
 /** Kills every command and `bash` tool job the session still has running. */
@@ -195,42 +165,22 @@ function hostEnvironment(environmentRoot: string): NodeJS.ProcessEnv {
   return environment;
 }
 
-function adaptProcess(
-  child: ChildProcess,
-  options: SandboxSpawnOptions,
-  onClose: () => void,
-): SandboxProcess {
+function adaptProcess(child: ChildProcess, onClose: () => void): SandboxBackendProcess {
   let closed = false;
-  // Once the pipes close this command is done; its group may live on in the session registry.
-  const kill = () => {
-    if (!closed && child.pid !== undefined) killGroup(child.pid);
-  };
-  options.abortSignal?.addEventListener("abort", kill, { once: true });
-
-  const exit = new Promise<number>((resolveExit, rejectExit) => {
+  const exited = new Promise<number>((resolveExit, rejectExit) => {
     child.once("error", rejectExit);
     child.once("close", (code, signal) => {
       closed = true;
-      if (options.abortSignal?.aborted) rejectExit(options.abortSignal.reason);
-      else resolveExit(code ?? 128 + (signal === null ? 0 : constants.signals[signal]));
+      resolveExit(code ?? 128 + (signal === null ? 0 : constants.signals[signal]));
     });
-  }).finally(() => {
-    options.abortSignal?.removeEventListener("abort", kill);
-    onClose();
-  });
-  // Surface spawn and abort failures through `wait()`, not as unhandled rejections.
-  exit.catch(() => {});
-
+  }).finally(onClose);
   return {
-    pid: child.pid,
+    exited,
     stdout: Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
     stderr: Readable.toWeb(child.stderr!) as ReadableStream<Uint8Array>,
-    async wait() {
-      return { exitCode: await exit };
-    },
-    async kill() {
-      kill();
-      await exit.catch(() => {});
+    // Once the pipes close this command is done; its group may live on in the session registry.
+    kill() {
+      if (!closed && child.pid !== undefined) killGroup(child.pid);
     },
   };
 }

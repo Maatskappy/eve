@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "#execution/sandbox/bash.js";
 
-import { releaseHostSandboxHandle } from "#execution/sandbox/bindings/host-session.js";
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -113,7 +112,9 @@ describe("HostSandbox", () => {
     const second = await provider.start({ appRoot, sandboxName: "session-b" });
     await first.handle.sandbox.writeTextFile({ content: "a", path: "owner.txt" });
 
-    expect(second.state.root).not.toBe(first.state.root);
+    const firstRoot = sandboxWorkspaceRoot(first.handle.sandbox);
+    const secondRoot = sandboxWorkspaceRoot(second.handle.sandbox);
+    expect(secondRoot).not.toBe(firstRoot);
     expect(await second.handle.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
 
     const resumed = await provider.openSession({
@@ -129,8 +130,8 @@ describe("HostSandbox", () => {
     await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
     await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
     await provider.endSession({ appRoot, sandboxName: "never-started", state: null });
-    expect(existsSync(first.state.root)).toBe(false);
-    expect(existsSync(second.state.root)).toBe(true);
+    expect(existsSync(firstRoot)).toBe(false);
+    expect(existsSync(secondRoot)).toBe(true);
     const fresh = await provider.openSession({ appRoot, sandboxName: "session-a" });
     expect(await fresh.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
   });
@@ -146,7 +147,7 @@ describe("HostSandbox", () => {
     const { handle, state } = await provider.start(session);
     await handle.sandbox.writeTextFile({ content: "lost", path: "notes.txt" });
     await handle.onSandboxStop();
-    await rm(join(state.root, ".."), { force: true, recursive: true });
+    await rm(join(sandboxWorkspaceRoot(handle.sandbox), ".."), { force: true, recursive: true });
 
     // eve clears the session's state on this error and reruns the selector, which starts again.
     await expect(provider.openSession({ ...session, existing: state })).rejects.toBeInstanceOf(
@@ -187,8 +188,12 @@ describe("HostSandbox", () => {
     const concurrent = await Promise.all(
       [1, 2, 3].map(() => provider.start({ appRoot, sandboxName: "session-upsert" })),
     );
-    const root = concurrent[0]!.state.root;
-    expect(concurrent.map(({ state }) => state.root)).toEqual([root, root, root]);
+    const root = sandboxWorkspaceRoot(concurrent[0]!.handle.sandbox);
+    expect(concurrent.map(({ handle }) => sandboxWorkspaceRoot(handle.sandbox))).toEqual([
+      root,
+      root,
+      root,
+    ]);
     expect(await readdir(join(root, "..", ".."))).toHaveLength(1);
     await concurrent[0]!.handle.sandbox.writeTextFile({ content: "kept", path: "notes.txt" });
 
@@ -350,7 +355,7 @@ describe("HostSandbox", () => {
       const releasedJob = (await startBashJob(released.sandbox, "released.pid")).job;
       const keptJob = (await startBashJob(kept.sandbox, "kept.pid")).job;
 
-      releaseHostSandboxHandle(released);
+      await provider.releaseToolSession(released);
 
       await vi.waitFor(() => expect(isProcessAlive(releasedJob)).toBe(false), {
         timeout: 10_000,
@@ -401,10 +406,11 @@ describe("HostSandbox", () => {
       ],
     });
 
-    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-shared" });
-    expect(state.root).toBe(join(appRoot, "project"));
+    const { handle } = await provider.start({ appRoot, sandboxName: "session-shared" });
+    const root = sandboxWorkspaceRoot(handle.sandbox);
+    expect(root).toBe(join(appRoot, "project"));
     expect((await handle.sandbox.run({ command: "cat README.md" })).stdout).toBe("mine");
-    expect(await readdir(state.root)).toEqual(["README.md"]);
+    expect(await readdir(root)).toEqual(["README.md"]);
     expect(
       await handle.sandbox.readTextFile({
         path: await resolveSandboxModelPath({

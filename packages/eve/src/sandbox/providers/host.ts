@@ -1,3 +1,4 @@
+import type { SandboxBackendArtifact, SandboxBackendState } from "#execution/sandbox/backend.js";
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/local.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
@@ -8,8 +9,8 @@ export type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox
 export const HostSandbox = defineSandboxProvider<
   HostSandboxEnvironmentOptions,
   undefined,
-  { readonly templateKey: string },
-  { readonly root: string; readonly version: 1 },
+  SandboxBackendArtifact,
+  SandboxBackendState,
   SandboxSession
 >({
   name: "host",

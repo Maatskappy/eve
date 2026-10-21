@@ -51,8 +51,13 @@ has no open options and no `setNetworkPolicy`.
 | Seeded from    | cached template: workspace files, then `prepare`   | nothing; eve never writes seed files into it |
 | Deleted by eve | on `delete()` and session end                      | never                                        |
 
-`<key>` is a hash of the durable session id, so keyed tool sessions and resume
-find the same directory. Templates live under
+`start()` is an idempotent upsert on the session id (the provider contract from
+#5132): `<key>` is a hash of the session id alone, never the artifact or open
+options, so repeated and concurrent starts, keyed tool sessions, sharing
+subagents, and other processes on the machine all find the same directory. The
+template seeds the workspace only when a start creates it; concurrent creators
+copy to temporary directories and race on an atomic rename, and the losers
+adopt the winner's directory. Templates live under
 `.eve/sandbox-cache/host/templates/<key>`, keyed by resources and source
 revision, published atomically, and pruned with the other local templates.
 The session directory also holds `skills/` and `jobs/` (for the `bash` tool).
@@ -65,6 +70,11 @@ are not rewritten and must survive in place.
 
 Session state is `{ root, version }`. Resume checks that `root` matches what the
 environment derives for the session and that it still exists.
+
+`onSessionEnd(context, state | null)` derives the session directory from the
+key and ignores `state`. It stops the session's commands and jobs, then removes
+the directory; it is idempotent, succeeds when nothing exists, and never
+touches a shared `root`, which lives outside the session directory.
 
 ## Workspace and skill root contract
 

@@ -282,7 +282,12 @@ import {
   createSandboxSession,
   defineSandboxProvider,
   type SandboxProviderHandle,
+  type SandboxProviderSessionContext,
 } from "eve/sandbox/provider";
+
+// Derived from the session id alone, so every start for a session finds the same root.
+const sessionRoot = (ctx: SandboxProviderSessionContext) =>
+  join(ctx.storagePath, "just-bash", encodeURIComponent(ctx.session.id));
 
 const toStream = (body: string | Uint8Array) => new Response(body).body!;
 
@@ -332,16 +337,18 @@ export const JustBashSandbox = defineSandboxProvider<
       async prepare() {
         return null;
       },
+      // An upsert: `mkdir` keeps an existing root, so repeated and concurrent starts share it.
       async start(ctx) {
-        const root = join(ctx.storagePath, "just-bash", encodeURIComponent(ctx.session.id));
+        const root = sessionRoot(ctx);
         await mkdir(join(root, "workspace"), { recursive: true });
         return { handle: openHandle(root), state: { root, version: 1 } };
       },
       async resume(_ctx, _artifact, state) {
         return openHandle(state.root);
       },
-      async onSessionEnd(_ctx, _artifact, state) {
-        await rm(state.root, { force: true, recursive: true });
+      // `state` is null when the session never recorded it; the key finds the root either way.
+      async onSessionEnd(ctx) {
+        await rm(sessionRoot(ctx), { force: true, recursive: true });
       },
     };
   },

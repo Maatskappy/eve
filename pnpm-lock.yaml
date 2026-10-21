@@ -246,6 +246,9 @@ catalogs:
     ai:
       specifier: ^7.0.137
       version: 7.0.137
+    just-bash:
+      specifier: ^3.1.0
+      version: 3.1.0
     marked:
       specifier: 17.0.6
       version: 17.0.6
@@ -1095,9 +1098,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      just-bash:
-        specifier: ^3.1.0
-        version: 3.1.0(supports-color@10.2.2)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -1551,6 +1551,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      just-bash:
+        specifier: 'catalog:'
+        version: 3.1.0(supports-color@10.2.2)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

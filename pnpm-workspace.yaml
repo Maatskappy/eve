@@ -49,6 +49,7 @@ catalog:
   "@workflow/world-postgres": "5.0.3"
   ai: "^7.0.137"
   better-auth: "1.6.26"
+  just-bash: "^3.1.0"
   marked: "17.0.6"
   next: "16.3.4"
   phase: "0.0.1"

@@ -15,7 +15,6 @@ export const JustBashSandbox = defineSandboxBackend<JustBashOptions>({
   workspaceRoot: "/workspace",
   // eve prepares one template directory per build and copies it into each session's directory.
   directoryTemplate: true,
-  keyedToolSessions: true,
   async open(ctx, options) {
     // eve stages PDFs up to 20 MiB, past just-bash's default 10 MB read limit.
     const root = new ReadWriteFs({ maxFileReadSize: Number.MAX_SAFE_INTEGER, root: ctx.directory });
@@ -31,7 +30,7 @@ export const JustBashSandbox = defineSandboxBackend<JustBashOptions>({
       instance: {
         exec: ({ command, cwd, env, signal }) =>
           bash.exec(command, { cwd, env: { ...env }, signal }),
-        readFile: (path) => fs.readFileBuffer(path).catch(() => null),
+        readFile: async (path) => ((await fs.exists(path)) ? await fs.readFileBuffer(path) : null),
         async writeFile(path, content) {
           await fs.mkdir(posix.dirname(path), { recursive: true });
           await fs.writeFile(path, content);

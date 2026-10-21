@@ -117,26 +117,20 @@ export function createHostSandboxProvider(
       }
       return { templateKey };
     },
-    // An upsert on the session id: the template seeds the workspace only when
-    // this call creates it, and concurrent creators race on an atomic rename.
     async start(context, _openOptions, artifactValue) {
       const artifact = requireHostArtifact(artifactValue);
-      const root = resolveWorkspaceRoot(context);
-      if (sharedRoot === undefined && !(await pathExists(root))) {
-        const templatePath = await requireTemplate(context, artifact);
-        await copyDirectoryAtomically(join(templatePath, WORKSPACE_DIRECTORY_NAME), root);
-      }
-      await requireDirectory(root);
+      const root = await ensureWorkspace(context, artifact);
       return { handle: await openHandle(context, artifact, root), state: { root, version: 1 } };
     },
+    // The workspace comes from the key, so a session whose directory was
+    // removed, for example with `.eve`, gets a fresh one instead of failing.
     async resume(context, artifactValue, stateValue) {
       const artifact = requireHostArtifact(artifactValue);
       const state = requireHostState(stateValue);
       if (state.root !== resolveWorkspaceRoot(context)) {
         throw new Error("HostSandbox session state is incompatible with this environment.");
       }
-      await requireDirectory(state.root);
-      return await openHandle(context, artifact, state.root);
+      return await openHandle(context, artifact, await ensureWorkspace(context, artifact));
     },
     // The session directory comes from the key, so `state` is not needed; a
     // shared root lives outside it and is never removed.
@@ -144,6 +138,24 @@ export function createHostSandboxProvider(
       await removeHostSessionDirectory(resolveSessionDirectory(context));
     },
   };
+
+  /**
+   * An upsert on the session id: the template seeds the per-session workspace
+   * only when it does not exist, and concurrent creators race on an atomic
+   * rename. A shared root must already exist; eve never creates it.
+   */
+  async function ensureWorkspace(
+    context: SandboxProviderSessionContext,
+    artifact: HostPreparedArtifact,
+  ): Promise<string> {
+    const root = resolveWorkspaceRoot(context);
+    if (sharedRoot === undefined && !(await pathExists(root))) {
+      const templatePath = await requireTemplate(context, artifact);
+      await copyDirectoryAtomically(join(templatePath, WORKSPACE_DIRECTORY_NAME), root);
+    }
+    await requireDirectory(root);
+    return root;
+  }
 
   function resolveWorkspaceRoot(context: SandboxProviderSessionContext): string {
     return sharedRoot === undefined

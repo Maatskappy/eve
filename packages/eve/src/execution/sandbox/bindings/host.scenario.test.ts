@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, realpath, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { homedir, uptime } from "node:os";
 import { join } from "node:path";
 
@@ -132,6 +132,29 @@ describe("HostSandbox", () => {
     expect(existsSync(second.state.root)).toBe(true);
     const fresh = await provider.openSession({ appRoot, sandboxName: "session-a" });
     expect(await fresh.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
+  });
+
+  it("resumes a session whose directory was removed with a freshly seeded one", async () => {
+    const appRoot = await createScratchDirectory("eve-host-resume-");
+    const provider = createHostProvider();
+    await provider.prepare({
+      appRoot,
+      seedFiles: [{ content: "seeded", path: "/workspace/seed.md" }],
+    });
+    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-removed" });
+    await handle.sandbox.writeTextFile({ content: "lost", path: "notes.txt" });
+    await handle.onSandboxStop();
+    await rm(join(state.root, ".."), { force: true, recursive: true });
+
+    const { sandbox } = await provider.openSession({
+      appRoot,
+      existing: state,
+      sandboxName: "session-removed",
+    });
+
+    expect(sandboxWorkspaceRoot(sandbox)).toBe(state.root);
+    expect(await sandbox.readTextFile({ path: "seed.md" })).toBe("seeded");
+    expect(await sandbox.readTextFile({ path: "notes.txt" })).toBeNull();
   });
 
   it("starts as an upsert on the session id, seeding only the session it creates", async () => {

@@ -69,7 +69,10 @@ stay. The session state does not change on a rebuild, so dynamic skill files
 are not rewritten and must survive in place.
 
 Session state is `{ root, version }`. Resume checks that `root` matches what the
-environment derives for the session and that it still exists.
+environment derives for the session, then runs the same upsert as `start()`, so
+a per-session directory removed outside eve (for example with `.eve`) comes
+back freshly seeded instead of failing every resume. A missing shared `root`
+still fails, because eve never creates it.
 
 `onSessionEnd(context, state | null)` derives the session directory from the
 key and ignores `state`. It stops the session's commands and jobs, then removes

@@ -5,7 +5,7 @@ description: "Build a sandbox provider that runs each session in a local microsa
 
 eve no longer ships a microsandbox sandbox provider. For a local sandbox with isolation, use [Docker](/docs/sandbox/docker). To run commands directly on your machine during development, use the [host sandbox](/docs/sandbox/host), which [`DefaultSandbox`](/docs/sandbox/default) selects during `eve dev` and `eve eval`. In production on Vercel, use [Vercel Sandbox](/docs/sandbox/vercel).
 
-If you want [microsandbox](https://www.npmjs.com/package/microsandbox) microVMs, build a provider for them with `defineSandboxProvider()` and `createSandboxSession()` from `eve/sandbox/provider`. This page shows a provider that runs one microVM per eve session from any OCI image.
+If you want [microsandbox](https://www.npmjs.com/package/microsandbox) microVMs, define them as a sandbox backend with `defineSandboxBackend()` from `eve/sandbox/provider`. This page shows a backend that runs one microVM per eve session from any OCI image; eve handles seeding, sessions, and cleanup.
 
 ## Requirements
 
@@ -28,27 +28,10 @@ node --input-type=module -e "import { install, isInstalled } from 'microsandbox'
 Save the provider in your application, for example in `agent/lib/`:
 
 ```ts title="agent/lib/microsandbox.ts"
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 
-import {
-  createSandboxSession,
-  defineSandboxProvider,
-  type SandboxProviderHandle,
-  type SandboxProviderSessionContext,
-  SandboxSessionGoneError,
-} from "eve/sandbox/provider";
-import {
-  isInstalled,
-  Sandbox,
-  type SandboxHandle,
-  SandboxNotFoundError,
-  SandboxStillRunningError,
-} from "microsandbox";
+import { defineSandboxBackend, type SandboxBackendInstance } from "eve/sandbox/provider";
+import { isInstalled, Sandbox, type SandboxHandle, SandboxNotFoundError } from "microsandbox";
 
 export interface MicrosandboxOptions {
   /** OCI image with bash, a `vercel-sandbox` user, and `/workspace`. */
@@ -57,42 +40,13 @@ export interface MicrosandboxOptions {
   readonly memoryMiB?: number;
 }
 
-type Artifact = { readonly templateKey: string };
-type State = { readonly version: 1 };
-
 // eve's Docker sandbox uses the eve image tagged with the installed eve version.
-const eveVersion = (createRequire(import.meta.url)("eve/package.json") as { version: string })
-  .version;
-const DEFAULT_IMAGE = `ghcr.io/vercel/eve:${eveVersion.replace(/\+.*$/u, "")}`;
+const { version } = createRequire(import.meta.url)("eve/package.json") as { version: string };
+const DEFAULT_IMAGE = `ghcr.io/vercel/eve:${version.replace(/\+.*$/u, "")}`;
 const USER = "vercel-sandbox";
-const HOME = `/home/${USER}`;
-const WORKSPACE = "/workspace";
-const RESOURCES = "/eve/resources";
-
-const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
-const templateRoot = (storagePath: string, key: string) =>
-  join(storagePath, "microsandbox", "templates", key);
-// VM names are global on the machine, so the app's storage path namespaces the session id.
-const vmName = (ctx: SandboxProviderSessionContext) =>
-  `eve-${hash(`${ctx.storagePath}\0${ctx.session.id}`)}`;
-const toStream = (body: Uint8Array) =>
-  new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(body);
-      controller.close();
-    },
-  });
-
-function requireRuntime() {
-  if (!isInstalled()) {
-    throw new Error(
-      "The microsandbox VM runtime is not installed. Install it with " +
-        `node --input-type=module -e "import { install } from 'microsandbox'; await install();"`,
-    );
-  }
-}
 
 async function findVm(name: string): Promise<SandboxHandle | undefined> {
+  if (!isInstalled()) return undefined; // Without a runtime, no VM can exist.
   try {
     return await Sandbox.get(name);
   } catch (error) {
@@ -101,219 +55,73 @@ async function findVm(name: string): Promise<SandboxHandle | undefined> {
   }
 }
 
-async function wake(vm: SandboxHandle): Promise<Sandbox> {
-  return vm.status === "running" || vm.status === "draining"
-    ? await vm.connect()
-    : await vm.startDetached();
-}
-
-/** Returns the session's VM, or creates and seeds it. */
-async function upsertVm(name: string, template: string, options: MicrosandboxOptions) {
-  const existing = await findVm(name);
-  if (existing !== undefined) return await wake(existing);
-
-  let vm: Sandbox;
-  try {
-    vm = await Sandbox.builder(name)
-      .image(options.image ?? DEFAULT_IMAGE)
-      .cpus(options.cpus ?? 1)
-      .memory(options.memoryMiB ?? 1024)
-      .user(USER)
-      .env("HOME", HOME)
-      .workdir(WORKSPACE)
-      .volume(RESOURCES, (mount) => mount.bind(template).readonly())
-      .detached(true)
-      .create();
-  } catch (error) {
-    // Another process created the VM first.
-    const raced = await findVm(name);
-    if (raced === undefined) throw error;
-    return await wake(raced);
-  }
-
-  const seeded = await vm.shell(
-    `mkdir -p "$HOME/.agents/skills" && cp -R ${RESOURCES}/workspace/. ${WORKSPACE}/ && ` +
-      `cp -R ${RESOURCES}/skills/. "$HOME/.agents/skills/"`,
+const wake = async (vm: SandboxHandle) =>
+  connect(
+    vm.status === "running" || vm.status === "draining"
+      ? await vm.connect()
+      : await vm.startDetached(),
   );
-  if (seeded.code !== 0) {
-    // Never leave an unseeded VM for the next start to reconnect to.
-    await vm.detach();
-    await removeVm(name);
-    throw new Error(`Seeding the microVM failed: ${seeded.stderr()}`);
-  }
-  return vm;
-}
 
-async function removeVm(name: string) {
-  const vm = await findVm(name);
-  if (vm === undefined) return;
-  await vm.stopWithTimeout(10_000).catch(() => {});
-  try {
-    await vm.remove();
-  } catch (error) {
-    if (error instanceof SandboxNotFoundError) return;
-    if (!(error instanceof SandboxStillRunningError)) throw error;
-    await vm.kill();
-    await vm.remove();
-  }
-}
-
-function createHandle(name: string, vm: Sandbox): SandboxProviderHandle {
+function connect(vm: Sandbox): SandboxBackendInstance {
   return {
-    sandbox: createSandboxSession({
-      resolvePath: (path) => (path.startsWith("/") ? path : `${WORKSPACE}/${path}`),
-      async spawn({ abortSignal, command, env, workingDirectory }) {
-        const exec = await vm.execStreamWith("bash", (builder) =>
-          builder
-            .args(["-lc", command])
-            .cwd(workingDirectory ?? WORKSPACE)
-            .envs({ AI_AGENT: "eve", ...env }),
-        );
-        abortSignal?.addEventListener("abort", () => void exec.kill().catch(() => {}), {
-          once: true,
-        });
-
-        let stdout!: ReadableStreamDefaultController<Uint8Array>;
-        let stderr!: ReadableStreamDefaultController<Uint8Array>;
-        const streams = {
-          stdout: new ReadableStream<Uint8Array>({
-            start: (controller) => void (stdout = controller),
-          }),
-          stderr: new ReadableStream<Uint8Array>({
-            start: (controller) => void (stderr = controller),
-          }),
-        };
-        const exited = (async () => {
-          const events = exec[Symbol.asyncIterator]();
-          let exitCode: number | undefined;
-          try {
-            for (;;) {
-              // Read output that arrives just after the exit event without waiting for the stream to end.
-              const next =
-                exitCode === undefined
-                  ? await events.next()
-                  : await Promise.race([events.next(), sleep(100)]);
-              if (next === undefined || next.done === true) break;
-              const event = next.value;
-              if (event.kind === "stdout") stdout.enqueue(event.data);
-              else if (event.kind === "stderr") stderr.enqueue(event.data);
-              else if (event.kind === "exited") exitCode = event.code;
-            }
-            if (exitCode === undefined) throw new Error("The command ended without an exit code.");
-            stdout.close();
-            stderr.close();
-            return exitCode;
-          } catch (error) {
-            stdout.error(error);
-            stderr.error(error);
-            throw error;
-          } finally {
-            void events.return?.();
-          }
-        })();
-        exited.catch(() => {});
-
-        return {
-          ...streams,
-          wait: async () => ({ exitCode: await exited }),
-          kill: () => exec.kill(),
-        };
-      },
-      async readFile({ path }) {
-        const fs = vm.fs();
-        return (await fs.exists(path)) ? toStream(await fs.read(path)) : null;
-      },
-      async writeFile({ content, path }) {
-        const bytes = Buffer.from(await new Response(content).arrayBuffer());
-        // Write as the sandbox user so the agent owns the file and its parent directories.
-        const result = await vm.execWith("bash", (builder) =>
-          builder
-            .args(["-c", 'mkdir -p -- "$(dirname -- "$1")" && cat > "$1"', "write", path])
-            .stdinBytes(bytes),
-        );
-        if (result.code !== 0) throw new Error(`Writing ${path} failed: ${result.stderr()}`);
-      },
-      async removePath({ force, path, recursive }) {
-        const flags = `${force === true ? "f" : ""}${recursive === true ? "r" : ""}`;
-        const result = await vm.execWith("rm", (builder) =>
-          builder.args(flags === "" ? ["--", path] : [`-${flags}`, "--", path]),
-        );
-        if (result.code !== 0) throw new Error(`Removing ${path} failed: ${result.stderr()}`);
-      },
-    }),
-    async onRuntimeShutdown() {
-      await vm.stop().catch(() => {});
-      await vm.detach();
+    async exec({ command, cwd, env }) {
+      const out = await vm.execWith("bash", (b) => b.args(["-lc", command]).cwd(cwd).envs(env));
+      return { exitCode: out.code, stderr: out.stderrBytes(), stdout: out.stdoutBytes() };
     },
-    onSandboxDelete: () => removeVm(name),
-    async onSandboxStop() {
+    async readFile(path) {
+      return (await vm.fs().exists(path)) ? await vm.fs().read(path) : null;
+    },
+    async writeFile(path, content) {
+      // Write as the sandbox user so the agent owns the file and its parent directories.
+      const script = 'mkdir -p -- "$(dirname -- "$1")" && cat > "$1"';
+      const out = await vm.execWith("bash", (b) =>
+        b.args(["-c", script, "write", path]).stdinBytes(Buffer.from(content)),
+      );
+      if (out.code !== 0) throw new Error(`Writing ${path} failed: ${out.stderr()}`);
+    },
+    async stop() {
       await vm.stop();
       await vm.detach();
     },
   };
 }
 
-export const MicrosandboxSandbox = defineSandboxProvider<
-  MicrosandboxOptions,
-  undefined,
-  Artifact,
-  State
->({
+export const MicrosandboxSandbox = defineSandboxBackend<MicrosandboxOptions>({
   name: "microsandbox",
-  environment(options = {}) {
-    async function open(ctx: SandboxProviderSessionContext, artifact: Artifact) {
-      requireRuntime();
-      const name = vmName(ctx);
-      const template = templateRoot(ctx.storagePath, artifact.templateKey);
-      return createHandle(name, await upsertVm(name, template, options));
+  workspaceRoot: "/workspace",
+  async open(ctx, options) {
+    if (!isInstalled()) throw new Error("The microsandbox VM runtime is not installed.");
+    const existing = await findVm(ctx.key);
+    if (existing !== undefined) return { instance: await wake(existing) };
+    try {
+      const vm = await Sandbox.builder(ctx.key)
+        .image(options.image ?? DEFAULT_IMAGE)
+        .cpus(options.cpus ?? 1)
+        .memory(options.memoryMiB ?? 1024)
+        .user(USER)
+        .env("HOME", `/home/${USER}`)
+        .workdir("/workspace")
+        .detached(true)
+        .create();
+      return { created: true, instance: connect(vm) };
+    } catch (error) {
+      // Another process created the VM first.
+      const raced = await findVm(ctx.key);
+      if (raced === undefined) throw error;
+      return { instance: await wake(raced) };
     }
-
-    return {
-      async prepare(ctx) {
-        const { skills, workspace } = ctx.resources;
-        const templateKey = hash(JSON.stringify([workspace?.key, skills?.key]));
-        const template = templateRoot(ctx.storagePath, templateKey);
-        if (existsSync(template)) return { templateKey };
-
-        const draft = `${template}.${randomUUID()}.tmp`;
-        const trees = [
-          { files: workspace?.files ?? [], path: "workspace" },
-          { files: skills?.files ?? [], path: "skills" },
-        ];
-        for (const tree of trees) {
-          await mkdir(join(draft, tree.path), { recursive: true });
-          for (const file of tree.files) {
-            const target = join(draft, tree.path, file.relativePath);
-            await mkdir(dirname(target), { recursive: true });
-            await writeFile(target, file.content);
-          }
-        }
-        await rename(draft, template).catch(async (error: unknown) => {
-          await rm(draft, { force: true, recursive: true });
-          if (!existsSync(template)) throw error;
-        });
-        return { templateKey };
-      },
-      // An upsert on the session id: the image and template apply only when the VM is created.
-      async start(ctx, _openOptions, artifact) {
-        return { handle: await open(ctx, artifact), state: { version: 1 } };
-      },
-      // A VM removed outside eve is gone: eve then reruns the selector, whose start creates a new one.
-      async resume(ctx) {
-        requireRuntime();
-        const name = vmName(ctx);
-        const vm = await findVm(name);
-        if (vm === undefined) {
-          throw new SandboxSessionGoneError(`microsandbox VM "${name}" no longer exists.`);
-        }
-        return createHandle(name, await wake(vm));
-      },
-      // The key finds the VM, so `state` may be null. Without a runtime, no VM can exist.
-      async onSessionEnd(ctx) {
-        if (!isInstalled()) return;
-        await removeVm(vmName(ctx));
-      },
-    };
+  },
+  async find(ctx) {
+    const vm = await findVm(ctx.key);
+    return vm === undefined ? undefined : await wake(vm);
+  },
+  async remove(ctx) {
+    const vm = await findVm(ctx.key);
+    if (vm === undefined) return;
+    await vm.stopWithTimeout(10_000).catch(() => vm.kill());
+    await vm.remove().catch((error: unknown) => {
+      if (!(error instanceof SandboxNotFoundError)) throw error;
+    });
   },
 });
 ```
@@ -354,27 +162,24 @@ Any OCI image works if it has `bash`, a `vercel-sandbox` user with a home direct
 
 ## How the provider works
 
-The provider follows eve's [custom provider contract](/docs/sandbox#custom-providers):
+The provider describes only the microVM. eve's [sandbox backend contract](/docs/sandbox#sandbox-backends) does the rest:
 
-- **Preparation:** `prepare()` writes `agent/sandbox/workspace/` files and skill packages to a template directory under `.eve/sandbox-cache/microsandbox/templates/` in your app.
-- **Sessions:** each eve session gets one microVM, named from a hash of the app's storage path and the session id. `start()` is an upsert: it connects to the VM when it is running, starts it when it exists but is not running, and creates it only when it does not exist. On creation, the provider mounts the template read-only at `/eve/resources`, then copies the workspace files to `/workspace` and the skills to `/home/vercel-sandbox/.agents/skills`. If creation fails and the VM exists afterward, because another process created it first, the provider connects to that VM.
-- **Commands:** every command runs as `vercel-sandbox` with `bash -lc`, starting in `/workspace`. Aborting a command kills it.
-- **Lifecycle:** `sandbox.stop()` and server shutdown stop the VM, and its disk persists, so the next access starts it again. `sandbox.delete()` and session end remove the VM. `onSessionEnd()` finds the VM from the session id, succeeds when it does not exist, and can run more than once.
-- **Removed VMs:** if the session's VM was removed outside eve, `resume()` throws `SandboxSessionGoneError`. eve then clears the session's sandbox state and runs `defineSandbox()` again, and `start()` creates and seeds a new VM.
-- **Failed seeding:** if copying the template into a new VM fails, the provider removes the VM before it reports the error, so the next `start()` creates it again instead of reconnecting to an unseeded VM.
-- **Environment:** every command gets `AI_AGENT=eve`, as in eve's built-in providers, plus the `env` eve passes for that command.
+- **Sessions:** each eve session gets one microVM named `ctx.key`, which eve derives from the app's storage path and the session id. `open()` connects to the VM when it is running, starts it when it exists but is not running, and creates it only when it does not exist. If creation fails and the VM exists afterward, because another process created it first, the provider connects to that VM.
+- **Seeding:** when `open()` reports `created`, eve writes `agent/sandbox/workspace/` files under `/workspace` and skill packages under `/home/vercel-sandbox/.agents/skills` through `writeFile()`, then runs the environment's `prepare` function. If any of that fails, eve stops and removes the VM, so the next open creates it again instead of reconnecting to an unseeded VM.
+- **Commands:** every command runs as `vercel-sandbox` with `bash -lc`, starting in `/workspace`, with `AI_AGENT=eve` plus the `env` eve passes for that command.
+- **Lifecycle:** `sandbox.stop()` and server shutdown stop the VM, and its disk persists, so the next access starts it again. `sandbox.delete()` and session end remove the VM; `remove()` succeeds when the VM or the runtime does not exist.
+- **Removed VMs:** if the session's VM was removed outside eve, `find()` returns `undefined`, and eve starts the session over with a new VM.
 
 ## What this provider omits
 
 The removed built-in provider did more than this page's provider. Add these pieces when you need them:
 
-- **Dockerfile builds and template snapshots:** the built-in provider built `agent/sandbox/Dockerfile` with Docker, pushed the image to a local registry, booted a template VM from it during preparation, ran the environment's `prepare` function there, and saved the VM as a microsandbox snapshot that session VMs booted from. To do the same, build and push the image in `prepare()`, create a temporary VM, run your setup, stop it, and capture it with `SandboxHandle.snapshot()`. Then create session VMs with `Sandbox.builder(name).fromSnapshot(...)` instead of `.image(...)`.
+- **Streaming output and cancellation:** `exec()` waits for each command with `execWith()`, so eve receives output only when the command finishes, and aborting a command does not stop it. To stream, start the command with `execStreamWith()` and return `{ stdout, stderr, exited, kill }`: split its `stdout` and `stderr` events into two streams, resolve `exited` from its `exited` event, and call its `kill()` from `kill`.
+- **Dockerfile builds and template snapshots:** the built-in provider built `agent/sandbox/Dockerfile` with Docker, pushed the image to a local registry, booted a template VM from it during preparation, ran the environment's `prepare` function there, and saved the VM as a microsandbox snapshot that session VMs booted from. This provider runs `prepare` in every new VM instead. To snapshot, use `defineSandboxProvider()` for full control: build and push the image in `prepare()`, create a temporary VM, run your setup, stop it, and capture it with `SandboxHandle.snapshot()`. Then create session VMs with `Sandbox.builder(name).fromSnapshot(...)` instead of `.image(...)`.
 - **Saved state outside development:** the built-in provider snapshotted a session's disk when it captured state in production and restored it on reconnect. This provider relies on the stopped VM's disk on the same machine.
-- **A cross-process creation lock:** the built-in provider held a file lock while it created, reconnected, or removed a session's VM. This provider resolves a creation race by connecting to whichever VM exists after its own creation fails. Add a lock, for example a file lock under `ctx.storagePath`, if your setup runs several eve processes against one machine.
+- **A cross-process creation lock:** the built-in provider held a file lock while it created, reconnected, or removed a session's VM. This provider resolves a creation race by connecting to whichever VM exists after its own creation fails. Add a lock, for example a file lock under `ctx.directory`, if your setup runs several eve processes against one machine.
 - **Network policies:** the built-in provider accepted a `networkPolicy` open option, applied domain rules, and injected credentials into outbound requests. This provider leaves the VM's network at microsandbox's default and does not expose `setNetworkPolicy()`. Configure networking at creation with the builder's `network()`, `disableNetwork()`, or `secretEnv()` methods.
-- **Template pruning:** the built-in provider removed old template directories and their snapshots. This provider never deletes templates under `.eve/sandbox-cache/microsandbox/templates/`, and it removes a VM only on `sandbox.delete()` and session end. List leftover VMs with `msb ls` and remove them with `msb rm <name>`. Two consequences of the provider's design:
-  - VM names hash the app's storage path, so moving or renaming the app directory leaves its existing VMs behind under names the provider no longer derives.
-  - Each VM bind-mounts its template directory read-only. If you delete `.eve/sandbox-cache`, a stopped VM can no longer restart; remove such VMs with `msb rm <name>`, and the next access creates fresh ones.
+- **VM cleanup:** the provider removes a VM only on `sandbox.delete()` and session end. List leftover VMs with `msb ls` and remove them with `msb rm <name>`. VM names hash the app's storage path, so moving or renaming the app directory leaves its existing VMs behind under names eve no longer derives.
 - **Platform checks and installation:** the built-in provider checked the host platform and installed the SDK and runtime during `eve dev`. This provider only checks that the runtime is installed.
 
 ## Troubleshooting

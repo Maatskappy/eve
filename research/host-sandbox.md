@@ -58,17 +58,18 @@ subagents, and other processes on the machine all find the same directory. The
 template seeds the workspace only when a start creates it; concurrent creators
 copy to temporary directories and race on an atomic rename, and the losers
 adopt the winner's directory. Templates live under
-`.eve/sandbox-cache/host/templates/<key>`, keyed by resources and source
-revision, published atomically, and pruned with the other local templates.
-The session directory also holds `skills/` and `jobs/` (for the `bash` tool).
-Authored skills are copied from the template when a session opens on a new
-generation, recorded in `authored-skills.json` with the template key and skill
-names: on a rebuild eve replaces the current authored skills and removes the
+`.eve/sandbox-cache/host/templates/<key>` (`resources/` with the authored
+files, `sandbox/` with the prepared session directory), keyed by resources,
+source revision, and options, published atomically, and pruned with the other
+local templates. The session directory also holds `skills/` and `jobs/` (for
+the `bash` tool). Authored skills are copied from the build's resources when a
+session opens on a new generation, recorded in `.eve-authored-skills.json`
+beside the skill root with the template key and skill names: on a rebuild eve replaces the current authored skills and removes the
 ones the previous generation wrote, while dynamic skills in the same directory
 stay. The session state does not change on a rebuild, so dynamic skill files
 are not rewritten and must survive in place.
 
-Session state is `{ root, version }`. Resume checks that `root` matches what the
+Session state is `{ key, version }`. Resume checks that `key` matches what the
 environment derives for the session. When a per-session workspace was removed
 outside eve (for example with `.eve`), resume throws `SandboxSessionGoneError`
 (#5117): eve clears the session's sandbox state and reruns the selector, whose
@@ -127,23 +128,63 @@ the first open (adds harness plumbing and still arrives after the first tool
 call), and overriding `HOME` in host commands (breaks `git`, `pnpm`, and
 credential lookups that the provider exists to reach).
 
-## Exported session helper
+## Sandbox backends
 
-Custom providers built on a non-shell engine previously had just-bash as the
-reference. `eve/sandbox/provider` now exports `createSandboxSession(primitives)`,
-which wraps the internal `buildSandboxSession`: a provider implements `spawn`,
-`readFile`, `writeFile`, `removePath`, and `resolvePath`, and gets the full
-`SandboxSession` (`run`, binary and text
-variants, encodings, line ranges). The `/sandbox/just-bash` and
-`/sandbox/microsandbox` docs pages are complete custom-provider guides built on
-it; the application installs `just-bash` or `microsandbox` itself.
+Custom providers on a non-shell engine previously re-implemented eve's own
+contract: template hashing and atomic publish, session-key naming, the
+#5132 upsert, gone resume, and `onSessionEnd`, seeding workspace files and
+skills, path resolution, `AI_AGENT`, stream conversion, and no-op lifecycle
+hooks. `eve/sandbox/provider` exports `defineSandboxBackend`, where the author
+describes only the engine and eve owns the contract:
 
-`eve/sandbox/provider` also exports `SandboxSessionGoneError` (#5117's class),
-so a custom provider's `resume()` can report a native sandbox that no longer
-exists the way the built-in providers do: eve clears the session's sandbox
-state and reruns the selector, whose `start()` creates a fresh sandbox. Both
-guides throw it instead of recreating inside `resume()`, which would skip
-initialization that `defineSandbox()` runs after `open()`.
+```ts
+defineSandboxBackend<Options>({
+  name: "just-bash",
+  workspaceRoot: "/workspace", // or (ctx, options) => string
+  directoryTemplate?: true,
+  keyedToolSessions?: true,
+  open(ctx, options): Promise<{ instance; created?: boolean }>, // find-or-create
+  find?(ctx, options): Promise<instance | undefined>, // resume; undefined => gone
+  remove?(ctx, options): Promise<void>, // idempotent; default rm ctx.directory
+});
+// instance: exec -> { stdout, stderr, exitCode } | { stdout, stderr, exited, kill },
+//           readFile -> bytes | string | null, writeFile(path, bytes),
+//           removePath? (default rm via exec), stop?, dispose?
+// ctx: key (name-safe, per app storage path and session id), directory
+//      (eve-owned per-session dir), session, resolveProjectPath.
+```
+
+`environment()` accepts the backend's options plus `prepare`. eve seeds a sandbox
+only when `open` reports `created`: workspace files under `workspaceRoot`,
+authored skills at the sandbox's resolved skill root, then `prepare`; on failure
+it stops and removes the sandbox so a later open cannot reconnect to it
+half-seeded. Every open refreshes authored skills through the marker described
+under [Modes](#modes). eve injects `AI_AGENT=eve`, normalizes buffered and
+streaming exec (killing streaming commands on abort), maps `stop()` to stop,
+delete, and shutdown and `dispose()` to keyed tool-session release, and throws
+`SandboxSessionGoneError` when `find` returns `undefined` (or, without `find`,
+when `ctx.directory` is missing). `defineSandboxProvider` stays for full control
+such as snapshots and network policies, and `SandboxSessionGoneError` stays
+exported for those providers. `createSandboxSession` never shipped and is gone.
+
+`directoryTemplate` is the one opt-in for directory-backed engines: eve seeds
+and prepares a template directory once per build and copies it
+(copy-on-write where supported) into `ctx.directory` before the first open.
+Without it, `prepare` would run per session, a regression for `HostSandbox`
+and the former just-bash provider, which both cached it per template.
+
+`HostSandbox` is built from two internal backend definitions over the same
+core: per-session mode uses `directoryTemplate` and reports a missing
+workspace as gone; shared-root mode has no template, so eve writes no
+workspace files into the author's directory, and its `find` rejects with the
+plain missing-root error. Process groups, job kills, env filtering,
+`EVE_SANDBOX_SKILL_ROOT`, and `EVE_SANDBOX_JOB_ROOT` stay in the host
+instance; it needs no host-specific backend surface. The just-bash guide's
+backend runs in the `agent-mcp` e2e fixture so CI exercises it.
+
+A backend keeps its prepared files under the app's
+`.eve/sandbox-cache/<name>/`, so it builds and runs on the same machine, as the
+local providers already did.
 
 ## Commands and environment
 

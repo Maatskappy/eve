@@ -8,7 +8,7 @@
 import type { ContextReader } from "#context/key.js";
 import { contextStorage } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
-import { HOST_PROVIDER_NAME } from "#execution/sandbox/bindings/local.js";
+import { HOST_PROVIDER_NAME } from "#execution/sandbox/host-provider-name.js";
 import { skillFilePath } from "#execution/skills/instructions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { SEARCH_TOOL_NAME, SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";

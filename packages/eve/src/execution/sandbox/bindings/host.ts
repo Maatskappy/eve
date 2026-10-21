@@ -21,6 +21,7 @@ import {
   LOCAL_SANDBOX_TEMPLATE_RETAIN_COUNT,
   selectStaleTemplateEntries,
 } from "#execution/sandbox/bindings/local-template-prune.js";
+import { HOST_PROVIDER_NAME } from "#execution/sandbox/host-provider-name.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
 import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
@@ -37,7 +38,7 @@ import {
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 
-export const HOST_PROVIDER_NAME = "host";
+export { HOST_PROVIDER_NAME };
 
 const WORKSPACE_DIRECTORY_NAME = "workspace";
 const SKILLS_DIRECTORY_NAME = "skills";

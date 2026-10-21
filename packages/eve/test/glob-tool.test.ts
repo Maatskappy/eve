@@ -23,10 +23,7 @@ interface FakeAccessOptions {
   readonly probeExitCode?: number;
 }
 
-const PROBE_COMMAND =
-  "command -v rg >/dev/null 2>&1 || exit 127; " +
-  "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
-  "'__eve_ripgrep_probe_never_matches__' .";
+const PROBE_COMMAND = "rg --version";
 const HOME_PROBE_COMMAND = `printf '%s\\n%s\\n' "$HOME" "\${EVE_SANDBOX_SKILL_ROOT-}"`;
 
 function createFakeAccess(
@@ -43,8 +40,6 @@ function createFakeAccess(
 
     async get() {
       return {
-        // Use a fresh id per fake session so the ripgrep-probe cache
-        // (keyed by `session.id`) does not leak across tests.
         id: `test-glob-sandbox-${crypto.randomUUID()}`,
         async readFile() {
           return null;

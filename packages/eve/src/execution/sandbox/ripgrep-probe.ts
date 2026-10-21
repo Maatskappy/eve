@@ -1,16 +1,22 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 
-// Searches where commands start, the workspace root, so a provider whose `rg`
-// cannot traverse that tree falls back to POSIX find and grep.
-const RIPGREP_PROBE_COMMAND =
-  "command -v rg >/dev/null 2>&1 || exit 127; " +
-  "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
-  "'__eve_ripgrep_probe_never_matches__' .";
+const RIPGREP_PROBE_COMMAND = "rg --version";
 
+const ripgrepAvailability = new WeakMap<SandboxSession, Promise<boolean>>();
+
+/** Whether the sandbox has `rg`; glob and grep fall back to POSIX find and grep otherwise. */
 export async function ripgrepIsAvailable(session: SandboxSession): Promise<boolean> {
+  let available = ripgrepAvailability.get(session);
+  if (available === undefined) {
+    available = probeRipgrep(session);
+    ripgrepAvailability.set(session, available);
+  }
+  return await available;
+}
+
+async function probeRipgrep(session: SandboxSession): Promise<boolean> {
   try {
-    const result = await session.run({ command: RIPGREP_PROBE_COMMAND });
-    return (result.exitCode === 0 || result.exitCode === 1) && result.stderr.trim().length === 0;
+    return (await session.run({ command: RIPGREP_PROBE_COMMAND })).exitCode === 0;
   } catch {
     return false;
   }

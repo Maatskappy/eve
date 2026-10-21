@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import editFile, { applyExactEdits } from "./extension/subagents/agent/tools/edit_file.js";
 
@@ -107,5 +107,34 @@ describe("applyExactEdits", () => {
       ),
     ).resolves.toEqual({ path: "/source/file.ts", replacements: 1 });
     expect(content).toBe("before new after");
+  });
+
+  describe("during eve dev", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("keeps edits inside the application's agent directory", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      let content = "before old after";
+      const sandbox = {
+        readTextFile: async () => content,
+        resolvePath: (path: string) => (path.startsWith("/") ? path : `/app/${path}`),
+        writeTextFile: async (input: { readonly content: string }) => {
+          content = input.content;
+        },
+      };
+      const edit = (path: string) =>
+        editFile.execute({ edits: [{ newText: "new", oldText: "old" }], path }, {
+          getSandbox: async () => sandbox,
+        } as never);
+
+      await expect(edit("/app/agent/tools/greet.ts")).resolves.toEqual({
+        path: "/app/agent/tools/greet.ts",
+        replacements: 1,
+      });
+      await expect(edit("/app/package.json")).rejects.toThrow("must stay below /app/agent");
+      await expect(edit("/app/agent/../package.json")).rejects.toThrow(
+        "must stay below /app/agent",
+      );
+    });
   });
 });

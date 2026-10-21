@@ -17,7 +17,7 @@ export default selfModification({
 });
 ```
 
-Local source editing is available while `eve dev` is running, and registry installation adds only `just-bash`. The registry command runs local-only setup; deployed-aware setup remains a separate integration. Keep the generated mount at `agent/extensions/self-modification/extension.ts`; alternate mount paths and namespaces are not supported by the self-modification setup and TUI flows.
+Local source editing is available while `eve dev` is running, and edits the application directory through the host sandbox. Registry installation adds no dependencies. The registry command runs local-only setup; deployed-aware setup remains a separate integration. Keep the generated mount at `agent/extensions/self-modification/extension.ts`; alternate mount paths and namespaces are not supported by the self-modification setup and TUI flows.
 
 ## Migrate a scaffolded subagent
 

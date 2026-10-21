@@ -64,7 +64,7 @@ const inspectTraceSpansTool = defineTool({
         found: true,
         availableFields,
         fields,
-        rawPath: `/traces/${traceId}/segments/${source.segmentFile}`,
+        rawPath: source.segmentPath,
         truncated: spanTruncated,
       };
     });

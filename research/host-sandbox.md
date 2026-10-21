@@ -136,10 +136,13 @@ removed; there is no `host` option because `root` conflicts with the shared
 ## Self-modification
 
 Local self-modification binds `HostSandbox.environment({ root: "." })` during
-`eve dev`, so the workspace root is the app root. Outside dev it binds the
-default Vercel environment with a selector that throws, the same prewarm-safe
-approach remote self-modification uses. Remote self-modification drops its
-dev-only just-bash branch and always binds the Vercel environment.
+`eve dev`. In development the sandbox app root is the authored app root, not the
+runtime generation snapshot, so the workspace root is the developer's real
+project. Outside dev it binds the default Vercel environment with a selector
+that throws, the same prewarm-safe approach remote self-modification uses.
+Remote self-modification drops its dev-only just-bash branch and always binds
+the Vercel environment; it keeps `/source` as its symlinked view of the
+checkout.
 
 | just-bash mount  | Host path (relative to the app root) |
 | ---------------- | ------------------------------------ |
@@ -148,10 +151,16 @@ dev-only just-bash branch and always binds the Vercel environment.
 | `/logs` (ro)     | `.eve/logs`                          |
 | `/eve-docs` (ro) | `node_modules/eve/docs`              |
 
-`edit_file` and `write_file` keep edits contained to `<root>/agent`. The
-instructions allow real `git`, `pnpm`, and `tsc` (for example a typecheck after
-edits) but keep source edits on the edit tools. Read-only mounts become a
-convention instead of an enforced boundary.
+Local instructions are resolved at `session.started`, so they render these as
+absolute paths under the authored app root. Guidance shared with the remote
+child takes the source and docs roots as arguments. `edit_file` and
+`search_registry` are shared too; they read the source root from the active
+child (`/source` when deployed, `resolvePath("agent")` locally), and
+`edit_file` rejects paths outside it. The built-in `write_file` stays
+unconstrained, as it always was; the instructions limit source edits to the
+agent directory. The instructions allow real `git`, `pnpm`, and `tsc` (for
+example a typecheck after edits) but keep source edits on the edit tools.
+Read-only mounts become a convention instead of an enforced boundary.
 
 ## just-bash removal
 

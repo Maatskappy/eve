@@ -1,6 +1,7 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 
 import { isDeployedRuntime } from "../../../mode.js";
+import { DEPLOYED_SOURCE_ROOT } from "../../../paths.js";
 import {
   documentationInstructions,
   registryWorkflowInstructions,
@@ -34,11 +35,11 @@ export default defineDynamic({
       return defineInstructions({
         markdown: renderInstructions([
           roleInstructions,
-          sourceWorkspaceInstructions,
+          sourceWorkspaceInstructions(DEPLOYED_SOURCE_ROOT),
           sourceEditingInstructions,
-          toolAuthoringInstructions,
+          toolAuthoringInstructions(DEPLOYED_SOURCE_ROOT),
           registryWorkflowInstructions,
-          documentationInstructions,
+          documentationInstructions("/eve-docs"),
           deployedGuidance,
           workingInstructions,
           deployedReportingGuidance,

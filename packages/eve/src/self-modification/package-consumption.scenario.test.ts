@@ -143,7 +143,6 @@ describe("packed package consumption", () => {
           dependencies: {
             "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
-            "just-bash": "3.1.0",
           },
         },
         null,

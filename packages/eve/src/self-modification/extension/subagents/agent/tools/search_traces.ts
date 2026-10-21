@@ -4,12 +4,14 @@ import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local/trace-query.js";
 import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local/trace-summary.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
+import { shellQuote } from "#shared/shell-quote.js";
 import {
   localTraceConversationMarker,
   localTraceIndexedMarker,
 } from "#tracing/local/trace-discovery-index.js";
 
 import type { ResolvedSelfModificationConfig } from "../../../../config.js";
+import { LOCAL_TRACES_PATH } from "../../../../paths.js";
 import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js";
 import {
   readTraceSources,
@@ -58,12 +60,14 @@ const searchTracesTool = defineTool({
       ctx.session.parent?.rootSessionId ?? ctx.session.id,
     );
     const sandbox = await ctx.getSandbox();
+    const traceRoot = sandbox.resolvePath(LOCAL_TRACES_PATH);
+    const traces = `${shellQuote(traceRoot)}/*`;
     const [available, indexed, conversation] = await Promise.all([
-      sandbox.run({ command: "ls -1dt /traces/*" }),
-      sandbox.run({ command: `ls -1 /traces/*/${localTraceIndexedMarker()}` }),
-      sandbox.run({ command: `ls -1 /traces/*/${localTraceConversationMarker(conversationId)}` }),
+      sandbox.run({ command: `ls -1dt ${traces}` }),
+      sandbox.run({ command: `ls -1 ${traces}/${localTraceIndexedMarker()}` }),
+      sandbox.run({ command: `ls -1 ${traces}/${localTraceConversationMarker(conversationId)}` }),
     ]);
-    if (available.exitCode !== 0 && !isEmptyTraceListing(available)) {
+    if (available.exitCode !== 0 && !isEmptyTraceListing(available, traceRoot)) {
       throw new Error(`Could not list local traces: ${available.stderr}`);
     }
 
@@ -182,13 +186,13 @@ function traceIds(value: string): Set<string> {
   return ids;
 }
 
-function isEmptyTraceListing(result: {
-  readonly stderr: string;
-  readonly stdout: string;
-}): boolean {
+function isEmptyTraceListing(
+  result: { readonly stderr: string; readonly stdout: string },
+  traceRoot: string,
+): boolean {
   return (
     result.stdout.trim() === "" &&
-    result.stderr.includes("/traces/*") &&
+    result.stderr.includes(`${traceRoot}/*`) &&
     /no such file or directory/iu.test(result.stderr)
   );
 }

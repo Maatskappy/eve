@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 
+import { selfModificationSourceRoot } from "../../../../paths.js";
+
 const replacementSchema = {
   type: "object",
   additionalProperties: false,
@@ -26,7 +28,7 @@ const inputSchema = {
     path: {
       type: "string",
       minLength: 1,
-      description: "Absolute path below /source to edit.",
+      description: "Absolute path below the authored agent directory to edit.",
     },
     edits: {
       type: "array",
@@ -123,8 +125,12 @@ export default defineTool({
     const sandbox = await ctx.getSandbox();
 
     const resolved = sandbox.resolvePath(path);
-    if (!resolved.startsWith("/source/") || resolved.split("/").some((part) => part === "..")) {
-      throw new Error("Self-modification file edits must stay below /source.");
+    const sourceRoot = selfModificationSourceRoot(sandbox);
+    if (
+      !resolved.startsWith(`${sourceRoot}/`) ||
+      resolved.split("/").some((part) => part === "..")
+    ) {
+      throw new Error(`Self-modification file edits must stay below ${sourceRoot}.`);
     }
 
     const content = await sandbox.readTextFile({ path: resolved });

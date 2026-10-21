@@ -1,9 +1,13 @@
 import type { ToolContext } from "eve/tools";
 
+import { shellQuote } from "#shared/shell-quote.js";
 import { parseLocalTraceSegment, type LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
+import { LOCAL_TRACES_PATH } from "../paths.js";
+
 export interface LocalTraceSpanSource {
-  readonly segmentFile: string;
+  /** Absolute path of the segment file the span came from. */
+  readonly segmentPath: string;
   readonly span: LocalTraceSpan;
 }
 
@@ -19,8 +23,8 @@ export async function readTraceSources(
   ctx: Pick<ToolContext, "abortSignal" | "getSandbox">,
 ): Promise<LocalTraceSpanSource[]> {
   const sandbox = await ctx.getSandbox();
-  const directory = `/traces/${traceId}/segments`;
-  const listed = await sandbox.run({ command: `ls -1 ${directory}` });
+  const directory = `${sandbox.resolvePath(LOCAL_TRACES_PATH)}/${traceId}/segments`;
+  const listed = await sandbox.run({ command: `ls -1 ${shellQuote(directory)}` });
   if (listed.exitCode !== 0) {
     throw new Error(`Could not list local trace segments: ${listed.stderr}`);
   }
@@ -35,10 +39,11 @@ export async function readTraceSources(
   const sources: LocalTraceSpanSource[] = [];
   for (const file of files) {
     if (ctx.abortSignal.aborted) throw new Error("Trace inspection was cancelled.");
-    const content = await sandbox.readTextFile({ path: `${directory}/${file}` });
+    const segmentPath = `${directory}/${file}`;
+    const content = await sandbox.readTextFile({ path: segmentPath });
     if (content === null || content.length > MAX_SEGMENT_BYTES) continue;
     for (const span of parseLocalTraceSegment(content, traceId)) {
-      sources.push({ segmentFile: file, span });
+      sources.push({ segmentPath, span });
     }
   }
   return sources;

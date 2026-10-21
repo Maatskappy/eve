@@ -1,5 +1,7 @@
 import { defineTool, type ToolContext } from "eve/tools";
 
+import { selfModificationSourceRoot } from "../../../../paths.js";
+
 /** Registry categories an integration search can be narrowed to. */
 const CATEGORIES = ["channel", "connection", "extension", "instrumentation", "memory"] as const;
 
@@ -16,8 +18,6 @@ const FETCH_TIMEOUT_MS = 10_000;
  * serve a whole conversation. A stale-tolerant read is correct here.
  */
 const CACHE_TTL_MS = 5 * 60_000;
-/** The sandbox mounts the authored `agent/` directory here in development. */
-const AUTHORED_SOURCE_MOUNT = "/source";
 const AUTHORED_PREFIX = "agent/";
 const SELF_MODIFICATION_MOUNT = "agent/extensions/self-modification";
 
@@ -434,8 +434,8 @@ export async function loadRegistryIndex(input: {
 /**
  * Annotates each row with whether the authored tree already holds its file.
  *
- * Development mounts the authored `agent/` directory at `/source`, so
- * `agent/channels/slack.ts` is `/source/channels/slack.ts`. eve derives every
+ * The child's sandbox exposes the authored `agent/` directory at its source
+ * root, so `agent/channels/slack.ts` is `<source root>/channels/slack.ts`. eve derives every
  * integration name from its path, so a present file is an exact answer rather
  * than a heuristic. The field is left absent — never `false` — when the source
  * cannot be read, so "unknown" is not reported as "not installed".
@@ -459,11 +459,12 @@ async function annotateInstalled(input: {
     return input.rows;
   }
 
+  const sourceRoot = selfModificationSourceRoot(sandbox);
   return await Promise.all(
     input.rows.map(async (row) => {
       const target = targets.get(row.address);
       if (target === undefined) return row;
-      const path = `${AUTHORED_SOURCE_MOUNT}/${target.slice(AUTHORED_PREFIX.length)}`;
+      const path = `${sourceRoot}/${target.slice(AUTHORED_PREFIX.length)}`;
       try {
         const content = await sandbox.readTextFile({ path });
         return { ...row, installed: content !== null };

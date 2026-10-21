@@ -19,6 +19,8 @@ Add a tool that converts temperatures between Celsius and Fahrenheit.
 
 The self-modification subagent changes the authored files in your project. Review the diff and test the new behavior as you would for any other source change. `eve dev` reloads changes while you work.
 
+The subagent works directly in your application directory through the [host sandbox](/docs/sandbox/host). It can run the tools installed on your machine, such as `git`, `pnpm`, and `tsc`, for example to typecheck after an edit. Its instructions limit source edits to files under `agent/`, and its `edit_file` tool rejects paths outside that directory. It reads your local traces in `.eve/traces/v1`, logs in `.eve/logs`, and the eve docs in `node_modules/eve/docs`. Commands run as your user without isolation, so use local self-modification only in projects and conversations you trust.
+
 ## Change the self-modification model
 
 The subagent uses your agent's model by default. To give it a different model or reasoning level, ask for it directly:

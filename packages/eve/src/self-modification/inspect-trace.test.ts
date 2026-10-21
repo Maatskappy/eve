@@ -10,6 +10,10 @@ const otherTraceId = "2".repeat(32);
 const spanId = "a".repeat(16);
 const toolSpanId = "b".repeat(16);
 const originalEveDev = process.env.EVE_DEV;
+// The local child's sandbox is rooted at the app directory, so traces live under it.
+const TRACE_ROOT = "/app/.eve/traces/v1";
+const LIST_TRACES = `ls -1dt '${TRACE_ROOT}'/*`;
+const resolvePath = (path: string) => `/app/${path}`;
 
 beforeEach(() => {
   process.env.EVE_DEV = "1";
@@ -85,15 +89,16 @@ function traceContext(contents: Record<string, string>) {
   return {
     abortSignal: new AbortController().signal,
     getSandbox: async () => ({
+      resolvePath,
       readTextFile: async ({ path }: { path: string }) =>
         Object.entries(contents).find(([id]) => path.includes(id))?.[1] ?? null,
       run: async ({ command }: { command: string }) => {
-        if (command === "ls -1dt /traces/*") {
+        if (command === LIST_TRACES) {
           return {
             exitCode: 0,
             stderr: "",
             stdout: Object.keys(contents)
-              .map((id) => `/traces/${id}`)
+              .map((id) => `${TRACE_ROOT}/${id}`)
               .join("\n"),
           };
         }
@@ -157,6 +162,7 @@ describe("self-modification trace inspection tools", () => {
     const ctx = {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
+        resolvePath,
         readTextFile: async ({ path }: { path: string }) =>
           path.includes(traceId)
             ? segment({
@@ -167,11 +173,11 @@ describe("self-modification trace inspection tools", () => {
               })
             : segment({ id: otherTraceId, runId: "other" }),
         run: async ({ command }: { command: string }) => {
-          if (command === "ls -1dt /traces/*") {
+          if (command === LIST_TRACES) {
             return {
               exitCode: 0,
               stderr: "",
-              stdout: `/traces/${traceId}\n/traces/${otherTraceId}\n`,
+              stdout: `${TRACE_ROOT}/${traceId}\n${TRACE_ROOT}/${otherTraceId}\n`,
             };
           }
           if (command.includes("/segments"))
@@ -206,10 +212,11 @@ describe("self-modification trace inspection tools", () => {
     const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({ limit: 10 }, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
+        resolvePath,
         readTextFile: async () => segment({ conversationId: "other" }),
         run: async ({ command }: { command: string }) =>
-          command === "ls -1dt /traces/*"
-            ? { exitCode: 0, stderr: "", stdout: ids.map((id) => `/traces/${id}`).join("\n") }
+          command === LIST_TRACES
+            ? { exitCode: 0, stderr: "", stdout: ids.map((id) => `${TRACE_ROOT}/${id}`).join("\n") }
             : command.includes("/segments")
               ? { exitCode: 0, stderr: "", stdout: `${spanId}.otlp.json\n` }
               : { exitCode: 2, stderr: "", stdout: "" },
@@ -233,11 +240,12 @@ describe("self-modification trace inspection tools", () => {
     const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({ limit: 10 }, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
+        resolvePath,
         run: async ({ command }: { command: string }) =>
-          command === "ls -1dt /traces/*"
+          command === LIST_TRACES
             ? {
                 exitCode: 2,
-                stderr: "ls: cannot access '/traces/*': No such file or directory",
+                stderr: `ls: cannot access '${TRACE_ROOT}/*': No such file or directory`,
                 stdout: "",
               }
             : { exitCode: 2, stderr: "", stdout: "" },
@@ -253,16 +261,17 @@ describe("self-modification trace inspection tools", () => {
     const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({ limit: 10 }, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
+        resolvePath,
         readTextFile: async () => segment({ id: traceId }),
         run: async ({ command }: { command: string }) => {
-          if (command === "ls -1dt /traces/*") {
+          if (command === LIST_TRACES) {
             return {
               exitCode: 0,
               stderr: "",
-              stdout: `/traces/${missingTraceId}\n/traces/${traceId}\n`,
+              stdout: `${TRACE_ROOT}/${missingTraceId}\n${TRACE_ROOT}/${traceId}\n`,
             };
           }
-          if (command.includes(`/traces/${missingTraceId}/segments`)) {
+          if (command.includes(`${TRACE_ROOT}/${missingTraceId}/segments`)) {
             return { exitCode: 2, stderr: "trace was pruned", stdout: "" };
           }
           if (command.includes("/segments")) {

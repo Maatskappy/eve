@@ -305,6 +305,42 @@ describe("the conversation", () => {
     },
   );
 
+  it("reconciles a split answer while its interaction is still open and the message waits", () => {
+    const conversation = observe([...started, requested, approval("approval_0")]);
+    const pending = conversation.answer([{ interactionId: "approval_0", optionId: "approve" }]);
+    conversation.setSubmissions([{ id: "bob", message: "Bob follows up." }]);
+    pending.accept("d_1");
+    expect(tool(conversation)?.interaction?.answer).toMatchObject({ optionId: "approve" });
+
+    observe([{ type: "delivery.admitted", data: { deliveryId: "answers_d_1" } }], conversation);
+    expect(tool(conversation)?.interaction?.status).toBe("open");
+    expect(tool(conversation)?.interaction?.answer).toBeUndefined();
+    expect(
+      conversation.state.messages.some((message) =>
+        message.parts.some((part) => part.type === "text" && part.text === "Bob follows up."),
+      ),
+    ).toBe(true);
+
+    observe(
+      [
+        { type: "delivery.consumed", data: { deliveryId: "answers_d_1", turnId, parts: [] } },
+        {
+          type: "response.submitted",
+          data: {
+            deliveryId: "answers_d_1",
+            interactionId: "approval_0",
+            responseId: "response_1",
+            value: { optionId: "approve" },
+          },
+        },
+        { type: "response.admitted", data: { responseId: "response_1" } },
+      ],
+      conversation,
+    );
+    expect(tool(conversation)?.interaction?.answer).toMatchObject({ optionId: "approve" });
+    expect(conversation.view.deliveries["d_1"]).toBeUndefined();
+  });
+
   it("does not retract a newer answer when an earlier POST fails", () => {
     const conversation = observe([...started, requested, approval("approval_0")]);
     const retract = conversation.answer([{ interactionId: "approval_0", optionId: "approve" }]);

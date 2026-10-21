@@ -30,6 +30,7 @@ import { activeTurnId, storedProjection, turnPosition } from "#harness/session-m
 import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 
 export type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
@@ -383,8 +384,18 @@ function splitAnswers(delivery: DeliverHookPayload): {
     const { answers: _answers, ...other } = payload;
     return [{ index, payload: other }];
   });
+  const selectedAnswers = selectDeliveryPayloads(delivery, answers);
+  const messageIndices = new Set(rest.map(({ index }) => index));
   return {
-    answers: selectDeliveryPayloads(delivery, answers),
+    answers: {
+      ...selectedAnswers,
+      deliveryMetadata: selectedAnswers.deliveryMetadata?.map((entry) => ({
+        ...entry,
+        deliveryId: messageIndices.has(answers[entry.payloadIndex]!.index)
+          ? answersDeliveryId(entry.deliveryId)
+          : entry.deliveryId,
+      })),
+    },
     rest: rest.length === 0 ? undefined : selectDeliveryPayloads(delivery, rest),
   };
 }

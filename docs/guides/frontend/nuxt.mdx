@@ -59,7 +59,7 @@ export default defineNuxtConfig({
 <script setup lang="ts">
 const { status, send } = useEveAgent();
 
-const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isBusy = computed(() => status.value === "busy");
 const isInputDisabled = computed(() => isBusy.value || status.value === "resuming");
 
 const message = ref("");

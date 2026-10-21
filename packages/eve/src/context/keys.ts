@@ -13,7 +13,7 @@ import type {
   SessionCallback,
   SessionCapabilities,
   SessionParent,
-  SessionTraceContext,
+  SessionTraceSeed,
   SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
@@ -23,9 +23,10 @@ import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
-import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
+import {
+  EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME,
+  SESSION_CALLBACK_CONTEXT_KEY_NAME,
+} from "#context/key-names.js";
 import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { PersistedDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
@@ -37,7 +38,7 @@ import type { HistoryViewProjector } from "#shared/history-view.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
-import type { SessionPredecessor } from "#protocol/message.js";
+import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type {
@@ -46,7 +47,7 @@ export type {
   SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
-export type { SessionPredecessor } from "#protocol/message.js";
+export type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 
 // ---------------------------------------------------------------------------
 // Session types (public API surface)
@@ -140,20 +141,6 @@ export interface OfferedCatalogTools {
 export const OfferedCatalogToolsKey = new ContextKey<OfferedCatalogTools>(
   "eve.offeredCatalogTools",
 );
-export interface ActiveChannelDelivery {
-  readonly traceSessionId: string;
-  readonly agentName?: string;
-  readonly channelType?: string;
-  readonly delivery: InstrumentationChannelDeliveryRef;
-  readonly policyAgentName?: string;
-  readonly rootSessionId: string;
-  readonly sequence: number;
-  readonly sessionId: string;
-  readonly turnId: string;
-}
-export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelDelivery[]>(
-  "eve.activeChannelDeliveries",
-);
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
@@ -163,9 +150,9 @@ export const SessionPredecessorKey = new ContextKey<SessionPredecessor>("eve.ses
 /** Set only when the trace root differs from `ParentSessionKey`'s root; see {@link SessionTraceRoot}. */
 export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
-export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
+export const ParentTraceContextKey = new ContextKey<SessionTraceSeed>("eve.parentTraceContext");
 
-export type SessionTraceSeed = SessionTraceContext;
+export type { SessionTraceSeed } from "#channel/types.js";
 export const SessionTraceSeedKey = new ContextKey<SessionTraceSeed>("eve.sessionTraceSeed");
 export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled");
 
@@ -183,9 +170,12 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
 
-/** Present when a remote agent protocol 1 caller created the session. */
-export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller>(
-  "eve.legacyRemoteAgentCaller",
+/**
+ * The remote agent protocol of a {@link SessionCallbackKey} caller that speaks an earlier one. That
+ * caller gets the session's result, but the session relays none of its requests to it.
+ */
+export const EarlierRemoteCallerKey = new ContextKey<number>(
+  EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME,
 );
 
 // ---------------------------------------------------------------------------

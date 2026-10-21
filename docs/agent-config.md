@@ -286,7 +286,7 @@ turns that answer a message, clear or compact the context, or end in
 cancellation. A session never expires while a turn is open, including a turn
 held open while its [tasks](./tools/tasks) work or while it waits for a person
 to answer; the window restarts when that turn settles. Process restarts do not
-change the window. When the window elapses, eve emits `session.completed` and
+change the window. When the window elapses, eve emits `session.ended` with `outcome: "completed"` and
 releases every continuation address; the next qualifying channel message starts
 fresh. To carry an earlier conversation into the fresh session, pass it as
 [prior history](./channels/eve#start-from-prior-history). Set it to `false` to
@@ -334,18 +334,18 @@ Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
 false` is not accepted. eve calls `sessionUsage` before each model call once
 the window has usage. The model call that crosses a limit is allowed to finish
 because exact usage arrives after the call completes. Before the next model
-call, eve pauses the turn (`turn.waiting`) and sends a deterministic
+call, eve pauses the turn (`turn.paused`) and sends a deterministic
 continuation prompt with two options: **Continue** starts a new window and
 resumes the same turn, and **Stop** cancels the in-flight turn through the
-standard cancellation path (`turn.cancelled` → `session.waiting`). Stop is a
+standard cancellation path (`turn.settled` with `outcome: "cancelled"`). Stop is a
 user decision, not an error. The session stays resumable; because it is still
 over budget after Stop, the next message raises a new prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree, so the delegating parent never receives an error result it
 could retry. A reply that answers neither option is queued while the existing
 prompt stays pending; eve does not raise another
-copy or start another turn. The reply is received (`message.received`) and
-processed in the held turn once the budget is granted.
+copy or start another turn. The reply waits unconsumed, and the held turn consumes it
+(`delivery.consumed`) once the budget is granted.
 
 For sessions already waiting on a continuation prompt from an older deployment,
 the previous turn has completed. A non-answer message still queues behind the

@@ -4,11 +4,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, StaticModelReferenceKey } from "#context/keys.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import {
+  dispatchMemoryCompactionCompleted,
+  dispatchMemoryCompactionRequested,
+  dispatchMemoryTurnStarted,
+} from "#context/memory-lifecycle.js";
+import {
+  compactionCompletedPoint,
+  compactionRequestedPoint,
+  turnStartedForResolvers,
+} from "#harness/session-machine/change-points.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import { defineMemory } from "#public/memory/index.js";
@@ -88,7 +97,7 @@ describe("compaction summary call", () => {
       role: "assistant",
     });
     // Session limits see the summary call; a manual compaction has no turn to report it.
-    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({
+    expect(sessionUsage(result.session)).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
     });
@@ -141,7 +150,7 @@ describe("compaction summary call", () => {
 
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
-    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({ inputTokens: 120 });
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120 });
   });
 });
 
@@ -209,7 +218,7 @@ describe("memory recalled after a compaction", () => {
   async function runWithNotes(options: {
     readonly compactOnly?: boolean;
     readonly history: HarnessSession["history"];
-    readonly input: StepInput;
+    readonly input: HarnessStepInput;
     readonly steps?: readonly (() => StreamResult)[];
   }) {
     const stepPrompts: string[][] = [];
@@ -251,15 +260,48 @@ describe("memory recalled after a compaction", () => {
     const result = await contextStorage.run(ctx, async () => {
       let stepped = await createToolLoopHarness({
         compactOnly: options.compactOnly,
+        // The memory points the session's participants dispatch from these facts.
         handleEvent: foldingHandler(async (event, messages) => {
-          await dispatchMemoryLifecycleEvent({
-            appRoot: "",
-            ctx,
-            event,
-            memories: [notes],
-            messages,
-            nodeId: "__root__",
-          });
+          const memory = { ctx, memories: [notes] };
+          if (event.type === "turn.started") {
+            await dispatchMemoryTurnStarted({
+              ...memory,
+              appRoot: "",
+              event: turnStartedForResolvers({ sequence: 0, turnId: event.data.turnId }, event),
+              nodeId: "__root__",
+            });
+          } else if (event.type === "context.started" && event.data.kind === "compaction") {
+            await dispatchMemoryCompactionRequested({
+              ...memory,
+              appRoot: "",
+              event: compactionRequestedPoint({
+                modelId: "step-model",
+                sequence: 0,
+                sessionId: "memory-compaction-session",
+                stepIndex: 0,
+                turnId: event.data.turnId ?? "",
+                usageInputTokens: event.data.trigger?.inputTokens ?? null,
+              }),
+              messages: messages ?? [],
+              nodeId: "__root__",
+            });
+          } else if (
+            event.type === "context.settled" &&
+            event.data.kind === "compaction" &&
+            event.data.outcome === "completed"
+          ) {
+            await dispatchMemoryCompactionCompleted({
+              ...memory,
+              event: compactionCompletedPoint({
+                modelId: "step-model",
+                sequence: 0,
+                sessionId: "memory-compaction-session",
+                stepIndex: 0,
+                turnId: "turn_0",
+              }),
+              messages: messages ?? [],
+            });
+          }
         }),
         historyProjector: projectMemoryHistoryFromSessionState,
         resolveModel: async () => model,

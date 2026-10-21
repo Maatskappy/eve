@@ -7,27 +7,26 @@ export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
 export { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
-export { defaultMessageReducer } from "#client/message-reducer.js";
-export { conversationReducer } from "#client/conversation-reducer.js";
+export { conversationOf } from "#client/conversation.js";
 export {
-  transcriptReducer,
+  transcriptOf,
   type TranscriptData,
   type TranscriptMessage,
-  type TranscriptReducerOptions,
-} from "#client/transcript-reducer.js";
-export { openConversationInputs } from "#client/conversation-state.js";
-export { toolCallState, type ToolCallState, type ToolCallStatus } from "#client/tool-call-state.js";
+  type TranscriptOptions,
+} from "#client/transcript.js";
 
 export type {
   AgentObservation,
   ConversationAgentSession,
-  ConversationInput,
   ConversationState,
-  ConversationTask,
-  ConversationTaskCall,
-  ConversationTurn,
 } from "#client/conversation-state.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
+export type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientAgentSession } from "#client/agent-session.js";
 export { ClientSession } from "#client/session.js";
@@ -42,6 +41,7 @@ export {
 // ---------------------------------------------------------------------------
 
 export type {
+  AcceptedDelivery,
   EveAgentStoreCallbacks,
   EveAgentStoreInit,
   EveAgentStoreSnapshot,
@@ -91,25 +91,12 @@ export type {
 } from "#client/types.js";
 
 export type {
-  EveAgentReducer,
-  EveAgentReducerEvent,
-  ClientInputRespondedEvent,
-  ClientMessageFailedEvent,
-  ClientMessageSubmittedEvent,
-} from "#client/reducer.js";
-
-export type {
-  EveAuthorizationChallenge,
-  EveAuthorizationOutcome,
-  EveAuthorizationPart,
-  EveMessageData,
-  EveDynamicToolPart,
-  EveMessageInputRequest,
+  EveInteractionPart,
   EveMessage,
   EveMessageMetadata,
   EveMessagePart,
-  EveMessageToolMetadata,
-} from "#client/message-reducer.js";
+  EveToolPart,
+} from "#client/message-types.js";
 
 // ---------------------------------------------------------------------------
 // Stream event types (re-exported so consumers can type-narrow without
@@ -117,62 +104,21 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
-  ActionPartialStreamEvent,
-  ActionResultStreamEvent,
-  ActionsRequestedStreamEvent,
-  AgentStartedStreamEvent,
-  AssistantStepFinishReason,
-  AuthorizationOutcome,
-  CompactionCompletedStreamEvent,
-  CompactionRequestedStreamEvent,
-  AuthorizationCompletedStreamEvent,
-  ConnectionAuthorizationOutcome,
-  AuthorizationRequiredStreamEvent,
-  HandleMessageStreamEvent,
-  HistoryImportedMessage,
-  HistoryImportedStreamEvent,
-  MessageStreamEventMeta,
-  InputResolution,
-  InputResolutionOutcome,
-  InputResolvedStreamEvent,
-  InputRequestedStreamEvent,
-  MessageAppendedStreamEvent,
-  MessageCompletedStreamEvent,
-  MessageReceivedPart,
-  MessageReceivedStreamEvent,
-  ReasoningAppendedStreamEvent,
-  ReasoningCompletedStreamEvent,
-  ResultCompletedStreamEvent,
-  RuntimeTraceContext,
-  SessionCompletedStreamEvent,
-  SessionFailedStreamEvent,
+  TraceContext,
   SessionPredecessor,
-  SessionStartedStreamEvent,
-  SessionWaitingStreamEvent,
-  MessageStreamEvent,
-  StepCompletedStreamEvent,
-  StepFailedStreamEvent,
-  StepStartedStreamEvent,
-  TaskSettledStreamEvent,
-  TaskStartedStreamEvent,
-  TurnCancelledStreamEvent,
-  TurnCompletedStreamEvent,
-  TurnFailedStreamEvent,
-  TurnStartedStreamEvent,
-  TurnFailureStreamEvent,
-  TurnWaitingOn,
-  TurnWaitingStreamEvent,
-} from "#protocol/message.js";
+} from "#protocol/session-events/families/session.js";
+export type {
+  SessionEvent,
+  SessionEventMeta,
+  SessionStreamEvent,
+} from "#protocol/session-event.js";
+export type * from "#protocol/session-events/index.js";
+export { endsTurn, failureOf } from "#client/session-utils.js";
 
-export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
+export type { SessionView, SessionPreviews } from "#protocol/session-projection/tables.js";
+export type { Answer } from "#shared/input.js";
+export type { Interaction, AskedCall } from "#protocol/session-reader.js";
+export { signInEnding } from "#protocol/session-reader.js";
+export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
 
-export type { InputOption, InputRequest, InputRequestKind, InputResponse } from "#shared/input.js";
-export {
-  isInputRequest,
-  isInputResponse,
-  parseInputResponse,
-  parseInputResponses,
-} from "#shared/input.js";
-
-export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";
 export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";

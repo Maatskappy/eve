@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
+import { resolveDynamicConnections } from "#context/dynamic-connection-lifecycle.js";
 import {
-  dispatchDynamicSubagentEvent,
-  getDynamicSubagentSelection,
+  resolveDynamicSubagents,
+  readDynamicSubagentSelections,
 } from "#context/dynamic-subagent-lifecycle.js";
 import { AuthKey, SessionIdKey, StaticModelReferenceKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
-import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
+import {
+  sessionStartedForResolvers,
+  turnStartedForResolvers,
+} from "#harness/session-machine/change-points.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import type {
   ResolvedConnectionDefinition,
@@ -20,6 +23,17 @@ import type {
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
+
+// A session's and a turn's start, as the session machine hands them to resolvers.
+const sessionStart = () => sessionStartedForResolvers({ data: {}, type: "session.started" });
+const turnStart = (turn: { sequence: number; turnId: string }) =>
+  turnStartedForResolvers(turn, {
+    data: { cause: { deliveryId: "d_0" }, follows: null, turnId: turn.turnId },
+    scope: { turnId: turn.turnId },
+    type: "turn.started",
+  });
+const getDynamicSubagentSelection = (ctx: ContextContainer, nodeId: string) =>
+  readDynamicSubagentSelections(ctx)[nodeId] ?? undefined;
 
 describe("dynamic connection lifecycle", () => {
   it("resolves a mixed connection map with bare map-key names", async () => {
@@ -38,9 +52,9 @@ describe("dynamic connection lifecycle", () => {
       }),
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
@@ -71,9 +85,9 @@ describe("dynamic connection lifecycle", () => {
       slug: "aws",
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
@@ -95,16 +109,16 @@ describe("dynamic connection lifecycle", () => {
       },
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
     expect(registry.getConnectionNames()).toEqual(["primary"]);
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+      event: turnStart({ sequence: 0, turnId: "turn-1" }),
       resolvers: [resolver],
     });
     expect(registry.getConnectionNames()).toEqual([]);
@@ -122,9 +136,9 @@ describe("dynamic connection lifecycle", () => {
       }),
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
@@ -151,16 +165,16 @@ describe("dynamic connection lifecycle", () => {
       },
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+        event: turnStart({ sequence: 0, turnId: "turn-1" }),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -190,9 +204,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createSessionStartedEvent(),
+        event: sessionStart(),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -229,9 +243,9 @@ describe("dynamic connection lifecycle", () => {
       },
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
@@ -240,9 +254,9 @@ describe("dynamic connection lifecycle", () => {
     expect(firstInstanceId).not.toContain("account-123");
 
     instanceKey = "account-456";
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+      event: turnStart({ sequence: 0, turnId: "turn-1" }),
       resolvers: [resolver],
     });
 
@@ -268,9 +282,9 @@ describe("dynamic connection lifecycle", () => {
       },
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
@@ -297,9 +311,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createSessionStartedEvent(),
+        event: sessionStart(),
         resolvers: [
           createResolver({ handler: connection, slug: "first" }),
           createResolver({ handler: connection, slug: "second" }),
@@ -323,9 +337,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createSessionStartedEvent(),
+        event: sessionStart(),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -355,9 +369,9 @@ describe("dynamic connection lifecycle", () => {
       sourceKind: "module",
     };
     ctx.set(BundleKey, agentBundle({ dynamicSubagents: [billing] }));
-    await dispatchDynamicSubagentEvent({
+    await resolveDynamicSubagents({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       messages: [],
       resolvers: [billing],
     });
@@ -375,9 +389,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+        event: turnStart({ sequence: 1, turnId: "turn_1" }),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -398,9 +412,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createSessionStartedEvent(),
+        event: sessionStart(),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -425,9 +439,9 @@ describe("dynamic connection lifecycle", () => {
         ),
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 
@@ -447,9 +461,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createSessionStartedEvent(),
+        event: sessionStart(),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -471,9 +485,9 @@ describe("dynamic connection lifecycle", () => {
     });
 
     await expect(
-      dispatchDynamicConnectionEvent({
+      resolveDynamicConnections({
         ctx,
-        event: createSessionStartedEvent(),
+        event: sessionStart(),
         resolvers: [resolver],
       }),
     ).rejects.toThrow(
@@ -501,9 +515,9 @@ describe("dynamic connection lifecycle", () => {
       }),
     });
 
-    await dispatchDynamicConnectionEvent({
+    await resolveDynamicConnections({
       ctx,
-      event: createSessionStartedEvent(),
+      event: sessionStart(),
       resolvers: [resolver],
     });
 

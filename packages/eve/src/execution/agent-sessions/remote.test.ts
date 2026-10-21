@@ -172,14 +172,17 @@ describe("startRemoteAgentSession", () => {
     const { agentDelegation } = await import("#tracing/eve/delegation.js");
     const manager = new AsyncLocalStorageContextManager().enable();
     context.setGlobalContextManager(manager);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json(
-          { ok: true, protocolVersion: 2, sessionId: "remote-session", status: "accepted" },
-          { status: 202 },
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          ok: true,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+          sessionId: "remote-session",
+          status: "accepted",
+        },
+        { status: 202 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     try {
       await agentDelegation.resume(
@@ -230,14 +233,17 @@ describe("startRemoteAgentSession", () => {
   });
 
   it("carries a replay-stable operation id so the receiver can create once", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json(
-          { ok: true, protocolVersion: 2, sessionId: "remote-session", status: "accepted" },
-          { status: 202 },
-        ),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          ok: true,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+          sessionId: "remote-session",
+          status: "accepted",
+        },
+        { status: 202 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await startRemoteAgentSession({
@@ -253,7 +259,7 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
-  it("accepts an unversioned (protocol 1) remote's create response", async () => {
+  it("accepts an unversioned (protocol 1) remote's create response and names its protocol", async () => {
     vi.stubGlobal(
       "fetch",
       vi
@@ -270,7 +276,7 @@ describe("startRemoteAgentSession", () => {
         remote: createRemoteAgent(),
         session: { continuationToken: "eve:parent-token" },
       }),
-    ).resolves.toEqual({ sessionId: "legacy-session" });
+    ).resolves.toEqual({ earlierProtocol: 1, sessionId: "legacy-session" });
   });
 
   it.each([true, false])(
@@ -280,7 +286,7 @@ describe("startRemoteAgentSession", () => {
         Response.json(
           {
             ok: true,
-            protocolVersion: 2,
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
             sessionId: "accepted-child",
             status: "accepted",
           },
@@ -335,7 +341,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -397,7 +403,7 @@ describe("startRemoteAgentSession", () => {
         "find the marker",
       ].join("\n"),
       capabilities: {},
-      protocolVersion: 2,
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -464,7 +470,7 @@ describe("startRemoteAgentSession", () => {
         Response.json(
           {
             code: "REMOTE_AGENT_PROTOCOL_MISMATCH",
-            protocolVersion: 3,
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION + 1,
           },
           { status: 409 },
         ),
@@ -477,7 +483,7 @@ describe("startRemoteAgentSession", () => {
       session: { continuationToken: "eve:parent-token" },
     });
     await expect(result).rejects.toBeInstanceOf(FatalError);
-    await expect(result).rejects.toThrow("protocol 3");
+    await expect(result).rejects.toThrow(`protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION + 1)}`);
     await expect(result).rejects.not.toThrow("may have completed");
   });
 
@@ -486,7 +492,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -516,7 +522,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -549,7 +555,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -575,7 +581,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -606,7 +612,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -659,7 +665,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     return new Response(
       JSON.stringify({
         ok: true,
-        protocolVersion: 2,
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         sessionId: "remote-session",
         status: "accepted",
       }),
@@ -839,7 +845,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -878,7 +884,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          protocolVersion: 2,
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -930,12 +936,12 @@ describe("respondToRemoteAgentSession", () => {
         sessionId: "remote-session",
         url: "https://remote.example.com/prefix",
       },
-      responses: [{ requestId: "ask-1", text: "approved" }],
+      responses: [{ interactionId: "ask-1", text: "approved" }],
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://remote.example.com/prefix/eve/v1/session/remote-session",
       expect.objectContaining({
-        body: JSON.stringify({ inputResponses: [{ requestId: "ask-1", text: "approved" }] }),
+        body: JSON.stringify({ answers: [{ interactionId: "ask-1", text: "approved" }] }),
         headers: { authorization: "Bearer remote-token", "content-type": "application/json" },
         method: "POST",
       }),
@@ -955,7 +961,7 @@ describe("respondToRemoteAgentSession", () => {
       auth: responder,
       headers: { authorization: "Bearer remote-token" },
       remote: { name: "research", sessionId: "remote-session", url: "https://remote.example.com" },
-      responses: [{ requestId: "approval-1", optionId: "approve" }],
+      responses: [{ interactionId: "approval-1", optionId: "approve" }],
     };
     await respondToRemoteAgentSession({
       ...input,
@@ -964,8 +970,8 @@ describe("respondToRemoteAgentSession", () => {
     await respondToRemoteAgentSession({ ...input, remote: input.remote });
     const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string));
     expect(bodies).toEqual([
-      { inputResponses: input.responses, forwardedPrincipal: { current: responder } },
-      { inputResponses: input.responses },
+      { answers: input.responses, forwardedPrincipal: { current: responder } },
+      { answers: input.responses },
     ]);
   });
 });

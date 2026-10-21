@@ -1,3 +1,4 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
   publishFromSessionStep,
@@ -8,14 +9,14 @@ import {
   withSessionStateDelta,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { retireCancelledCandidates } from "#harness/hitl/index.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { cancel } from "#harness/session-machine/transitions.js";
+import { cancel, controlled } from "#harness/session-machine/transitions.js";
+import type { ControlDelivery } from "#harness/types.js";
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
@@ -33,6 +34,8 @@ interface CancelledTurnSettleInput extends SessionHistoryStepState {
    * reported; otherwise the next settled turn reports it.
    */
   readonly reportUsage: boolean;
+  /** The cancel control that stopped the turn, when it named its delivery. */
+  readonly control?: ControlDelivery;
 }
 
 /**
@@ -54,23 +57,30 @@ export async function settleCancelledTurn(
   const step = { ...(await restoreSessionStep(input)), history: input.history };
   const durableState = step.durableSession.state;
   const owningTurnId =
-    runtimeWait(durableState)?.event.turnId ?? storedProjection(durableState).activeTurnId ?? "";
+    runtimeWait(durableState)?.event.turnId ?? activeTurnIdOf(storedProjection(durableState)) ?? "";
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
     publish: (emit, session) =>
       applyTransition(
         session,
-        cancel(sessionView(currentProjection(step.ctx), session.state)),
+        controlled(input.control, "cancel", (cause) =>
+          cancel(sessionView(currentProjection(step.ctx), session.state), { cause }),
+        ),
         emit,
       ),
     updateSession(_session, cancelled) {
       // The cancel reported every request and call it closed and committed the steps it stopped;
-      // what remains is private: its runs are forgotten, and its responders stop.
+      // what remains is private: its runs are forgotten, and its responders retire with the
+      // answers it closed.
       const cancelledSession = removeBlockingWorkflowToolRuns(
-        retireCancelledCandidates({ ...cancelled, outputSchema: undefined }),
+        { ...cancelled, outputSchema: undefined },
         owningTurnId,
       );
-      if (!input.reportUsage || getTurnUsageState(cancelled.state) === undefined) {
+      const spent = sessionUsage(cancelled);
+      const spentNothing =
+        spent.inputTokens + spent.outputTokens + spent.cacheReadTokens + spent.cacheWriteTokens ===
+          0 && spent.costUsd === undefined;
+      if (!input.reportUsage || spentNothing) {
         return { session: cancelledSession };
       }
       // Reported like a settled turn, as usage since the last report, so the

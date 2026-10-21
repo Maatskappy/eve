@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type {
   ChannelReceiveContext,
@@ -6,11 +6,11 @@ import type {
   ChannelSendOptions,
   ChannelSource,
 } from "#channel/channel-operations.js";
-import { type InputResponse, inputResponseSchema } from "#shared/input.js";
+import { type Answer, answerSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
-  | (ChannelSendOptions<TState> & { readonly message: string | UserContent })
-  | (ChannelRespondOptions<TState> & { readonly inputResponses: readonly InputResponse[] });
+  | (ChannelSendOptions<TState> & { readonly message: MessageContent })
+  | (ChannelRespondOptions<TState> & { readonly answers: readonly Answer[] });
 
 type DeliveryObserver<TState> = (
   continuationToken: string,
@@ -28,12 +28,12 @@ export function mockChannelContext<TState = undefined>(
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },
         async create() {
-          return { id: `session:${continuationToken}` } as never;
+          return { created: true, session: { id: `session:${continuationToken}` } } as never;
         },
-        async respond(inputResponses, options) {
+        async respond(answers, options) {
           return (await observeDelivery(continuationToken, {
             ...options,
-            inputResponses: inputResponseSchema.array().parse(inputResponses),
+            answers: answerSchema.array().parse(answers),
           })) as never;
         },
         async cancel() {

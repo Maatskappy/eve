@@ -71,7 +71,7 @@ Commands inherit the environment variables of the process that started eve, with
 
 - Values eve loaded from your `.env` files. If your shell exports a variable that an `.env` file also defines with a different value, the command keeps your shell's value.
 - Variables eve sets for its own runtime: `EVE_DEV`, `EVE_EVALUATION`, `EVE_BASE_URL`, `PORT`, and names starting with `EVE_DEV_`, `EVE_DEVELOPMENT_`, `EVE_EVALUATION_`, `EVE_MODEL_`, `NITRO_`, or `WORKFLOW_`.
-- The agent's model credentials, `AI_GATEWAY_API_KEY` and `VERCEL_OIDC_TOKEN`. Pass them through `env` if a command needs them.
+- The agent's model credentials: `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `VERCEL_OIDC_TOKEN`. Pass them through `env` if a command needs them.
 
 eve also sets `AI_AGENT=eve`, `EVE_SANDBOX_JOB_ROOT`, and `EVE_SANDBOX_SKILL_ROOT`. The `env` you pass to `run()` or `spawn()` overrides inherited values.
 

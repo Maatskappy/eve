@@ -491,6 +491,8 @@ describe("HostSandbox", () => {
       const appRoot = await createScratchDirectory("eve-host-env-");
       const stripped = [
         "AI_GATEWAY_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
         "EVE_DEV",
         "EVE_DEV_WORKFLOW_TRANSPORT_SECRET",
         "EVE_EVALUATION_RUN_ID",

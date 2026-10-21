@@ -11,6 +11,7 @@ import type {
   SandboxBackendProcess,
 } from "#execution/sandbox/backend.js";
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
+import { MODEL_API_KEY_ENV } from "#internal/model-auth/key-env.js";
 import { readDevelopmentEnvironmentValues } from "#shared/development-env-files.js";
 import { SANDBOX_SKILL_ROOT_ENV } from "#shared/skill-paths.js";
 
@@ -121,7 +122,7 @@ export async function removeHostSessionDirectory(sessionDirectory: string): Prom
  * credentials that belong to the eve agent rather than the workspace.
  */
 const EVE_RUNTIME_ENV_NAMES = new Set([
-  "AI_GATEWAY_API_KEY",
+  ...Object.values(MODEL_API_KEY_ENV),
   "EVE_BASE_URL",
   "EVE_DEV",
   "EVE_EVALUATION",

@@ -1,12 +1,7 @@
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
+import { MODEL_API_KEY_ENV as KEY_ENV } from "./key-env.js";
 import { readModelSecret, modelKeySecretName } from "./store.js";
-
-const KEY_ENV = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  "ai-gateway-key": "AI_GATEWAY_API_KEY",
-} as const;
 
 export async function resolveModelApiKey(provider: keyof typeof KEY_ENV): Promise<string> {
   const value = process.env[KEY_ENV[provider]];

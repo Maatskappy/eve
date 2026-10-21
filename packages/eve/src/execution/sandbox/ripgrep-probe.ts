@@ -1,9 +1,11 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 
+// Searches where commands start, the workspace root, so a provider whose `rg`
+// cannot traverse that tree falls back to POSIX find and grep.
 const RIPGREP_PROBE_COMMAND =
   "command -v rg >/dev/null 2>&1 || exit 127; " +
   "rg --line-number --color=never --hidden --glob '!.git/*' --max-count 1 -- " +
-  "'__eve_ripgrep_probe_never_matches__' /workspace";
+  "'__eve_ripgrep_probe_never_matches__' .";
 
 export async function ripgrepIsAvailable(session: SandboxSession): Promise<boolean> {
   try {

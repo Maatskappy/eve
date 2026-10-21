@@ -106,7 +106,6 @@ describe("teamsChannel", () => {
 
     expect(
       teamsAdapter.instrumentation?.audience?.({
-        auth: null,
         caller: { type: "anonymous" },
         channel: { kind: "channel:teams" },
         environment: "production",

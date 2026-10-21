@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
 
 import {
@@ -132,19 +132,20 @@ interface SandboxBackendDefinitionBase<Options extends object> {
    * session, even from separate processes, must end up with the same sandbox.
    * Set `created` when this call created it: eve then writes the workspace
    * files and skills and runs the environment's `prepare`, and removes the
-   * sandbox if that fails. eve seeds after `open` returns, so another process
-   * that opens the same sandbox meanwhile can use it before seeding finishes;
-   * hold a lock around `open` and seeding if your setup runs several eve
-   * processes against one engine.
+   * sandbox if that fails. Seeding runs after `open` returns, so when eve
+   * processes on several machines or in several servers open the same new
+   * session at once, one of them can use the sandbox before seeding finishes.
+   * A `directoryTemplate` backend is not affected, because its directory is a
+   * finished template copy before `open` runs.
    */
   open(
     context: SandboxBackendContext,
     options: Readonly<Options>,
   ): Promise<{ readonly created?: boolean; readonly instance: SandboxBackendInstance }>;
   /**
-   * Removes the session's sandbox when the session ends, the agent deletes
-   * it, or `find` reports it gone. It must succeed when nothing exists.
-   * Defaults to deleting `context.directory`.
+   * Removes the session's sandbox when the session ends or the agent deletes
+   * it. It must succeed when nothing exists. Defaults to deleting
+   * `context.directory`.
    */
   remove?(context: SandboxBackendContext, options: Readonly<Options>): Promise<void>;
 }
@@ -160,8 +161,8 @@ export type SandboxBackendDefinition<Options extends object = Record<never, neve
       | {
           /**
            * Finds the session's existing sandbox when eve resumes it. Return
-           * `undefined` when it no longer exists: eve removes what is left with
-           * `remove` and starts a fresh sandbox.
+           * `undefined` when it no longer exists: eve then starts the session
+           * over, and `open` must create a sandbox it reports as `created`.
            */
           find(
             context: SandboxBackendContext,
@@ -172,7 +173,10 @@ export type SandboxBackendDefinition<Options extends object = Record<never, neve
       | {
           /**
            * Finds the session's existing sandbox when eve resumes it. Defaults
-           * to reopening with `open` while `context.directory` exists.
+           * to reopening with `open` while `context.directory` exists. Return
+           * `undefined` when part of the directory is missing: eve then starts
+           * the session over and copies the missing entries from the template
+           * without replacing existing files.
            */
           find?(
             context: SandboxBackendContext,
@@ -487,11 +491,22 @@ export function createSandboxBackendImplementation<Options extends object>(
       // Checked before `open`, so a missing build never creates a sandbox it cannot seed.
       await requireTemplate(name, templatePath);
       await mkdir(dirname(context.directory), { recursive: true });
-      if (definition.directoryTemplate === true && !(await pathExists(context.directory))) {
-        await copyDirectoryAtomically(
-          join(templatePath, TEMPLATE_DIRECTORY_NAME),
-          context.directory,
-        );
+      if (definition.directoryTemplate === true) {
+        const template = join(templatePath, TEMPLATE_DIRECTORY_NAME);
+        if (!(await pathExists(context.directory))) {
+          await copyDirectoryAtomically(template, context.directory);
+        } else if (
+          definition.find !== undefined &&
+          (await definition.find(context, options)) === undefined
+        ) {
+          // Part of the directory was removed, such as a workspace deleted by hand. Only the
+          // missing entries come back, so a concurrent session's files are never replaced.
+          await cp(template, context.directory, {
+            errorOnExist: false,
+            force: false,
+            recursive: true,
+          });
+        }
       }
       const { created, instance } = await definition.open(context, options);
       const sandbox = createBackendSession(instance, workspaceRoot(context));
@@ -533,9 +548,9 @@ export function createSandboxBackendImplementation<Options extends object>(
         );
       }
       const instance = await find(context);
+      // Nothing is removed here: a concurrent resume may already have started a fresh
+      // sandbox under this key, and `start` repairs what a partial removal left behind.
       if (instance === undefined) {
-        // Clears whatever is left, so the next start creates the sandbox from scratch.
-        await remove(context);
         throw new SandboxSessionGoneError(
           `The "${name}" sandbox for this session no longer exists.`,
         );

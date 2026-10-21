@@ -33,11 +33,18 @@ type Exec = (
   options: SandboxBackendExecOptions,
 ) => SandboxBackendExecResult | SandboxBackendProcess | Promise<SandboxBackendExecResult>;
 
+// The test runner may itself run inside an eve sandbox; the fake must not inherit its roots.
+const {
+  EVE_SANDBOX_JOB_ROOT: _jobRoot,
+  EVE_SANDBOX_SKILL_ROOT: _skillRoot,
+  ...SHELL_ENV
+} = process.env;
+
 /** Runs commands the test does not script in a real shell whose `$HOME` is the fake's. */
 const shell: Exec = (options) => {
   const result = spawnSync("bash", ["-c", options.command], {
     encoding: "utf8",
-    env: { ...process.env, ...options.env, HOME },
+    env: { ...SHELL_ENV, ...options.env, HOME },
   });
   return { exitCode: result.status ?? 1, stderr: result.stderr, stdout: result.stdout };
 };
@@ -255,7 +262,7 @@ describe("defineSandboxBackend", () => {
     expect(events).toEqual(["stop", "stop", "stop", "remove"]);
   });
 
-  it("removes what is left of a sandbox that no longer exists, and treats another key as gone", async () => {
+  it("reports a sandbox that no longer exists or has another key as gone", async () => {
     const appRoot = await createScratchDirectory("eve-backend-gone-");
     const { definition, events, sandboxes } = createMemoryBackend();
     const provider = harness(definition);
@@ -272,7 +279,7 @@ describe("defineSandboxBackend", () => {
     await expect(
       provider.openSession({ appRoot, existing: first.state, sandboxName: "session-a" }),
     ).rejects.toBeInstanceOf(SandboxSessionGoneError);
-    expect(events).toEqual(["remove"]);
+    expect(events).toEqual([]);
 
     // A `directoryTemplate` backend without `find` is gone once its directory is.
     const directoryBackend = harness(createDirectoryBackend());
@@ -281,6 +288,39 @@ describe("defineSandboxBackend", () => {
     await expect(
       directoryBackend.openSession({ appRoot, existing: state, sandboxName: "session-c" }),
     ).rejects.toBeInstanceOf(SandboxSessionGoneError);
+  });
+
+  it("never removes a sandbox that a concurrent start created while a stale resume ran", async () => {
+    const appRoot = await createScratchDirectory("eve-backend-resume-race-");
+    const { definition, events, sandboxes } = createMemoryBackend();
+    let findLooked = false;
+    let releaseFind = () => {};
+    const findHeld = new Promise<void>((resolve) => (releaseFind = resolve));
+    const provider = harness({
+      ...definition,
+      // The stale resume looks before the concurrent start creates, and finishes after.
+      async find(context, options) {
+        const found = await definition.find!(context, options);
+        findLooked = true;
+        await findHeld;
+        return found;
+      },
+    });
+    const { state } = await provider.start({ appRoot, sandboxName: "session-a" });
+    sandboxes.delete(state.key);
+
+    const staleResume = provider.openSession({
+      appRoot,
+      existing: state,
+      sandboxName: "session-a",
+    });
+    await vi.waitFor(() => expect(findLooked).toBe(true));
+    const fresh = await provider.start({ appRoot, sandboxName: "session-a" });
+    releaseFind();
+
+    await expect(staleResume).rejects.toBeInstanceOf(SandboxSessionGoneError);
+    expect(sandboxes.has(fresh.state.key)).toBe(true);
+    expect(events).not.toContain("remove");
   });
 
   it("removes a sandbox whose seeding fails, so the next start creates a fresh one", async () => {

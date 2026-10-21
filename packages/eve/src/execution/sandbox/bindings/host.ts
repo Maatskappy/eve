@@ -20,6 +20,7 @@ import {
   selectStaleTemplateEntries,
 } from "#execution/sandbox/bindings/local-template-prune.js";
 import { HOST_PROVIDER_NAME } from "#execution/sandbox/host-provider-name.js";
+import { withToolSessionSandboxes } from "#execution/tool-session/sandbox.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
 import type { SandboxProviderImplementation } from "#shared/sandbox-provider.js";
@@ -96,12 +97,13 @@ function windowsHostProvider(): ReturnType<typeof createHostSandboxProvider> {
       "HostSandbox requires a POSIX shell and does not run on Windows; use WSL or DockerSandbox.",
     );
   };
-  return {
+  // Registered for keyed tool sessions so a keyed call also reaches `start` and its hint.
+  return withToolSessionSandboxes({
     prepare: async () => ({ templateKey: "windows" }),
     start: fail,
     resume: fail,
     onSessionEnd: async () => {},
-  };
+  });
 }
 
 /** Removes stale host template directories for one application. */

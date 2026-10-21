@@ -9,7 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "#execution/sandbox/bash.js";
 
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
-import { releaseToolSessionHandle } from "#execution/tool-session/sandbox.js";
+import {
+  assertToolSessionSandboxSupport,
+  releaseToolSessionHandle,
+} from "#execution/tool-session/sandbox.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -178,6 +181,10 @@ describe("HostSandbox", () => {
         provider.openSession({ appRoot, sandboxName: "session-windows" }),
       ).rejects.toThrow("use WSL or DockerSandbox");
       expect(existsSync(join(appRoot, "host"))).toBe(false);
+      // A keyed tool call gets as far as opening, so it sees the same hint.
+      expect(() =>
+        assertToolSessionSandboxSupport(createStubSandboxRegistry(HostSandbox.environment())),
+      ).not.toThrow();
     } finally {
       Object.defineProperty(process, "platform", platform);
     }

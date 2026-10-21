@@ -48,19 +48,20 @@ export async function startAgentServer(input: {
   const port = input.port ?? DEFAULT_PORT;
   const baseUrl = `http://localhost:${port}`;
 
+  // Built smoke servers run on the local machine. `eve start` does not set
+  // EVE_DEV, so set it here to let `localDev()` authenticate local requests.
+  // The build gets it too, so DefaultSandbox prepares the provider the server opens.
+  const serverEnv = { ...(input.startEnv ?? process.env), EVE_DEV: "1" };
+
   if (plan.build !== undefined) {
     console.log(theme.muted(`[tui] building "${input.appName}" before smoke run ...`));
     await runPnpmCommand({
       ...plan.build,
-      env: input.startEnv ?? process.env,
+      env: serverEnv,
     });
   }
 
   console.log(theme.muted(`[tui] starting "${input.appName}" ${mode} server on ${baseUrl} ...`));
-
-  // Built smoke servers run on the local machine. `eve start` does not set
-  // EVE_DEV, so set it here to let `localDev()` authenticate local requests.
-  const serverEnv = { ...(input.startEnv ?? process.env), EVE_DEV: "1" };
 
   const child = spawnServerProcess({
     args: plan.start.args,

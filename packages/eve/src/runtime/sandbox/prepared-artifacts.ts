@@ -49,8 +49,15 @@ export async function loadSandboxPreparedArtifact(input: {
   const manifest = await loadSandboxPreparedArtifactsManifest(input.compiledArtifactsSource);
   const entry = manifest?.entries.find((candidate) => candidate.nodeId === input.nodeId);
   if (entry !== undefined && entry.providerName !== input.providerName) {
+    // DefaultSandbox picks its provider from the environment, so a build and a
+    // server started with different environments disagree.
     throw new Error(
-      `Prepared sandbox artifact for node "${input.nodeId}" belongs to provider "${entry.providerName}", not "${input.providerName}".`,
+      `Prepared sandbox artifact for node "${input.nodeId}" belongs to provider ` +
+        `"${entry.providerName}", not "${input.providerName}": \`eve build\` prepared the sandbox ` +
+        `for "${entry.providerName}", but this server selected "${input.providerName}". ` +
+        "DefaultSandbox chooses its provider from the environment (VERCEL, EVE_DEV, and whether " +
+        "Docker is reachable), so run `eve build` and the server with the same environment, or " +
+        "select a provider explicitly in agent/sandbox/sandbox.ts.",
     );
   }
   return entry?.artifact;

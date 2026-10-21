@@ -20,6 +20,8 @@ export default defineSandbox(() => environment.open());
 
 When none of these apply, for example `eve start` on a server without Docker, `eve build` still succeeds, but opening the sandbox fails with an error that names the available choices. Start Docker, deploy to Vercel, or select a provider explicitly in `agent/sandbox/sandbox.ts`. eve never selects the host sandbox in production; to run commands directly on a server, use `HostSandbox.environment()` explicitly.
 
+`eve build` prepares the sandbox for the provider it selects, and the running server must select the same provider. Run `eve build` and the server with the same `VERCEL` and `EVE_DEV` environment variables and the same Docker availability. For example, if you set `EVE_DEV=1` for `eve start` so local requests authenticate, also set it for `eve build`, because `EVE_DEV=1` selects the host sandbox. When the two differ, opening the sandbox fails with an error that names both providers.
+
 The `prepare` option applies to whichever provider `DefaultSandbox` selects. The `docker` and `vercel` options apply only when that provider is selected.
 
 During `eve dev` and `eve eval`, `prepare` runs on your machine, in the host sandbox's template directory, with your own tools. If it assumes the eve sandbox image, for example by installing packages with `dnf` or `sudo`, select [`DockerSandbox`](/docs/sandbox/docker) for local runs instead:

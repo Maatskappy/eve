@@ -22,4 +22,20 @@ When none of these apply, for example `eve start` on a server without Docker, `e
 
 The `prepare` option applies to whichever provider `DefaultSandbox` selects. The `docker` and `vercel` options apply only when that provider is selected.
 
+During `eve dev` and `eve eval`, `prepare` runs on your machine, in the host sandbox's template directory, with your own tools. If it assumes the eve sandbox image, for example by installing packages with `dnf` or `sudo`, select [`DockerSandbox`](/docs/sandbox/docker) for local runs instead:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { DefaultSandbox, defineSandbox, type SandboxSession } from "eve/sandbox";
+import { DockerSandbox } from "eve/sandbox/docker";
+
+async function prepare(sandbox: SandboxSession) {
+  await sandbox.run({ command: "sudo dnf install -y jq" });
+}
+
+export const environment = process.env.VERCEL
+  ? DefaultSandbox.environment({ prepare })
+  : DockerSandbox.environment({ prepare });
+export default defineSandbox(() => environment.open());
+```
+
 Use a provider directly when you need its image, VM, network, compute, or mount options.

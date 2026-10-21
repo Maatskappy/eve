@@ -111,7 +111,7 @@ export default defineTool({
     lang: "typescript",
     NavIcon: IconSandbox,
     description:
-      "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
+      "Every agent includes a sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
     code: `import { DefaultSandbox,
   defineSandbox } from "eve/sandbox";
 
@@ -119,7 +119,7 @@ export const environment =
   DefaultSandbox.environment({
     prepare: async (sandbox) => {
       await sandbox.run({
-        command: "git clone repo /workspace"
+        command: "git clone repo"
       });
     }
   });

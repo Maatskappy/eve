@@ -55,6 +55,32 @@ import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/c
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
 
+function rejectUnknownFields(
+  payload: Record<string, unknown>,
+  fields: readonly string[],
+): Response | undefined {
+  const unknown: string[] = [];
+  // One extra name reports omissions without walking the rest of the object.
+  for (const key in payload) {
+    if (!Object.hasOwn(payload, key) || fields.includes(key)) continue;
+    unknown.push(key.length > 128 ? `${key.slice(0, 128)}…` : key);
+    if (unknown.length === 9) break;
+  }
+  if (unknown.length === 0) return undefined;
+  const names = unknown
+    .slice(0, 8)
+    .sort()
+    .map((key) => `'${JSON.stringify(key).slice(1, -1).replaceAll("'", "\\'")}'`);
+  const omitted = unknown.length > 8 ? " (additional unknown fields omitted)" : "";
+  return Response.json(
+    {
+      ok: false,
+      error: `Unknown field${unknown.length === 1 ? "" : "s"} ${names.join(", ")}${omitted}. Accepted fields: ${fields.length === 0 ? "(none)" : fields.join(", ")}.`,
+    },
+    { status: 400 },
+  );
+}
+
 /** Replay-stable identity for one authenticated create operation. */
 export async function deriveOperationContinuationToken(input: {
   readonly auth: SessionAuthContext;
@@ -76,13 +102,26 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
+  // A newer protocol may introduce fields; preserve upgrade guidance before checking this one's envelope.
+  const protocolVersion =
+    input.callback === undefined ? undefined : parseProtocolVersionField(input.protocolVersion);
+  if (protocolVersion instanceof Response) return protocolVersion;
+  const fields = [
+    "message",
+    "clientContext",
+    "outputSchema",
+    "operationId",
+    "callback",
+    "protocolVersion",
+    "capabilities",
+    "stubs",
+    "forwardedPrincipal",
+  ];
+  // Protocol 1–3 callers can still send this retired advisory field when delegating.
+  if (input.callback !== undefined) fields.push("activityObserver");
+  const rejection = rejectUnknownFields(input, fields);
+  if (rejection !== undefined) return rejection;
   const payload = withoutLegacyTaskId(input);
-  if (payload.answers !== undefined) {
-    return Response.json(
-      { error: "'answers' is only accepted for an existing session.", ok: false },
-      { status: 400 },
-    );
-  }
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 
@@ -91,10 +130,6 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const protocolVersion =
-    callback === undefined ? undefined : parseProtocolVersionField(payload.protocolVersion);
-  if (protocolVersion instanceof Response) return protocolVersion;
-
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
@@ -152,15 +187,19 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  const fields = [
+    "message",
+    "answers",
+    "clientContext",
+    "outputSchema",
+    "turnPolicy",
+    "callback",
+    "forwardedPrincipal",
+  ];
+  if (input.callback !== undefined) fields.push("activityObserver");
+  const rejection = rejectUnknownFields(input, fields);
+  if (rejection !== undefined) return rejection;
   const payload = input;
-  if (Object.hasOwn(payload, "stubs")) {
-    return Response.json(
-      { ok: false, error: "Tool stubs are fixed at session creation." },
-      { status: 400 },
-    );
-  }
-  const tokenRejection = rejectSessionContinuationToken(payload);
-  if (tokenRejection !== null) return tokenRejection;
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
@@ -209,8 +248,8 @@ interface ParsedCancelTurnBody {
 export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTurnBody | Response> {
   const payload = await parseOptionalJsonRequest(req);
   if (payload instanceof Response) return payload;
-  const tokenRejection = rejectSessionContinuationToken(payload);
-  if (tokenRejection !== null) return tokenRejection;
+  const rejection = rejectUnknownFields(payload, ["turnId"]);
+  if (rejection !== undefined) return rejection;
 
   const turnId = payload.turnId;
   if (
@@ -244,8 +283,8 @@ export async function parseResetBody(
 ): Promise<{ readonly reason?: string } | Response> {
   const payload = await parseOptionalJsonRequest(req);
   if (payload instanceof Response) return payload;
-  const tokenRejection = rejectSessionContinuationToken(payload);
-  if (tokenRejection !== null) return tokenRejection;
+  const rejection = rejectUnknownFields(payload, ["reason"]);
+  if (rejection !== undefined) return rejection;
   const reason = payload.reason;
   if (reason !== undefined && (typeof reason !== "string" || reason.length === 0)) {
     return Response.json(
@@ -261,7 +300,7 @@ export async function parseSessionControlBody(
 ): Promise<Record<string, unknown> | Response> {
   const payload = await parseOptionalJsonRequest(req);
   if (payload instanceof Response) return payload;
-  return rejectSessionContinuationToken(payload) ?? payload;
+  return rejectUnknownFields(payload, []) ?? payload;
 }
 
 export async function parseOptionalJsonRequest(
@@ -285,15 +324,6 @@ export async function parseOptionalJsonRequest(
     return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
   }
   return payload as Record<string, unknown>;
-}
-
-export function rejectSessionContinuationToken(payload: Record<string, unknown>): Response | null {
-  return "continuationToken" in payload
-    ? Response.json(
-        { error: "Session-ID routes do not accept 'continuationToken'.", ok: false },
-        { status: 400 },
-      )
-    : null;
 }
 
 export function requireSessionId(params: Readonly<Record<string, string>>): string | Response {

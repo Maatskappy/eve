@@ -67,6 +67,118 @@ function createArgs(session = createFixedSession()): RouteHandlerArgs {
 
 describe("eve ID-addressed session routes", () => {
   it.each([
+    ["/eve/v1/session", { message: "Hello", outputschema: {} }, "outputschema", "outputSchema"],
+    ["/eve/v1/session", { message: "Hello", turnPolicy: "queue" }, "turnPolicy", "operationId"],
+    ["/eve/v1/session", { message: "Hello", activityObserver: {} }, "activityObserver", "message"],
+    [
+      "/eve/v1/session/:sessionId",
+      { message: "Hello", operationId: "retry" },
+      "operationId",
+      "turnPolicy",
+    ],
+    ["/eve/v1/session/:sessionId/cancel", { message: "Hello" }, "message", "turnId"],
+    ["/eve/v1/session/:sessionId/compact", { turnId: "turn_1" }, "turnId", "(none)"],
+    ["/eve/v1/session/:sessionId/clear", { reason: "Start fresh" }, "reason", "(none)"],
+    ["/eve/v1/session/:sessionId/reset", { turnId: "turn_1" }, "turnId", "reason"],
+  ] as const)(
+    "rejects unknown %s fields before dispatch: %s",
+    async (path, body, unknown, accepted) => {
+      const session = createFixedSession();
+      const createSession = vi.fn().mockResolvedValue({ sessionId: "wrun_A" });
+      const onMessage = vi.fn().mockReturnValue({
+        auth: { authenticator: "none", principalType: "anonymous", principalId: "anonymous" },
+      });
+      const attachSession = vi.fn(() => session);
+      const args = attachRouteSessionCreator(
+        { ...createArgs(session), attachSession },
+        createSession,
+      );
+      const response = await route("POST", path, { auth: none(), onMessage })(
+        new Request("https://eve.test" + path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        args,
+      );
+
+      expect(response.status).toBe(400);
+      const error = (await response.json()) as { ok: boolean; error: string };
+      expect(error).toMatchObject({ ok: false });
+      expect(error.error).toContain(`Unknown field '${unknown}'. Accepted fields:`);
+      expect(error.error).toContain(accepted);
+      expect(createSession).not.toHaveBeenCalled();
+      expect(attachSession).not.toHaveBeenCalled();
+      expect(onMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports multiple unknown names in order without their values", async () => {
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        method: "POST",
+        body: JSON.stringify({ message: "Hello", zOption: "private-value", OutputSchema: null }),
+      }),
+      createArgs(),
+    );
+    expect(response.status).toBe(400);
+    const { error } = (await response.json()) as { error: string };
+    expect(error).toMatch(/^Unknown fields 'OutputSchema', 'zOption'\. Accepted fields:/);
+    expect(error).not.toContain("private-value");
+  });
+
+  it("bounds unknown-field diagnostics", async () => {
+    const body = Object.fromEntries(
+      Array.from({ length: 100 }, (_, i) => ["x".repeat(1_000) + i, "private-value"]),
+    );
+    const response = await route("POST", "/eve/v1/session/:sessionId/compact")(
+      new Request("https://eve.test/eve/v1/session/wrun_A/compact", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      createArgs(),
+    );
+    expect(response.status).toBe(400);
+    const { error } = (await response.json()) as { error: string };
+    expect(error.length).toBeLessThan(2_000);
+    expect(error).toContain("additional unknown fields omitted");
+    expect(error).toContain("Accepted fields: (none).");
+    expect(error).not.toContain("private-value");
+  });
+
+  it("keeps application keys inside declared open payloads", async () => {
+    const session = createFixedSession();
+    const outputSchema = { type: "object", properties: { customField: { type: "string" } } };
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        method: "POST",
+        body: JSON.stringify({
+          message: "Hello",
+          clientContext: { outputschema: "application data" },
+          outputSchema,
+        }),
+      }),
+      createArgs(session),
+    );
+    expect(response.status).toBe(202);
+    expect(session.send).toHaveBeenCalledWith("Hello", expect.objectContaining({ outputSchema }));
+  });
+
+  it("authenticates before reporting unknown request fields", async () => {
+    const onMessage = vi.fn();
+    const response = await route("POST", "/eve/v1/session", { auth: () => null, onMessage })(
+      new Request("https://eve.test/eve/v1/session", {
+        method: "POST",
+        body: JSON.stringify({ outputschema: {} }),
+      }),
+      createArgs(),
+    );
+    expect(response.status).toBe(401);
+    expect(await response.text()).not.toContain("Accepted fields:");
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["without a request body", undefined],
     ["with an empty JSON object", "{}"],
   ])("creates and parks a conversation %s", async (_description, body) => {
@@ -494,7 +606,7 @@ describe("eve ID-addressed session routes", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "'answers' is only accepted for an existing session.",
+      error: expect.stringContaining("Unknown field 'answers'. Accepted fields:"),
       ok: false,
     });
     expect(createSession).not.toHaveBeenCalled();

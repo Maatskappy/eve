@@ -188,4 +188,31 @@ describe("Client.sessions", () => {
     expect(JSON.parse(requests[4]!.body!)).toEqual({ reason: "fresh start" });
     expect(session.state).toEqual({ sessionId: "wrun_A", streamIndex: 0 });
   });
+
+  it("sends only each control's own fields when options carry extra keys", async () => {
+    const requests: Array<{ readonly body?: string; readonly signal?: AbortSignal | null }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      requests.push({ body: init?.body as string | undefined, signal: init?.signal });
+      return Response.json(
+        { ok: true, sessionId: "wrun_A", deliveryId: `delivery_${requests.length}` },
+        { status: 202 },
+      );
+    });
+    const session = new Client({ baseUrl: "https://eve.test" }).sessions.attach("wrun_A");
+    const signal = new AbortController().signal;
+    const options = { signal, turnId: "turn_1", reason: "fresh start", extra: true };
+
+    await session.cancel(options);
+    await session.compact(options);
+    await session.clear(options);
+    await session.reset(options);
+
+    expect(requests.map(({ body }) => JSON.parse(body!))).toEqual([
+      { turnId: "turn_1" },
+      {},
+      {},
+      { reason: "fresh start" },
+    ]);
+    expect(requests.every((request) => request.signal === signal)).toBe(true);
+  });
 });

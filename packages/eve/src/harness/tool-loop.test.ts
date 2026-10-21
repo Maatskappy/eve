@@ -1491,7 +1491,7 @@ describe("createToolLoopHarness", () => {
   });
 
   // Regression for #5128: the resolver heard the previous step's index from the second step on.
-  it.fails("gives the dynamic model resolver the index of the step it selects for", async () => {
+  it("gives the dynamic model resolver the index of the step it selects for", async () => {
     const addStep = (toolCallId: string) => {
       const toolCall = { input: {}, toolCallId, toolName: "add", type: "tool-call" };
       const toolResult = { ...toolCall, output: "42", type: "tool-result" };

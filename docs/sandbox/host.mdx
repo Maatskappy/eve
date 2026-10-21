@@ -41,7 +41,7 @@ export default defineSandbox(() => environment.open());
 
 The directory name comes from the session id alone, so every open for a session, including a subagent that shares the sandbox, a keyed tool session, or another eve process on the same machine, finds the same directory. The template applies only when eve creates the directory: after you change `agent/sandbox/workspace/` or `prepare`, existing sessions keep their files, and new sessions start from the new template. Authored skills are the exception; eve refreshes them in every session after a rebuild.
 
-eve deletes a session's directory when you call `sandbox.delete()` and when the session ends. Templates live under `.eve/sandbox-cache/host/templates/` and are pruned with other local sandbox templates.
+eve deletes a session's directory when you call `sandbox.delete()` and when the session ends. If you delete it yourself, for example by removing `.eve`, the session's next sandbox access starts a fresh directory from the template, as after `sandbox.delete()`. Templates live under `.eve/sandbox-cache/host/templates/` and are pruned with other local sandbox templates.
 
 ## Shared directory
 
@@ -55,7 +55,7 @@ export const environment = HostSandbox.environment({ root: "." });
 export default defineSandbox(() => environment.open());
 ```
 
-eve never copies `agent/sandbox/workspace/` files into a shared root and never deletes it, including on `sandbox.delete()` and session end. Because eve does not prepare a directory it does not own, `root` and `prepare` cannot be combined. Sessions that share a root also share its files, so concurrent sessions can see and overwrite each other's changes. eve stages attachments and tool-result files under `.eve/attachments/` in the root and does not remove them when a session ends; delete that directory when you no longer need them.
+eve never copies `agent/sandbox/workspace/` files into a shared root, never deletes it, including on `sandbox.delete()` and session end, and never creates it: if the root is missing, opening the sandbox fails until you create it or change `root`. Because eve does not prepare a directory it does not own, `root` and `prepare` cannot be combined. Sessions that share a root also share its files, so concurrent sessions can see and overwrite each other's changes. eve stages attachments and tool-result files under `.eve/attachments/` in the root and does not remove them when a session ends; delete that directory when you no longer need them.
 
 ## Paths
 

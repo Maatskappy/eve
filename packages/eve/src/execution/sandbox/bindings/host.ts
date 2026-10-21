@@ -36,6 +36,7 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 
 export { HOST_PROVIDER_NAME };
@@ -122,15 +123,23 @@ export function createHostSandboxProvider(
       const root = await ensureWorkspace(context, artifact);
       return { handle: await openHandle(context, artifact, root), state: { root, version: 1 } };
     },
-    // The workspace comes from the key, so a session whose directory was
-    // removed, for example with `.eve`, gets a fresh one instead of failing.
+    // A per-session workspace removed outside eve, for example with `.eve`, is
+    // gone: eve then clears the state and reruns the selector, whose `start`
+    // seeds a fresh one from the template.
     async resume(context, artifactValue, stateValue) {
       const artifact = requireHostArtifact(artifactValue);
       const state = requireHostState(stateValue);
       if (state.root !== resolveWorkspaceRoot(context)) {
         throw new Error("HostSandbox session state is incompatible with this environment.");
       }
-      return await openHandle(context, artifact, await ensureWorkspace(context, artifact));
+      if (sharedRoot !== undefined) {
+        await requireSharedRoot(state.root);
+      } else if (!(await isDirectory(state.root))) {
+        throw new SandboxSessionGoneError(
+          `HostSandbox session directory "${state.root}" no longer exists.`,
+        );
+      }
+      return await openHandle(context, artifact, state.root);
     },
     // The session directory comes from the key, so `state` is not needed; a
     // shared root lives outside it and is never removed.
@@ -149,11 +158,17 @@ export function createHostSandboxProvider(
     artifact: HostPreparedArtifact,
   ): Promise<string> {
     const root = resolveWorkspaceRoot(context);
-    if (sharedRoot === undefined && !(await pathExists(root))) {
+    if (sharedRoot !== undefined) {
+      await requireSharedRoot(root);
+      return root;
+    }
+    if (!(await pathExists(root))) {
       const templatePath = await requireTemplate(context, artifact);
       await copyDirectoryAtomically(join(templatePath, WORKSPACE_DIRECTORY_NAME), root);
     }
-    await requireDirectory(root);
+    if (!(await isDirectory(root))) {
+      throw new Error(`HostSandbox session directory "${root}" is not a directory.`);
+    }
     return root;
   }
 
@@ -319,10 +334,16 @@ async function requireTemplate(
   return templatePath;
 }
 
-async function requireDirectory(path: string): Promise<void> {
-  const stats = await stat(path).catch(() => undefined);
-  if (stats?.isDirectory() !== true) {
-    throw new Error(`HostSandbox directory "${path}" does not exist.`);
+async function isDirectory(path: string): Promise<boolean> {
+  return (await stat(path).catch(() => undefined))?.isDirectory() === true;
+}
+
+async function requireSharedRoot(root: string): Promise<void> {
+  if (!(await isDirectory(root))) {
+    throw new Error(
+      `HostSandbox root "${root}" does not exist. Create it, or change \`root\` in ` +
+        "agent/sandbox/sandbox.ts; eve never creates a shared root.",
+    );
   }
 }
 

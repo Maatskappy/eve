@@ -13,6 +13,7 @@ import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { sandboxWorkspaceRoot, type SandboxSession } from "#shared/sandbox-session.js";
 import {
   removeSkillPackageFromSandbox,
@@ -134,27 +135,44 @@ describe("HostSandbox", () => {
     expect(await fresh.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
   });
 
-  it("resumes a session whose directory was removed with a freshly seeded one", async () => {
+  it("reports a removed session directory as gone, and start seeds a fresh one", async () => {
     const appRoot = await createScratchDirectory("eve-host-resume-");
     const provider = createHostProvider();
     await provider.prepare({
       appRoot,
       seedFiles: [{ content: "seeded", path: "/workspace/seed.md" }],
     });
-    const { handle, state } = await provider.start({ appRoot, sandboxName: "session-removed" });
+    const session = { appRoot, sandboxName: "session-removed" };
+    const { handle, state } = await provider.start(session);
     await handle.sandbox.writeTextFile({ content: "lost", path: "notes.txt" });
     await handle.onSandboxStop();
     await rm(join(state.root, ".."), { force: true, recursive: true });
 
-    const { sandbox } = await provider.openSession({
-      appRoot,
-      existing: state,
-      sandboxName: "session-removed",
-    });
+    // eve clears the session's state on this error and reruns the selector, which starts again.
+    await expect(provider.openSession({ ...session, existing: state })).rejects.toBeInstanceOf(
+      SandboxSessionGoneError,
+    );
+    const fresh = await provider.start(session);
 
-    expect(sandboxWorkspaceRoot(sandbox)).toBe(state.root);
-    expect(await sandbox.readTextFile({ path: "seed.md" })).toBe("seeded");
-    expect(await sandbox.readTextFile({ path: "notes.txt" })).toBeNull();
+    expect(fresh.state).toEqual(state);
+    expect(await fresh.handle.sandbox.readTextFile({ path: "seed.md" })).toBe("seeded");
+    expect(await fresh.handle.sandbox.readTextFile({ path: "notes.txt" })).toBeNull();
+  });
+
+  it("never treats a missing shared root as gone", async () => {
+    const appRoot = await createScratchDirectory("eve-host-shared-missing-");
+    await mkdir(join(appRoot, "project"));
+    const provider = createHostProvider({ root: "project" });
+    await provider.prepare({ appRoot });
+    const session = { appRoot, sandboxName: "session-shared-missing" };
+    const { state } = await provider.start(session);
+    await rm(join(appRoot, "project"), { force: true, recursive: true });
+
+    const resumed = provider.openSession({ ...session, existing: state });
+
+    await expect(resumed).rejects.toThrow("eve never creates a shared root");
+    await expect(resumed).rejects.not.toBeInstanceOf(SandboxSessionGoneError);
+    expect(existsSync(join(appRoot, "project"))).toBe(false);
   });
 
   it("starts as an upsert on the session id, seeding only the session it creates", async () => {

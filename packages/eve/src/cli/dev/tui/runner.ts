@@ -1,5 +1,6 @@
 import { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";
 import {
+  activeTurn,
   delivery,
   turn as readTurn,
   task,
@@ -408,6 +409,11 @@ function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
   return undefined;
 }
 
+/** A turn waiting on a person is open while the store is idle, so it still takes steering and Stop. */
+function hasOpenTurn(snapshot: SessionStore["snapshot"]): boolean {
+  return activeTurn(snapshot.view) !== undefined;
+}
+
 export class EveTUIRunner {
   readonly #client: Client;
   /** Owns the conversation's sessions, root stream, turns, and subagent streams. */
@@ -772,7 +778,7 @@ export class EveTUIRunner {
         this.#lifecycle?.requestStop();
         return "exit";
       case "cancel": {
-        const working = isWorking(this.#store.snapshot.status);
+        const working = hasOpenTurn(this.#store.snapshot);
         if (working) this.#cancelTurn();
         this.#finishCommand({
           kind: "result",
@@ -841,7 +847,7 @@ export class EveTUIRunner {
   /** Sends a message; while work runs it steers the active turn instead. */
   #submitMessage(message: string): void {
     const snapshot = this.#store.snapshot;
-    const steering = isWorking(snapshot.status);
+    const steering = hasOpenTurn(snapshot);
     const sent: { text: string; deliveryId?: string } = { text: message };
     this.#sentMessage = sent;
     if (!steering) this.#cancelRequested = false;

@@ -121,6 +121,9 @@ export async function ensureSandboxAccess(
       async get() {
         return null;
       },
+      peek() {
+        return null;
+      },
       async stop() {},
     };
   }
@@ -401,6 +404,9 @@ export async function ensureSandboxAccess(
     },
     async get() {
       await requireHandle();
+      return opened?.sandbox ?? null;
+    },
+    peek() {
       return opened?.sandbox ?? null;
     },
     async stop() {

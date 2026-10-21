@@ -95,9 +95,12 @@ the model never needs to know the absolute root up front:
 - Attachments stage under `<workspace root>/.eve/attachments`.
 
 Skill paths stay symbolic (`$HOME/.agents/skills/<skill>/SKILL.md`); file
-tools resolve that prefix to the declared skill root, and loading a skill with
-package files opens the sandbox and prefixes the result with the resolved
-directory so shell commands use the right path. On `HostSandbox`, a `bash`
+tools resolve that prefix to the declared skill root. Loading a skill with
+package files prefixes the result with the resolved directory, so shell
+commands use the right path, but only when that starts nothing: the session's
+sandbox is already open (`SandboxAccess.peek()`), or the bound environment is
+`host`, which opens cheaply and is the provider whose skill root differs from
+`$HOME`. Otherwise the result is unchanged. On `HostSandbox`, a `bash`
 command that expands `$HOME` itself sees the real home directory.
 
 Rejected alternatives: announcing the root as a `context.state` message after

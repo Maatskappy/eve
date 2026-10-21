@@ -19,5 +19,7 @@ export interface SandboxAccess {
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
   get(): Promise<SandboxSession | null>;
+  /** The sandbox this access already opened in this process, without opening one. */
+  peek?(): SandboxSession | null;
   stop(): Promise<void>;
 }

@@ -7,6 +7,7 @@ import { isAuthorizationSignal, PendingAuthorizationResultKey } from "#harness/a
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
+import type { SandboxAccess } from "#sandbox/state.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import {
   catalogBundle,
@@ -335,9 +336,9 @@ describe("buildStepCatalog", () => {
       ).toBe("# PDF forms");
     });
 
-    it("reports where a skill's files live in the session sandbox", async () => {
+    it("reports where a skill's files live only when that costs no sandbox start", async () => {
       const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
-      const sandbox = mockSandbox({
+      const { session } = mockSandbox({
         commands: {
           [SANDBOX_PATHS_PROBE]: {
             exitCode: 0,
@@ -346,14 +347,35 @@ describe("buildStepCatalog", () => {
           },
         },
       });
-      const ctx = new ContextContainer();
-      ctx.set(SandboxKey, sandbox.access);
+      const load = async (access: { open: boolean; provider: string }) => {
+        const get = vi.fn(async () => session);
+        const ctx = new ContextContainer();
+        ctx.set(SandboxKey, {
+          captureState: async () => ({ session: null }),
+          environment: { provider: access.provider } as SandboxAccess["environment"],
+          get,
+          peek: () => (access.open ? session : null),
+          stop: async () => {},
+        });
+        const output = await contextStorage.run(ctx, () =>
+          resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "" }),
+        );
+        return { opened: get.mock.calls.length > 0, output };
+      };
+      const located = "Skill files: /app/.eve/skills/pdf-forms/\n\n# PDF forms";
 
-      const output = await contextStorage.run(ctx, () =>
-        resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "" }),
-      );
-
-      expect(output).toBe("Skill files: /app/.eve/skills/pdf-forms/\n\n# PDF forms");
+      await expect(load({ open: true, provider: "vercel" })).resolves.toEqual({
+        opened: false,
+        output: located,
+      });
+      await expect(load({ open: false, provider: "vercel" })).resolves.toEqual({
+        opened: false,
+        output: "# PDF forms",
+      });
+      await expect(load({ open: false, provider: "host" })).resolves.toEqual({
+        opened: true,
+        output: located,
+      });
     });
 
     it("resolves a direct call only to a listed tool, and eve__tool to a listed tool too", () => {

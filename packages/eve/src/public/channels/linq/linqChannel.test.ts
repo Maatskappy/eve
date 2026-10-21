@@ -34,6 +34,8 @@ vi.mock("#compiled/@linqapp/chat-sdk-adapter/index.js", () => ({
 }));
 vi.mock("#public/channels/auth.js", () => ({ vercelOidc: vi.fn() }));
 
+import type * as LinqAdapterModule from "#compiled/@linqapp/chat-sdk-adapter/index.js";
+import { vercelOidc } from "#public/channels/auth.js";
 import { Message } from "#compiled/chat/index.js";
 import { defaultLinqAuth, linqChannel } from "#public/channels/linq/linqChannel.js";
 
@@ -126,12 +128,37 @@ describe("linqChannel", () => {
     linqChannel({ credentials: { apiKey, signingSecret, webhookVerifier } });
 
     const config = createLinqAdapter.mock.calls[0]?.[0];
-    expect(config).toMatchObject({ webhookVerifier });
+    expect(config).toHaveProperty("webhookVerifier");
     expect(config).not.toHaveProperty("signingSecret");
     await expect(config?.credentials?.()).resolves.toEqual({
       apiKey: "rotating-token",
       signingSecret: "rotating-secret",
     });
+  });
+
+  it.each([
+    ["the default Vercel OIDC verifier", undefined],
+    ["a custom verifier", vi.fn(async () => undefined)],
+  ])("rejects unsigned webhooks that %s does not accept", async (_name, webhookVerifier) => {
+    vi.mocked(vercelOidc).mockReturnValue(async () => null);
+    linqChannel({ credentials: { apiKey: "linq-api-key", webhookVerifier } });
+    const config = createLinqAdapter.mock.calls[0]?.[0] as LinqAdapterModule.LinqAdapterConfig;
+    const real = await vi.importActual<typeof LinqAdapterModule>(
+      "#compiled/@linqapp/chat-sdk-adapter/index.js",
+    );
+
+    const response = await real.createLinqAdapter(config).handleWebhook(
+      new Request("https://agent.example.com/eve/v1/linq", {
+        body: JSON.stringify({
+          data: { chat: { id: "chat" }, direction: "inbound", id: "message", parts: [] },
+          event_type: "message.received",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
   });
 
   it("drops blank inbound messages", async () => {

@@ -63,7 +63,10 @@ export interface LinqChannelCredentials {
   readonly apiKey?: LinqCredentialValue;
   /** Signing secret for direct Linq webhook delivery. */
   readonly signingSecret?: LinqCredentialValue;
-  /** Trusted verifier for webhooks forwarded by a provider such as Vercel Connect. */
+  /**
+   * Trusted verifier for webhooks forwarded by a provider such as Vercel Connect.
+   * A falsy result or a thrown error rejects the webhook with 401.
+   */
   readonly webhookVerifier?: LinqWebhookVerifier;
 }
 
@@ -169,12 +172,15 @@ function normalizeCredentials(
   if (apiKey !== undefined) {
     config.credentials = createCredentialProvider(apiKey, signingSecret);
   }
-  if (webhookVerifier !== undefined) {
-    config.webhookVerifier = webhookVerifier;
-  } else if (signingSecret === undefined) {
-    config.webhookVerifier = vercelOidc();
-  }
+  const verifier = webhookVerifier ?? (signingSecret === undefined ? vercelOidc() : undefined);
+  if (verifier !== undefined) config.webhookVerifier = rejectFalsy(verifier);
   return config;
+}
+
+// The Linq adapter only rejects a verifier result of exactly `false`, but
+// verifiers such as `vercelOidc()` signal rejection with `null`.
+function rejectFalsy(verifier: LinqWebhookVerifier): LinqWebhookVerifier {
+  return async (request: Request, rawBody: Uint8Array) => Boolean(await verifier(request, rawBody));
 }
 
 function createCredentialProvider(

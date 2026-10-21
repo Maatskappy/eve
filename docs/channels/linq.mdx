@@ -112,7 +112,7 @@ export default linqChannel({
 });
 ```
 
-For direct Linq webhooks, pass `signingSecret`. A supplied `webhookVerifier` takes precedence over it.
+For direct Linq webhooks, pass `signingSecret`. A supplied `webhookVerifier` takes precedence over it. eve rejects the webhook with `401` when the verifier throws or returns a falsy value such as `null`.
 
 ## What to read next
 

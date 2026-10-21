@@ -11,7 +11,7 @@ import {
   defineSandboxProvider,
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
-import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
+import { SandboxSessionGoneError } from "#public/sandbox/provider.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
@@ -201,11 +201,12 @@ describe("ensureSandboxAccess", () => {
   });
 
   // https://github.com/vercel/eve/issues/5113
-  it("starts a fresh sandbox when the persisted one is gone", async () => {
+  it("starts a fresh sandbox when a provider reports the persisted one gone", async () => {
     const setup = vi.fn();
     const value = fixture(setup);
+    // Imported from `eve/sandbox/provider`, as a custom provider throws it.
     value.create.mockRejectedValueOnce(
-      new SandboxSessionGoneError('docker session "ses_1" is no longer available to resume.'),
+      new SandboxSessionGoneError('acme sandbox "ses_1" no longer exists.'),
     );
     const { access, sandbox } = await open(value.registry, "session-1", {
       session: { providerName: "test", state: null, stateProtocolVersion: 1 },

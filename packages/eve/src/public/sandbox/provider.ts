@@ -20,6 +20,16 @@ export {
 } from "#shared/sandbox-provider.js";
 
 /**
+ * Throw from a provider's `resume()` when the session's native sandbox no
+ * longer exists, for example after its container, VM, or directory was removed
+ * outside eve. eve then clears the session's sandbox state and reruns the
+ * sandbox selector, whose `start()` creates a fresh sandbox, as after
+ * `sandbox.delete()`. Any other error from `resume()` leaves the state in place,
+ * so every sandbox call in that session fails with it until the session ends.
+ */
+export { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
+
+/**
  * The byte-level operations a custom sandbox engine implements so
  * {@link createSandboxSession} can build a full {@link SandboxSession}.
  *

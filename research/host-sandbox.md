@@ -138,6 +138,13 @@ variants, encodings, line ranges). The `/sandbox/just-bash` and
 `/sandbox/microsandbox` docs pages are complete custom-provider guides built on
 it; the application installs `just-bash` or `microsandbox` itself.
 
+`eve/sandbox/provider` also exports `SandboxSessionGoneError` (#5117's class),
+so a custom provider's `resume()` can report a native sandbox that no longer
+exists the way the built-in providers do: eve clears the session's sandbox
+state and reruns the selector, whose `start()` creates a fresh sandbox. Both
+guides throw it instead of recreating inside `resume()`, which would skip
+initialization that `defineSandbox()` runs after `open()`.
+
 ## Commands and environment
 
 - `bash -c <command>` with `cwd` at the workspace root (or the resolved

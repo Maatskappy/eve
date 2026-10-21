@@ -110,7 +110,6 @@ describe("buildAgentInfoResponse", () => {
       expect.objectContaining({
         description: "Caller profile.",
         slot: "profile",
-        visibility: "scope",
       }),
     );
     expect(response.tools.dynamic).toContainEqual(

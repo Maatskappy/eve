@@ -18,12 +18,19 @@ export { defineInteractiveAuthorization } from "#shared/connection-types.js";
 export {
   defineDynamic,
   type DynamicConnectionDefinition,
-  type DynamicConnectionEvents,
-  type DynamicConnectionResolveContext,
   type DynamicConnectionResult,
   type DynamicConnectionSet,
 } from "#public/definitions/connections/dynamic.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export type {
+  DynamicContext,
+  DynamicKey,
+  DynamicModelContext,
+  DynamicSentinel,
+  DynamicTurn,
+  Memo,
+  Occurrence,
+  SessionFrame,
+} from "#dynamic/definition.js";
 export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,

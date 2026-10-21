@@ -20,6 +20,7 @@ import { disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { parseJsonValue } from "#shared/json.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { serializeOutputSchema } from "#tools/schema-emission.js";
 import type {
@@ -175,6 +176,11 @@ class RunAgentSession implements AgentSession {
                           resolverId: address.resolverId,
                           url: address.url,
                           sessionId: address.sessionId,
+                          ...(address.dynamicBinding !== undefined && {
+                            dynamicBinding: parseJsonValue(
+                              JSON.parse(JSON.stringify(address.dynamicBinding)),
+                            ),
+                          }),
                         }
                       : undefined,
                   ),

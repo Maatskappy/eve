@@ -55,7 +55,7 @@ function readChildOutput(turn: EveEvalTurn, mode: "direct" | "waiting"): string 
 
 export default (["direct", "waiting"] as const).map((mode) =>
   defineEval({
-    description: `${mode} delegation preserves every dynamic-skill resolver context field across session start and later turns.`,
+    description: `${mode} delegation preserves session, channel, and conversation context in dynamic skills across parent turns.`,
     async test(t) {
       const threadId = crypto.randomUUID();
       const firstMessage = `Alice asks Bob to review a report. SUBAGENT-HOOKS:${mode}`;
@@ -86,25 +86,30 @@ export default (["direct", "waiting"] as const).map((mode) =>
       if (!Array.isArray(output))
         throw new Error("Dynamic skill resolver observations are missing.");
       const observations = output as DynamicSkillContextObservation[];
+      const firstTurnId = initial.events.find((event) => event.type === "turn.started")?.data
+        .turnId;
+      const auditTurnId = audit.events.find((event) => event.type === "turn.started")?.data.turnId;
+      if (firstTurnId === undefined || auditTurnId === undefined)
+        throw new Error("Parent turn coordinates are missing.");
       t.check(
-        observations.map((entry) => entry.event),
-        equals(["session.started", "turn.started", "turn.started"]),
-      ).label("resolver runs once at session start and at every parent turn boundary");
+        [...new Set(observations.map((entry) => entry.turnId))],
+        equals([firstTurnId, auditTurnId]),
+      ).label("dynamic skill evaluations see both parent turns");
 
-      for (const [index, { context, event }] of observations.entries()) {
-        const last = index === observations.length - 1;
-        const label = `${event}[${index}]`;
-        const expected: Omit<typeof context, "messages"> = {
-          abortSignal: null,
-          model: { id: "eve-mock/model" },
+      for (const [index, { context, turnId }] of observations.entries()) {
+        const actor = turnId === auditTurnId ? "bob" : "alice";
+        const label = `${turnId}[${index}]`;
+        const expected: typeof context = {
           session: {
             id: started.sessionId,
             schedule: null,
             auth: {
-              current: expectedAuth(last ? "bob" : "alice"),
+              current: expectedAuth(actor),
               initiator: expectedAuth("alice"),
             },
             predecessor: null,
+            // The parent agent's skill runs in the root session, which has no parent.
+            parent: null,
           },
           channel: {
             kind: "channel:skill-context",
@@ -118,38 +123,8 @@ export default (["direct", "waiting"] as const).map((mode) =>
             principalType: "user",
           },
         };
-        const { messages, ...actual } = context;
         for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
-          t.check(actual[key], equals(expected[key])).label(`${label}: ctx.${key}`);
-        }
-        if (event === "session.started") {
-          t.check(messages, equals([])).label(`${label}: ctx.messages precedes the first turn`);
-          continue;
-        }
-        const userMessages = messages.filter((message) => message.role === "user");
-        t.check(
-          userMessages.some((message) => message.content === firstMessage),
-          equals(true),
-        ).label(`${label}: ctx.messages contains the original request`);
-        t.check(
-          userMessages.some((message) => message.content === followUp),
-          equals(last),
-        ).label(`${label}: ctx.messages includes the follow-up only after delivery`);
-        if (last) {
-          const replies = messages
-            .filter((message) => message.role === "assistant")
-            .map((message) =>
-              typeof message.content === "string"
-                ? message.content
-                : message.content
-                    .filter((part) => part.type === "text")
-                    .map((part) => part.text)
-                    .join(""),
-            );
-          t.check(
-            replies.some((reply) => reply.includes(childOutput)),
-            equals(true),
-          ).label(`${label}: ctx.messages retains the delivered child result`);
+          t.check(context[key], equals(expected[key])).label(`${label}: ctx.${key}`);
         }
       }
       t.notEvent("session.ended", { data: { outcome: "failed" } });

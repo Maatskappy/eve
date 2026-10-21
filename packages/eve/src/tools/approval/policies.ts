@@ -1,10 +1,8 @@
 import type { DecisionModel } from "#ai/decision-types.js";
-
 import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import { decide } from "#ai/decide.js";
 import { evaluateOnce } from "#approval/evaluation.js";
-import { parseJsonValue, type JsonObject } from "#shared/json.js";
-import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import { parseJsonValue } from "#shared/json.js";
 
 const MAX_ACTION_BYTES = 64 * 1024;
 
@@ -64,14 +62,6 @@ async function autoApproval(
   }
 }
 
-function alwaysApproval(_closure: JsonObject): "user-approval" {
-  return "user-approval";
-}
-
-function neverApproval(_closure: JsonObject): "not-applicable" {
-  return "not-applicable";
-}
-
 /**
  * Returns an `approval` callback that asks an AI SDK decision model whether
  * the exact tool call presents concrete security danger. Defaults to TypeSafe Jev.
@@ -79,44 +69,17 @@ function neverApproval(_closure: JsonObject): "not-applicable" {
  */
 export function auto<TInput = unknown>(options: AutoApprovalOptions = {}): ApprovalPolicy<TInput> {
   const decisionModel = options.model ?? "typesafe-ai/jev";
-  const policy: ApprovalPolicy<TInput> = (context) =>
-    autoApproval(decisionModel, options, context as ApprovalContext);
-  if (typeof decisionModel !== "string") return policy;
-  const closure = {
-    model: decisionModel,
-    instructions: options.instructions ?? DEFAULT_INSTRUCTIONS,
-    criteria: {
-      clear: options.criteria?.clear ?? DEFAULT_CLEAR_DESCRIPTION,
-      caution: options.criteria?.caution ?? DEFAULT_CAUTION_DESCRIPTION,
-    },
-  };
-  return stampDurableDynamicCallback(policy, {
-    callback: (saved: JsonObject, context: ApprovalContext) =>
-      autoApproval(saved.model as string, saved as AutoApprovalOptions, context),
-    closure,
-  });
+  return (context) => autoApproval(decisionModel, options, context as ApprovalContext);
 }
 
-/**
- * Returns an `approval` callback that always requires user approval before
- * the tool executes.
- */
+/** Returns an `approval` callback that always requires user approval. */
 export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "user-approval", {
-    callback: alwaysApproval,
-    closure: {},
-  });
+  return () => "user-approval";
 }
 
-/**
- * Returns an `approval` callback that never requires user approval before
- * the tool executes.
- */
+/** Returns an `approval` callback that never requires user approval. */
 export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "not-applicable", {
-    callback: neverApproval,
-    closure: {},
-  });
+  return () => "not-applicable";
 }
 
 /** Remembers a person's approval for this tool for the rest of the session. */
@@ -126,9 +89,5 @@ export function once<TInput = unknown>(): ApprovalPolicy<TInput> {
       "once() does not accept options. Use a custom approval policy for input-dependent decisions.",
     );
   }
-  const evaluate = (context: ApprovalContext<TInput>) => evaluateOnce(context as ApprovalContext);
-  return stampDurableDynamicCallback(evaluate, {
-    callback: (_closure: JsonObject, context: ApprovalContext<TInput>) => evaluate(context),
-    closure: {},
-  });
+  return (context) => evaluateOnce(context as ApprovalContext);
 }

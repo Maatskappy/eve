@@ -34,6 +34,20 @@ describe("findRemoteAgentBinding", () => {
     });
   });
 
+  it("carries the binding a dynamic remote agent's credentials are built from", async () => {
+    await expect(
+      findRemoteAgentBinding({
+        ...COORDINATES,
+        parent: parentWith({ dynamicBinding: { position: 3 }, resolverId: "node_1" }),
+      }),
+    ).resolves.toEqual({
+      dynamicBinding: { position: 3 },
+      name: "research",
+      resolverId: "node_1",
+      url: "https://research.example.com",
+    });
+  });
+
   it("names the earlier protocol of a child whose stream the parent can't follow", async () => {
     await expect(
       findRemoteAgentBinding({ ...COORDINATES, parent: parentWith({ earlierProtocol: 1 }) }),

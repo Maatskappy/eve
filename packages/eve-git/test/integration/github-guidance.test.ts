@@ -8,23 +8,22 @@ import pr from "../../extension/skills/pr.ts";
 import gh from "../../extension/tools/gh.ts";
 
 const context = {
-  model: null,
+  abortSignal: new AbortController().signal,
   session: { id: "guidance-test", auth: { current: null, initiator: null } },
   channel: { kind: "http" as const, metadata: {} },
-  messages: [],
 };
 
+async function run<T>(definition: { evaluate: (ctx: never) => unknown }): Promise<T> {
+  return (await definition.evaluate(context as never)) as T;
+}
+
 async function resolve() {
-  const instructionHandler = instructions.events["session.started"];
-  const skillHandler = pr.events["session.started"];
-  const toolHandler = gh.events["session.started"];
-  assert.ok(instructionHandler && skillHandler && toolHandler);
-  const guidance = await instructionHandler({}, context);
+  const guidance = await run<{ content?: string } | null>(instructions);
   assert.ok(guidance && "content" in guidance);
   return {
     content: guidance.content ?? "",
-    skill: (await skillHandler({}, context)) as SkillDefinition,
-    tool: await toolHandler({}, context),
+    skill: await run<SkillDefinition>(pr),
+    tool: await run<object | null>(gh),
   };
 }
 

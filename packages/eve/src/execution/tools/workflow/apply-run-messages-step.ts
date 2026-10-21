@@ -1,10 +1,8 @@
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { recordRemoteChildBinding, type RemoteChildBinding } from "#execution/child-binding.js";
 import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
-import {
-  withSessionStateDelta,
-  type SessionStateTransition,
-} from "#execution/session/state-delta.js";
+import { type SessionStateTransition } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { applyTaskRunMessage, type TaskRunMessage } from "#execution/tasks/steps.js";
 import type {
   WorkflowToolRunAgentStartedMessage,
@@ -18,7 +16,7 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import type { JsonValue } from "#shared/json.js";
+import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
 /**
  * A workflow tool run's `ctx.report()` update, as its call's progress. A run's last report can
@@ -62,6 +60,8 @@ async function childOpenedEvent(
       url: session.url,
     };
     if (session.resolverId !== undefined) binding.resolverId = session.resolverId;
+    if (session.dynamicBinding !== undefined)
+      binding.dynamicBinding = parseJsonValue(session.dynamicBinding);
     if (session.earlierProtocol !== undefined) binding.earlierProtocol = session.earlierProtocol;
     await recordRemoteChildBinding(parentSessionId, binding);
   }

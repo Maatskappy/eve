@@ -1,3 +1,4 @@
+import type { JsonValue } from "#shared/json.js";
 import type { MessageContent } from "#shared/message-content.js";
 
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -68,6 +69,11 @@ export interface RemoteAgentBinding {
   readonly forwardPrincipal?: boolean;
   readonly name: string;
   readonly resolverId?: string;
+  /**
+   * A dynamic remote agent's binding: what its credentials are built from again. Private: only
+   * the parent session's own state and steps carry it, never a request.
+   */
+  readonly dynamicBinding?: JsonValue;
   readonly url: string;
   /** The child's remote agent protocol, when it speaks an earlier one. */
   readonly earlierProtocol?: number;
@@ -88,6 +94,7 @@ export async function findRemoteAgentBinding(
             readonly callId: string;
             readonly name: string;
             readonly resolverId?: string;
+            readonly dynamicBinding?: JsonValue;
             readonly streamPath: string;
             readonly url: string;
             readonly earlierProtocol?: number;
@@ -110,6 +117,7 @@ export async function findRemoteAgentBinding(
     url: recorded.url,
   };
   if (recorded.resolverId !== undefined) binding.resolverId = recorded.resolverId;
+  if (recorded.dynamicBinding !== undefined) binding.dynamicBinding = recorded.dynamicBinding;
   if (recorded.earlierProtocol !== undefined) binding.earlierProtocol = recorded.earlierProtocol;
   return binding;
 }

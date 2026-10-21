@@ -25,16 +25,9 @@ import {
   type PublicAgentStaticModelDefinition,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
-import {
-  isDynamicSentinel,
-  type DynamicEvents,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-type MutableDynamicEvents = {
-  -readonly [K in DynamicToolEventName]?: DynamicEvents[DynamicToolEventName];
-};
 
 type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
   build?: {
@@ -52,6 +45,11 @@ export function normalizeAgentDefinition(
   value: unknown,
   message: string,
 ): Readonly<NormalizedAgentDefinition> {
+  if (isDynamicSentinel(value)) {
+    throw new Error(
+      `${message} agent.ts exports defineAgent(). To choose the model per session, make the model field dynamic: model: defineDynamic(async (ctx) => model) from "eve/models", or model: auto({ ... }).`,
+    );
+  }
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
@@ -75,15 +73,14 @@ export function normalizeAgentDefinition(
   }
 
   const definition: Mutable<NormalizedAgentDefinition> = {
-    model: normalizeAgentModelDefinition(record.model, message),
+    model: normalizeAgentModel(record.model, message),
   };
-
   if (
     isDynamicSentinel(definition.model) &&
     (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
   ) {
     throw new Error(
-      `${message} Dynamic model definitions do not support sibling "modelContextWindowTokens" or "modelOptions" fields. Return those overrides from the resolver selection instead.`,
+      `${message} A dynamic model returns its "modelContextWindowTokens" and "modelOptions" with the model they describe: return { model, modelContextWindowTokens, modelOptions } from its function.`,
     );
   }
 
@@ -133,37 +130,20 @@ export function normalizeAgentDefinition(
   return definition as Readonly<NormalizedAgentDefinition>;
 }
 
+/** A static model passes through; a dynamic one is its `defineDynamic(fn)` value. */
+function normalizeAgentModel(value: unknown, message: string): NormalizedAgentDefinition["model"] {
+  if (!isDynamicSentinel(value)) return value as NormalizedAgentDefinition["model"];
+  assertDynamicSentinelKeys(value, `${message} The dynamic "model":`);
+  // Keep the sentinel itself: eve's own resolvers, such as auto(), carry internal hooks on it.
+  return value as NormalizedAgentDefinition["model"];
+}
+
 function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
   if (!isAgentReasoningDefinition(value)) throw new Error(message);
   return value;
-}
-
-function normalizeAgentModelDefinition(
-  value: unknown,
-  message: string,
-): NormalizedAgentDefinition["model"] {
-  if (!isDynamicSentinel(value)) {
-    return value as NormalizedAgentDefinition["model"];
-  }
-
-  const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["events", "kind"], message);
-
-  const rawEvents = expectObjectRecord(record.events, message);
-  const events: MutableDynamicEvents = {};
-  for (const [eventName, handler] of Object.entries(rawEvents)) {
-    events[eventName as DynamicToolEventName] = expectFunction(handler, message) as NonNullable<
-      DynamicEvents[DynamicToolEventName]
-    >;
-  }
-
-  return {
-    events,
-    kind: record.kind,
-  } as NormalizedAgentDefinition["model"];
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

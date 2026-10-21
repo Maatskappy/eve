@@ -7,11 +7,13 @@ export default defineEval({
     turn.eventsSatisfy("routing failure is reported", (events) =>
       events.some(
         (event) =>
-          event.type === "session.ended" &&
+          event.type === "turn.settled" &&
           event.data.outcome === "failed" &&
+          event.data.error?.code === "REACTION_FAILED" &&
           event.data.error?.message.includes("Decision service unavailable"),
       ),
     );
+    turn.notEvent("model.started");
     turn.usedNoTools();
   },
 });

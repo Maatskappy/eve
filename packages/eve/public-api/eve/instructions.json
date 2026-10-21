@@ -1,9 +1,14 @@
 [
-  "DynamicInstructionsEvents",
+  "DynamicContext",
   "DynamicInstructionsResult",
-  "DynamicResolveContext",
+  "DynamicKey",
+  "DynamicModelContext",
   "DynamicSentinel",
+  "DynamicTurn",
   "InstructionsDefinition",
+  "Memo",
+  "Occurrence",
+  "SessionFrame",
   "defineDynamic",
   "defineInstructions"
 ]

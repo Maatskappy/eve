@@ -253,26 +253,19 @@ describe("mounted extension via authored-source loader", () => {
       manifest.subagents.find((subagent) => subagent.name === `${name}__worker`)!,
     );
     expect(workers[0]?.owner).toMatchObject({ mountId: "extensions/one" });
-    const reasoning = workers.map((worker) => {
-      if ("configResolver" in worker) throw new Error("Expected static worker config.");
-      const configSourceId = worker.agent.config.source.sourceId;
-      const definition = moduleMap.nodes[worker.nodeId]!.modules[configSourceId]!.default as {
-        model: { events: { "session.started": () => { reasoning: string } } };
-      };
-      return definition.model.events["session.started"]().reasoning;
-    });
+    // Each mounted worker reads its own extension configuration.
+    const reasoningOf = (map: typeof moduleMap, worker: (typeof workers)[number]) => {
+      if (!("config" in worker.agent)) throw new Error("Expected a worker config.");
+      const definition = map.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
+        .default as { model: { evaluate: (ctx: object) => { reasoning: string } } };
+      return definition.model.evaluate({}).reasoning;
+    };
+    const reasoning = workers.map((worker) => reasoningOf(moduleMap, worker));
     expect(reasoning).toEqual(["high", "low"]);
     const second = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
     });
-    const secondReasoning = workers.map((worker) => {
-      if ("configResolver" in worker) throw new Error("Expected static worker config.");
-      const definition = second.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
-        .default as {
-        model: { events: { "session.started": () => { reasoning: string } } };
-      };
-      return definition.model.events["session.started"]().reasoning;
-    });
+    const secondReasoning = workers.map((worker) => reasoningOf(second, worker));
     expect(secondReasoning).toEqual(["high", "low"]);
   });
 
@@ -459,7 +452,8 @@ describe("mounted extension via authored-source loader", () => {
   it("binds mounted config so a composed tool reads it", async () => {
     const app = await createAppRoot("eve-mounted-extension-authored-source-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": [
           'import crm from "@acme/crm";',
@@ -518,9 +512,11 @@ describe("mounted extension without config", () => {
   it("composes and runs a no-config extension mounted via re-export", async () => {
     const app = await createAppRoot("eve-mounted-extension-no-config-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
-        "agent/extensions/widget.mjs": 'export { default } from "@acme/widget";\n',
+        "agent/extensions/widget.mjs": `export { default } from "@acme/widget";
+`,
         "node_modules/@acme/widget/package.json": `${JSON.stringify({
           name: "@acme/widget",
           type: "module",
@@ -566,9 +562,11 @@ describe("mounted extension with an unsupported capability contract", () => {
     const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
     const app = await createAppRoot("eve-mounted-extension-incompatible-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
-        "agent/extensions/widget.mjs": 'export { default } from "@acme/widget";\n',
+        "agent/extensions/widget.mjs": `export { default } from "@acme/widget";
+`,
         "node_modules/@acme/widget/package.json": `${JSON.stringify({
           name: "@acme/widget",
           type: "module",
@@ -603,7 +601,8 @@ describe("mounted extension via directory form with override", () => {
   it("binds base config and lets a co-located override shadow or disable a tool", async () => {
     const app = await createAppRoot("eve-mounted-extension-directory-override-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm/extension.mjs": [
           'import crm from "@acme/crm";',
@@ -688,18 +687,15 @@ describe("mounted extension via directory form with override", () => {
         ].join("\n"),
         "node_modules/@acme/crm/extension/tools/crm_pulse.mjs": [
           'import { defineDynamic, defineTool } from "eve/tools";',
-          "export default defineDynamic({",
-          "  events: {",
-          '    "session.started": async () =>',
-          "      defineTool({",
-          '        description: "A dynamic tool the consumer opts out of.",',
-          "        inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
-          "        async execute() {",
-          "          return { pulse: true };",
-          "        },",
-          "      }),",
-          "  },",
-          "});",
+          "export default defineDynamic(() =>",
+          "    defineTool({",
+          '      description: "A dynamic tool the consumer opts out of.",',
+          "      inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
+          "      async execute() {",
+          "        return { pulse: true };",
+          "      },",
+          "    }),",
+          ");",
           "",
         ].join("\n"),
       },
@@ -731,7 +727,8 @@ describe("mounted extension via directory form with override", () => {
   it("replaces extension local and remote subagents with remote overrides", async () => {
     const app = await createAppRoot("eve-mounted-extension-subagent-override-repro-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm/extension.mjs": [
           'import crm from "@acme/crm";',
@@ -936,12 +933,15 @@ describe("mounted extension subagent resources", () => {
   it("materializes extension subagent resources under a Windows-safe directory", async () => {
     const app = await createAppRoot("eve-mounted-extension-subagent-resources-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
-        "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";\n',
-        "agent/subagents/research/agent.mjs":
-          'export default { model: "openai/gpt-5.4", description: "Research." };\n',
-        "agent/subagents/research/extensions/crm.mjs": 'export { default } from "@acme/crm";\n',
+        "agent/extensions/crm.mjs": `export { default } from "@acme/crm";
+`,
+        "agent/subagents/research/agent.mjs": `export default { model: "openai/gpt-5.4", description: "Research." };
+`,
+        "agent/subagents/research/extensions/crm.mjs": `export { default } from "@acme/crm";
+`,
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",

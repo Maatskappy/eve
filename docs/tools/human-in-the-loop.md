@@ -32,12 +32,12 @@ export default defineTool({
 });
 ```
 
-| Helper     | Behavior                                                                      |
-| ---------- | ----------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                            |
-| `once()`   | Remember approval for this tool for the rest of the session. |
-| `always()` | Require approval before every call.                                           |
-| `auto()`   | Ask a decision model whether to run the exact call or require user approval.  |
+| Helper     | Behavior                                                                     |
+| ---------- | ---------------------------------------------------------------------------- |
+| `never()`  | Never require approval (the default when omitted).                           |
+| `once()`   | Remember approval for this tool for the rest of the session.                 |
+| `always()` | Require approval before every call.                                          |
+| `auto()`   | Ask a decision model whether to run the exact call or require user approval. |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
@@ -61,6 +61,8 @@ approval: auto({
   },
 });
 ```
+
+Dynamic tools rebuild their policies when evaluated. Use [`ctx.memo()`](/docs/guides/dynamic-capabilities) to keep external JSON observations used to configure a policy.
 
 Each pending approval needs its own answer. A `once()` grant applies to later calls, not other already-open prompts.
 

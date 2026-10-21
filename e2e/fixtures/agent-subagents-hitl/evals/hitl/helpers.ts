@@ -1,4 +1,5 @@
-import type { EveEvalContext, EveEvalSession, EveEvalTurn, Interaction } from "eve/evals";
+import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
+import type { Interaction } from "eve/events";
 
 /**
  * Follows the parent session, turn by turn, until a child's request about `toolName` (or, for a
@@ -30,7 +31,7 @@ export async function waitForReply(
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const turn = await next(t, session);
-    if (turn.message?.includes(marker) === true) return turn;
+    if (turn.reply?.includes(marker) === true) return turn;
     session = turn.session;
   }
   throw new Error(`No parent reply contained ${marker} after five turns.`);
@@ -38,5 +39,5 @@ export async function waitForReply(
 
 /** The parent's events from its current cursor to the next turn boundary. */
 export function next(t: EveEvalContext, session: EveEvalSession): Promise<EveEvalTurn> {
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex }).result();
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch().result();
 }

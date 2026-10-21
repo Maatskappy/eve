@@ -132,8 +132,8 @@ same bounded startup retries as other follow-ups.
 To create the session and start its first turn in one request, include the message:
 
 ```ts
-const { session, response } = await client.sessions.create({ message: "Summarize account A." });
-await response.result();
+const { session, delivery } = await client.sessions.create({ message: "Summarize account A." });
+await delivery.result();
 
 await (await session.send("Now list the risks.")).result();
 await session.compact();
@@ -168,14 +168,14 @@ await session.reset({ reason: "User requested a fresh session" });
 A client can own many independent fixed sessions at once:
 
 ```ts
-const { session: alice, response: aliceResponse } = await client.sessions.create({
+const { session: alice, delivery: aliceDelivery } = await client.sessions.create({
   message: "Summarize account A.",
 });
-const { session: bob, response: bobResponse } = await client.sessions.create({
+const { session: bob, delivery: bobDelivery } = await client.sessions.create({
   message: "Summarize account B.",
 });
 
-await Promise.all([aliceResponse.result(), bobResponse.result()]);
+await Promise.all([aliceDelivery.result(), bobDelivery.result()]);
 ```
 
 The next pages cover the session lifecycle:

@@ -15,7 +15,10 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
-import { readSessionEventStream } from "#execution/session-event-stream.js";
+import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { encodeLine } from "#protocol/session-events/envelope.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -207,7 +210,7 @@ describe("stranded sessions", () => {
           "Alice asks for the weekly summary after the upgrade.",
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
         await expect(waiting).resolves.toMatchObject({
           done: false,
@@ -221,20 +224,23 @@ describe("stranded sessions", () => {
           },
         });
         await expect(reader.read()).resolves.toMatchObject({ done: true });
-        expect(fresh.id).not.toBe(anchor.runId);
+        expect(fresh.sessionId).not.toBe(anchor.runId);
         // The runtime started the successor itself; the channel started nothing.
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("cancelled");
         await expect(anchor.status).resolves.toBe("cancelled");
-        await waitForHook({ runId: fresh.id }, { token: sessionInboxHookToken(continuationToken) });
+        await waitForHook(
+          { runId: fresh.sessionId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.id,
+          sessionId: fresh.sessionId,
         });
         await expect(
-          waitForReceivedMessages(fresh.id, ["Alice asks for the weekly summary"]),
+          waitForReceivedMessages(fresh.sessionId, ["Alice asks for the weekly summary"]),
         ).resolves.toEqual([]);
         // The successor names the session it replaced.
-        const started = await readSessionStarted(fresh.id);
+        const started = await readSessionStarted(fresh.sessionId);
         expect(started.data.predecessor).toEqual({ sessionId: anchor.runId });
         // A remote job can finish after replacement. Its fixed parent inbox
         // must not route the result into the new conversation.
@@ -266,7 +272,7 @@ describe("stranded sessions", () => {
         );
         expect(callback.status).toBe(404);
         await expect(runtime.resolveContinuation(continuationToken)).resolves.toEqual({
-          sessionId: fresh.id,
+          sessionId: fresh.sessionId,
         });
 
         const resets = logs.records.filter((record) => record.message === "Reset stranded session");
@@ -302,11 +308,11 @@ describe("stranded sessions", () => {
           { context: ["Alice moved the standup to Thursday."] },
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
-        expect(fresh.id).not.toBe(stranded.runId);
+        expect(fresh.sessionId).not.toBe(stranded.runId);
         await expect(stranded.status).resolves.toBe("cancelled");
-        await expect(waitForAliasOwner(runtime, continuationToken)).resolves.toBe(fresh.id);
+        await expect(waitForAliasOwner(runtime, continuationToken)).resolves.toBe(fresh.sessionId);
       } finally {
         await cancelIfActive(stranded);
         await resetSession(runtime, freshSessionId);
@@ -329,7 +335,7 @@ describe("stranded sessions", () => {
         ]);
         freshSessionId = await waitForAliasOwner(runtime, continuationToken);
 
-        expect(candidates.map((session) => session.id)).toContain(freshSessionId);
+        expect(candidates.map((session) => session.sessionId)).toContain(freshSessionId);
         expect(freshSessionId).not.toBe(stranded.runId);
         await expect(stranded.status).resolves.toBe("cancelled");
         await expect(
@@ -434,6 +440,100 @@ describe("stranded sessions", () => {
     });
   });
 
+  it("fails a reset before cancelling when the history read stalls", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-stalled-read" } });
+    await test.run(async () => {
+      const continuationToken = "http:stranded-session-stalled-read";
+      const stranded = await parkStrandedOwner(continuationToken);
+      const runtime = channelRuntime();
+      const world = await getWorld();
+      const getInfo = world.streams.getInfo.bind(world.streams);
+      let stalled!: () => void;
+      const reached = new Promise<void>((resolve) => (stalled = resolve));
+      const stall = vi.spyOn(world.streams, "getInfo").mockImplementation((runId, name) => {
+        if (runId !== stranded.runId) return getInfo(runId, name);
+        stalled();
+        return new Promise(() => {});
+      });
+      vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const reset = runtime.dispatchSession({
+          command: { deliveryId: "reset-delivery", kind: "reset" },
+          sessionId: stranded.runId,
+        });
+        const outcome = expect(reset).rejects.toThrow(
+          `Timed out reading the history of stranded session "${stranded.runId}". Nothing was ended; retry the request.`,
+        );
+        await reached;
+        await vi.advanceTimersByTimeAsync(30_000);
+        await outcome;
+        vi.useRealTimers();
+        stall.mockRestore();
+
+        await expect(stranded.status).resolves.toBe("running");
+        const types: string[] = [];
+        for await (const event of streamSessionEvents(stranded.runId, { follow: false })) {
+          types.push(event.type);
+        }
+        expect(types).not.toContain("session.ended");
+
+        await expect(resetSession(runtime, stranded.runId)).resolves.toBeUndefined();
+        await expect(stranded.status).resolves.toBe("cancelled");
+      } finally {
+        vi.useRealTimers();
+        stall.mockRestore();
+        await cancelIfActive(stranded);
+      }
+    });
+  });
+
+  it("closes the turn and interaction a reset leaves open before the session ends", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-session-cascade" } });
+    await test.run(async () => {
+      const stranded = await parkStrandedOwner("http:stranded-session-cascade");
+      const runtime = channelRuntime();
+      try {
+        const waiting: SessionEvent[] = [
+          { data: { deliveryId: "d0" }, type: "delivery.admitted" },
+          {
+            data: { cause: { deliveryId: "d0" }, follows: null, turnId: "turn_0" },
+            scope: { turnId: "turn_0" },
+            type: "turn.started",
+          },
+          {
+            data: {
+              interactionId: "question-1",
+              request: { kind: "question", prompt: "Which room should Alice book?" },
+              subject: { turnId: "turn_0" },
+            },
+            scope: { turnId: "turn_0" },
+            type: "interaction.opened",
+          },
+        ];
+        const writer = getRun(stranded.runId).getWritable<Uint8Array>().getWriter();
+        await writer.write(
+          new TextEncoder().encode(encodeLine({ at: "2026-10-01T00:00:00.000Z", facts: waiting })),
+        );
+        writer.releaseLock();
+
+        await resetSession(runtime, stranded.runId);
+
+        const view = emptySessionView();
+        const types: string[] = [];
+        for await (const event of streamSessionEvents(stranded.runId, { follow: false })) {
+          foldReceivedEvent(view, event);
+          types.push(event.type);
+        }
+        expect(types.at(-1)).toBe("session.ended");
+        expect(view.session.status).toBe("ended");
+        expect(view.turns.turn_0).toMatchObject({ outcome: "cancelled", status: "settled" });
+        expect(view.interactions["question-1"]?.status).not.toBe("open");
+      } finally {
+        await cancelIfActive(stranded);
+      }
+    });
+  });
+
   it("refuses create() at a stranded address until it is reset", async () => {
     const test = await createTestRuntime({ agent: { name: "stranded-session-create" } });
     await test.run(async () => {
@@ -504,7 +604,7 @@ describe("stranded sessions", () => {
           { auth: null },
         );
 
-        expect(session.id).toBe(owner.runId);
+        expect(session.sessionId).toBe(owner.runId);
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(owner.status).resolves.toBe("running");
       } finally {
@@ -553,7 +653,7 @@ describe("stranded sessions", () => {
           "Alice asks to move the offsite to Friday.",
           { auth: null },
         );
-        freshSessionId = fresh.id;
+        freshSessionId = fresh.sessionId;
 
         await expect(reads.wait()).resolves.toEqual([
           {

@@ -163,10 +163,10 @@ const host = process.argv[2];
 if (!host) throw new Error("Usage: node save-chart.ts <dev-server-url>");
 
 const client = new Client({ host });
-const { response } = await client.sessions.create({
+const { delivery } = await client.sessions.create({
   message: "Use run_sql and chart_series to plot daily order revenue in May 2026.",
 });
-const turn = await response.result();
+const turn = await delivery.result();
 if (turn.status === "failed") throw new Error("The agent turn failed. Check the dev server logs.");
 if (turn.interactions.length > 0) {
   const prompts = turn.interactions.map((request) => request.prompt).join("\n");

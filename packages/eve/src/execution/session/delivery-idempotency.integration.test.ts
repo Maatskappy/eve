@@ -44,15 +44,25 @@ describe("delivery idempotency", () => {
           .from(address)
           .send("Alice asks for a report.", { auth: null, idempotencyKey: "initial" });
       const initial = await Promise.all([send(), send()]);
-      expect(initial[0]!.id).toBe(initial[1]!.id);
-      const session = initial[0]!;
+      expect(initial[0]!.sessionId).toBe(initial[1]!.sessionId);
+      const session = createSession(initial[0]!.sessionId, runtime);
       const stream = captureTurnEvents(getRun(session.id));
       let completed = false;
       try {
         await stream.nextTurn();
         await waitForParkedTurnStep(session.id);
         // Each hook resume replays the owner from its recorded history.
-        await send();
+        const retried = await send();
+        await vi.waitFor(async () => {
+          const recorded = [];
+          for await (const event of await runtime.getEventStream(session.id, { follow: false })) {
+            if (event.type === "delivery.settled") recorded.push(event.data);
+          }
+          expect(recorded).toContainEqual(
+            expect.objectContaining({ deliveryId: retried.deliveryId, outcome: "ignored" }),
+          );
+        });
+        await expect(retried.result()).resolves.toMatchObject({ status: "completed" });
         const fixed = createSession(session.id, runtime);
         const followUp = () =>
           fixed.send("Bob asks for the next step.", {
@@ -63,7 +73,8 @@ describe("delivery idempotency", () => {
         await Promise.all([followUp(), followUp()]);
         await stream.nextTurn();
         await waitForParkedTurnStep(session.id, 2);
-        await followUp();
+        const repeatedFollowUp = await followUp();
+        await expect(repeatedFollowUp.result()).resolves.toMatchObject({ status: "completed" });
         await fixed.send("Alice thanks Bob.", { auth: null, turnPolicy: "queue" });
         await stream.nextTurn();
         await waitForParkedTurnStep(session.id, 3);

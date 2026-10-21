@@ -31,7 +31,7 @@ export default defineTool({
     if (!host) throw new Error("The fixture's own server URL is unavailable.");
     const client = new Client({ host });
     const signal = AbortSignal.timeout(20_000);
-    const { response } = await client.sessions.create({
+    const { delivery } = await client.sessions.create({
       message: "Return a structured answer.",
       outputSchema: {
         type: "object",
@@ -41,7 +41,7 @@ export default defineTool({
       },
       signal,
     });
-    const result = await response.result();
+    const result = await delivery.result();
     signal.throwIfAborted();
     return { data: result.data, status: result.status };
   },
@@ -52,12 +52,12 @@ export default defineTool({
     const server = await startEveDev(app.appRoot);
     try {
       const client = new Client({ host: server.url });
-      const { response } = await client.sessions.create({
+      const { delivery } = await client.sessions.create({
         message: "Call call_child.",
         signal: AbortSignal.timeout(40_000),
       });
-      const result = await response.result();
-      expect(result.message).toContain("child-result");
+      const result = await delivery.result();
+      expect(result.reply).toContain("child-result");
       expect(result.status).toBe("waiting");
     } catch (error) {
       throw new Error(`${String(error)}\n${server.stdout()}\n${server.stderr()}`, { cause: error });

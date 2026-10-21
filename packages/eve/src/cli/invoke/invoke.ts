@@ -7,6 +7,8 @@ import {
 } from "#client/index.js";
 import type { SendTurnPayload } from "#client/types.js";
 import { collectTurnEvents, summarizeTurnEvents } from "#client/session-utils.js";
+import { deliveryEvents } from "#client/delivery-events.js";
+import { parseJsonValue } from "#shared/json.js";
 import type { RemoteDevelopmentTarget } from "#services/dev-client/target.js";
 import {
   formatVercelTrustedSourcesFailure,
@@ -16,16 +18,11 @@ import {
 import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 import { resolveVerifiedRemoteDevelopmentClient } from "#setup/verified-remote-client.js";
 
-import {
-  type InvokeAuthenticationFailure,
-  type InvokeResult,
-  type InvokeResume,
-  projectInvocationInteraction,
-} from "./result.js";
+import { type InvokeResult, type InvokeResume, projectInvocationInteraction } from "./result.js";
 
 export type InvokeOperation =
   | { readonly kind: "send"; readonly payload: SendTurnPayload; readonly resume?: InvokeResume }
-  | { readonly kind: "follow"; readonly resume: InvokeResume };
+  | { readonly kind: "follow"; readonly resume: InvokeResume; readonly turnId?: string };
 
 export interface RunInvokeInput {
   readonly headers?: Readonly<Record<string, string>>;
@@ -41,14 +38,27 @@ export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
   const resume = input.operation.resume;
 
   if (input.operation.kind === "follow") {
-    const session = client.sessions.attach(resume!.session.sessionId, {
-      streamIndex: resume!.session.streamIndex,
+    const session = client.sessions.attach(input.operation.resume.session.sessionId, {
+      streamIndex: input.operation.resume.session.streamIndex,
     });
+    const resume = input.operation.resume;
+    const turnId = input.operation.turnId ?? resume.turnId;
+    const pauseCursor = { reported: resume.pauseLine, latest: resume.pauseLine };
     return observeSafely(
       input,
       session,
-      session.stream({ signal: input.signal }),
+      turnId === undefined
+        ? deliveryEvents(session.stream({ signal: input.signal, startIndex: 0 }), resume.deliveryId)
+        : followSignInTurn(
+            session.stream({ signal: input.signal, startIndex: 0 }),
+            resume.deliveryId,
+            turnId,
+            pauseCursor,
+          ),
+      resume.deliveryId,
       deploymentResolution,
+      turnId,
+      turnId === undefined ? undefined : pauseCursor,
     );
   }
 
@@ -62,7 +72,7 @@ export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
       }
       const created = await client.sessions.create({ ...payload, message: payload.message });
       session = created.session;
-      response = created.response;
+      response = created.delivery;
     } else {
       session = client.sessions.attach(resume.session.sessionId, {
         streamIndex: resume.session.streamIndex,
@@ -74,12 +84,12 @@ export async function runInvoke(input: RunInvokeInput): Promise<InvokeResult> {
           : await session.respond(answers, options);
     }
   } catch (error) {
-    const authentication = authenticationFailure(error, undefined, deploymentResolution);
-    if (authentication !== undefined) return authentication;
+    const authentication = authenticationFailure(error, deploymentResolution);
+    if (authentication !== undefined) throw authentication;
     throw error;
   }
 
-  return observeSafely(input, session, response, deploymentResolution);
+  return observeSafely(input, session, response, response.deliveryId, deploymentResolution);
 }
 
 /** Converts a prompt and optional previous result into one valid invoke operation. */
@@ -95,30 +105,29 @@ export function resolveInvokeOperation(input: {
     return { kind: "send", payload: { message: prompt } };
   }
 
-  // An answer resumes with a prompt; a sign-in, which completes elsewhere, resumes without one.
+  if (previous.sessionEnded)
+    throw new Error("This session has ended and cannot accept another message.");
   const signingIn =
-    previous.status === "input-required" &&
+    previous.status === "awaiting-input" &&
     previous.interactions.every((interaction) => interaction.request.kind === "sign-in");
-  if (previous.status === "input-required" && !signingIn) {
+  if (previous.status === "awaiting-input" && !signingIn) {
     if (!prompt) throw new Error("This invocation is waiting for an answer.");
     return { kind: "send", payload: { message: prompt }, resume: previous.resume };
   }
-
-  if (signingIn || previous.status === "running" || previous.status === "authentication-required") {
-    if (prompt) {
+  if (signingIn || previous.status === "working") {
+    if (prompt)
       throw new Error(
-        previous.status === "running"
-          ? "A running invocation cannot accept a follow-up prompt."
-          : "Complete the requested authorization, then resume without a prompt.",
+        signingIn
+          ? "Complete the requested sign-in, then resume without a prompt."
+          : "A working invocation cannot accept a follow-up prompt.",
       );
-    }
-    return { kind: "follow", resume: previous.resume };
+    if (signingIn)
+      return { kind: "follow", resume: previous.resume, turnId: previous.interactions[0]!.turnId };
+    return previous.resume.turnId === undefined
+      ? { kind: "follow", resume: previous.resume }
+      : { kind: "follow", resume: previous.resume, turnId: previous.resume.turnId };
   }
-
-  if (previous.status !== "ready") {
-    throw new Error(`A terminal ${previous.status} invocation cannot be resumed.`);
-  }
-  if (!prompt) throw new Error("A ready invocation requires a follow-up prompt.");
+  if (!prompt) throw new Error("A settled invocation requires a follow-up prompt.");
   return { kind: "send", payload: { message: prompt }, resume: previous.resume };
 }
 
@@ -139,22 +148,40 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
   };
 }
 
+interface PauseCursor {
+  readonly reported?: number;
+  latest?: number;
+}
+
 async function observeSafely(
   input: RunInvokeInput,
   session: ClientSession,
   response: AsyncIterable<SessionStreamEvent>,
+  deliveryId: string,
   deploymentResolution?: VercelDeploymentResolution,
+  turnId?: string,
+  pauseCursor?: PauseCursor,
 ): Promise<InvokeResult> {
   try {
-    return await observeInvocation(input.target, session, response);
-  } catch (error) {
-    if (input.signal?.aborted === true) return runningResult(input.target, session.state);
-    const authentication = authenticationFailure(
-      error,
-      createResume(input.target, session.state),
-      deploymentResolution,
+    return await observeInvocation(
+      input.target,
+      session,
+      response,
+      deliveryId,
+      turnId,
+      pauseCursor,
     );
-    if (authentication !== undefined) return authentication;
+  } catch (error) {
+    const working = () =>
+      workingResult(input.target, session.state, deliveryId, turnId, pauseCursor?.reported);
+    if (input.signal?.aborted === true) return working();
+    const authentication = authenticationFailure(error, deploymentResolution);
+    if (authentication !== undefined) {
+      // The delivery was accepted, so losing its coordinates would strand it.
+      throw new Error(
+        `${authentication.message}\nThe delivery was accepted. After fixing credentials, pipe this result to \`eve remote invoke --resume\`:\n${JSON.stringify(working())}`,
+      );
+    }
     throw error;
   }
 }
@@ -163,49 +190,109 @@ async function observeInvocation(
   target: RemoteDevelopmentTarget,
   session: ClientSession,
   response: AsyncIterable<SessionStreamEvent>,
+  deliveryId: string,
+  turnId?: string,
+  pauseCursor?: PauseCursor,
 ): Promise<InvokeResult> {
-  const summary = summarizeTurnEvents(await collectTurnEvents(response));
-  if (summary.boundary === undefined) return runningResult(target, session.state);
-  if (summary.boundary.type === "session.ended" && summary.boundary.data.outcome === "failed") {
-    return { status: "failed", message: summary.failure?.message ?? "The session failed." };
-  }
-
-  const resume = createResume(target, session.state);
-  if (summary.failure !== undefined) {
-    return {
-      status: "ready",
-      outcome: { status: "failed", message: summary.failure.message },
-      resume,
-    };
-  }
-  const [first, ...rest] = summary.interactions.map(projectInvocationInteraction);
-  if (first !== undefined) {
-    return { interactions: [first, ...rest], resume, status: "input-required" };
-  }
-
-  const outcome =
-    summary.message === undefined
-      ? ({ status: "completed" } as const)
-      : ({ status: "completed", message: summary.message } as const);
-  return { status: "ready", outcome, resume };
-}
-
-function runningResult(target: RemoteDevelopmentTarget, state: ClientSessionState): InvokeResult {
-  return { status: "running", resume: createResume(target, state) };
-}
-
-function createResume(target: RemoteDevelopmentTarget, session: ClientSessionState): InvokeResume {
+  const summary = summarizeTurnEvents(
+    await collectTurnEvents(response, turnId === undefined ? deliveryId : undefined),
+    turnId === undefined ? deliveryId : undefined,
+  );
   return {
+    status: summary.status,
+    sessionEnded: summary.sessionEnded,
+    resume: createResume(
+      target,
+      session.state,
+      deliveryId,
+      turnId,
+      summary.status === "awaiting-input" ? pauseCursor?.latest : pauseCursor?.reported,
+    ),
+    interactions: summary.interactions.map(projectInvocationInteraction),
+    reply: summary.message,
+    data: summary.result === undefined ? undefined : parseJsonValue(summary.result),
+    error: summary.failure,
+  };
+}
+
+function workingResult(
+  target: RemoteDevelopmentTarget,
+  state: ClientSessionState,
+  deliveryId: string,
+  turnId?: string,
+  pauseLine?: number,
+): InvokeResult {
+  return {
+    status: "working",
+    sessionEnded: false,
+    interactions: [],
+    resume: createResume(target, state, deliveryId, turnId, pauseLine),
+  };
+}
+
+function createResume(
+  target: RemoteDevelopmentTarget,
+  session: ClientSessionState,
+  deliveryId: string,
+  turnId?: string,
+  pauseLine?: number,
+): InvokeResume {
+  const resume: InvokeResume = {
     session,
+    deliveryId,
     target: { kind: "remote", serverUrl: target.serverUrl },
   };
+  if (turnId === undefined) return resume;
+  return pauseLine === undefined ? { ...resume, turnId } : { ...resume, turnId, pauseLine };
+}
+
+async function* followSignInTurn(
+  stream: AsyncIterable<SessionStreamEvent>,
+  deliveryId: string,
+  turnId: string,
+  pauseCursor: PauseCursor,
+): AsyncGenerator<SessionStreamEvent> {
+  let admitted = false;
+  let settledLine: number | undefined;
+  let boundary = false;
+  let pendingPauseLine: number | undefined;
+  for await (const event of stream) {
+    if (!admitted) {
+      if (event.type !== "turn.started" || event.data.turnId !== turnId) continue;
+      admitted = true;
+    }
+    if (event.type === "delivery.settled" && event.data.deliveryId === deliveryId)
+      settledLine = event.meta.position.line;
+    if (
+      event.type === "turn.paused" &&
+      event.data.turnId === turnId &&
+      (pauseCursor.reported === undefined
+        ? settledLine === undefined || event.meta.position.line <= settledLine
+        : event.meta.position.line <= pauseCursor.reported)
+    )
+      continue;
+    if (event.type === "turn.paused" && event.data.turnId === turnId)
+      pendingPauseLine = event.meta.position.line;
+    if (pendingPauseLine !== undefined && event.meta.endOfLine !== false)
+      pauseCursor.latest = pendingPauseLine;
+    yield event;
+    if (
+      (event.type === "turn.settled" && event.data.turnId === turnId) ||
+      event.type === "session.ended" ||
+      (event.type === "turn.paused" &&
+        event.data.turnId === turnId &&
+        settledLine !== undefined &&
+        event.meta.position.line > settledLine)
+    )
+      boundary = true;
+    if (boundary && event.meta.endOfLine !== false) return;
+  }
 }
 
 function authenticationFailure(
   error: unknown,
-  resume?: InvokeResume,
   deploymentResolution?: VercelDeploymentResolution,
-): InvokeAuthenticationFailure | undefined {
+): Error | undefined {
   let message: string | undefined;
   let code: string | undefined;
   if (deploymentResolution?.kind === "not-found") {
@@ -224,14 +311,7 @@ function authenticationFailure(
     }
   }
   if (message === undefined) return undefined;
-  if (resume === undefined) {
-    return code === undefined
-      ? { status: "authentication-required", message }
-      : { status: "authentication-required", code, message };
-  }
-  return code === undefined
-    ? { status: "authentication-required", message, resume }
-    : { status: "authentication-required", code, message, resume };
+  return new Error(code === undefined ? message : `${message} (${code})`);
 }
 
 function isEveAuthorizationError(error: ClientError): boolean {

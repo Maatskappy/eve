@@ -148,11 +148,16 @@ export async function weighResponders(
   const challenges: AuthorizationChallenge[] = [];
   const unavailable: string[] = [];
   const upsert: Record<string, PendingResponder> = {};
+  const revised = revisedAnswers(view, input.now);
   for (const [responseId, pending] of Object.entries(recorded)) {
     const row = tables.responses[responseId];
     if (row?.status !== "submitted") continue;
     if (pending.expiresAt <= input.now) {
       events.push(responseSettled(responseId, "expired", EXPIRED_REASON));
+      continue;
+    }
+    if (revised.has(responseId)) {
+      events.push(responseSettled(responseId, "withdrawn", "revised"));
       continue;
     }
     if (
@@ -210,6 +215,38 @@ export async function weighResponders(
     turn: view.turn,
     unavailable,
   };
+}
+
+/**
+ * The unweighed answers a later answer from the same responder to the same approval revises, so
+ * a response policy runs once per person and approval however many answers they send.
+ */
+function revisedAnswers(view: SessionView, now: number): ReadonlySet<string> {
+  const tables = view.projection.view;
+  const latest = new Map<string, { readonly introducedAt: number; readonly responseId: string }>();
+  const revised = new Set<string>();
+  for (const [responseId, pending] of Object.entries(view.responders)) {
+    const row = tables.responses[responseId];
+    if (row?.status !== "submitted" || pending.expiresAt <= now) continue;
+    // An answer waiting on its responder's sign-in has met its policy already.
+    if ((pending.challenges?.length ?? 0) > 0) continue;
+    const { authenticator, issuer, principalId, principalType } = pending.responder;
+    const key = JSON.stringify([
+      row.interactionId,
+      authenticator,
+      issuer ?? "",
+      principalType,
+      principalId,
+    ]);
+    const prior = latest.get(key);
+    if (prior !== undefined && prior.introducedAt > row.introducedAt) {
+      revised.add(responseId);
+      continue;
+    }
+    if (prior !== undefined) revised.add(prior.responseId);
+    latest.set(key, { introducedAt: row.introducedAt, responseId });
+  }
+  return revised;
 }
 
 type Weighed =

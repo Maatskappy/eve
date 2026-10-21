@@ -1,4 +1,9 @@
-import { defineEval, type EveEvalContext, type EveEvalSession } from "eve/evals";
+import {
+  defineEval,
+  type EveEvalContext,
+  type EveEvalLiveTurn,
+  type EveEvalSession,
+} from "eve/evals";
 
 /** A human text answer resolves the child's proxied request at the parent by request ID. */
 export default defineEval({
@@ -18,7 +23,7 @@ export default defineEval({
       parent = live.session;
     }
     if (child.type !== "child.opened") throw new Error("Approval child was not called.");
-    const childTurn = t.target.watchTurn(child.data.sessionId);
+    const childTurn = t.target.attach(child.data.sessionId).watch();
     const pending = await waitForInput(t, parent);
     const request = pending.requireInteraction({
       prompt: /Approve the deployment/i,
@@ -26,9 +31,9 @@ export default defineEval({
     });
     const parkedChild = await childTurn.result();
 
-    const resumedChild = t.target.watchTurn(child.data.sessionId, {
-      startIndex: parkedChild.session.state.streamIndex,
-    });
+    const resumedChild = t.target
+      .attach(child.data.sessionId, { startIndex: parkedChild.session.state.streamIndex })
+      .watch();
     const approved = await pending.start("approve");
     const resolution = await waitForObservedEvent(resumedChild, "interaction.settled");
     if (resolution.type !== "interaction.settled") throw new Error("Question was not resolved.");
@@ -39,7 +44,7 @@ export default defineEval({
       throw new Error("The child did not resolve the proxied question with the selected option.");
     }
     await approved.cancel();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });
 
@@ -50,14 +55,14 @@ async function waitForInput(t: EveEvalContext, initial: EveEvalSession): Promise
       return session;
     }
     const turn = await watchNextTurn(t, session, "proxied ask wait").result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = turn.session;
   }
   throw new Error("Approval child did not surface its ctx.ask() request.");
 }
 
 async function waitForObservedEvent<TType extends "interaction.settled">(
-  turn: ReturnType<EveEvalContext["target"]["watchTurn"]>,
+  turn: EveEvalLiveTurn,
   type: TType,
 ) {
   for (let attempt = 0; attempt < 1_500; attempt += 1) {
@@ -69,8 +74,8 @@ async function waitForObservedEvent<TType extends "interaction.settled">(
 }
 
 function watchNextTurn(t: EveEvalContext, session: EveEvalSession, operation: string) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error(`${operation} has no parent session cursor.`);
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }

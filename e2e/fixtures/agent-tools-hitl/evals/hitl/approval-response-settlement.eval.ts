@@ -96,7 +96,7 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, interacti
 
 export default defineEval({
   description:
-    "A refused approval returns the frontend to an answerable idle state, including after reload (#3757).",
+    "A refused approval returns the frontend to an answerable state, including after reload (#3757).",
   tags: ["hitl", "regression", "authorization", "client"],
   timeoutMs: 120_000,
   async test(t) {
@@ -132,7 +132,7 @@ export default defineEval({
           (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
           t.signal,
         );
-        const parked = (await t.target.watchTurn(session.sessionId).result()).expectOk();
+        const parked = (await t.target.attach(session.id).watch().result()).expectOk();
         const approval = parked.session.requireInteraction({ toolName: TOOL });
         const { interactionId } = approval;
         const callId = approval.call!.callId;
@@ -142,12 +142,12 @@ export default defineEval({
         // Retrying on the same page must reach the policy again, not reuse the refused candidate.
         const retryCandidate = await refuse(t, page, callId, interactionId);
         await t.require(retryCandidate !== firstCandidate, equals(true));
-        page.reset();
+        page.newSession();
 
         const reload = new EveAgentStore({
           host,
           headers: ALICE,
-          initialSession: { sessionId: session.sessionId, streamIndex: 0 },
+          initialSession: { sessionId: session.id, streamIndex: 0 },
         });
         stores.push(reload);
         await settles("Reload resume", reload.resume());
@@ -176,11 +176,17 @@ export default defineEval({
             signal: t.signal,
           }),
         );
-        await waitForStore(reload, (snapshot) => snapshot.status === "idle", t.signal);
+        await waitForStore(
+          reload,
+          (snapshot) =>
+            snapshot.status === "idle" &&
+            snapshot.view.interactions[interactionId]?.status === "settled",
+          t.signal,
+        );
         await t.require(reload.snapshot.status, equals("idle"));
         await t.require(reload.snapshot.error, equals(undefined));
         const finished = (
-          await t.target.watchTurn(session.sessionId, { startIndex }).result()
+          await t.target.attach(session.id, { startIndex }).watch().result()
         ).expectOk();
         finished.event("interaction.settled", {
           data: {
@@ -196,10 +202,10 @@ export default defineEval({
           finished.calledTool(TOOL, { status: "completed", count: 0 });
         }
         await t.require(toolPart(reload, callId).interaction?.status, equals("settled"));
-        reload.reset();
+        reload.newSession();
       }
     } finally {
-      for (const store of stores) store.reset();
+      for (const store of stores) store.newSession();
       globalThis.fetch = originalFetch;
     }
   },

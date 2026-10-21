@@ -14,14 +14,14 @@ export default defineEval({
     held.calledTool(TOOL_NAME, { count: 1, status: "pending" });
     session.requireInteraction({ display: "confirmation", toolName: TOOL_NAME });
 
-    const cancellation = t.target.watchTurn(session.sessionId, {
-      startIndex: session.state.streamIndex,
-    });
+    const cancellation = t.target
+      .attach(session.id, { startIndex: session.state.streamIndex })
+      .watch();
     const accepted = await session.cancel();
     await t.require(
       accepted,
       satisfies(
-        (value: typeof accepted) => value.status === "accepted",
+        (value: typeof accepted) => typeof value.deliveryId === "string",
         "the approval turn cancellation is accepted",
       ),
     );

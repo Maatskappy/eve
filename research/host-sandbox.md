@@ -196,17 +196,18 @@ part of the public extension contract.
   only eve's file tools and skill loading map `$HOME/.agents/skills` to the
   session skill root.
 - Sessions that share a `root` share its files and can overwrite each other.
+- Attachments staged in a shared `root` accumulate under
+  `<root>/.eve/attachments`; eve never deletes inside a root it does not own.
 - Commands run detached in their own process group, so they outlive an eve
   process that exits without shutting down (for example after `kill -9`).
 - Process group ids are reused after every member exits. eve drops a group
   when it sees it empty and skips jobs that wrote an `exit` file, but a group
   that empties between checks, or a job killed with `SIGKILL`, can leave a
   stale id that a later stop signals.
-- The model learns the absolute workspace root at its first sandbox call, not
-  from the system prompt.
-- Fixtures that hardcode `/workspace` or need the eve base image (Python,
-  `/home/vercel-sandbox`) pin `DockerSandbox` off Vercel instead of moving to
-  the development default.
+- The system prompt does not name the absolute workspace root; file tools take
+  relative paths and report absolute ones.
+- Fixtures that need the eve base image (Python, `/home/vercel-sandbox`) pin
+  `DockerSandbox` off Vercel instead of moving to the development default.
 
 ## Breaking changes
 

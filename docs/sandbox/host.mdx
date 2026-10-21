@@ -53,7 +53,7 @@ export const environment = HostSandbox.environment({ root: "." });
 export default defineSandbox(() => environment.open());
 ```
 
-eve never copies `agent/sandbox/workspace/` files into a shared root and never deletes it, including on `sandbox.delete()` and session end. Because eve does not prepare a directory it does not own, `root` and `prepare` cannot be combined. Sessions that share a root also share its files, so concurrent sessions can see and overwrite each other's changes.
+eve never copies `agent/sandbox/workspace/` files into a shared root and never deletes it, including on `sandbox.delete()` and session end. Because eve does not prepare a directory it does not own, `root` and `prepare` cannot be combined. Sessions that share a root also share its files, so concurrent sessions can see and overwrite each other's changes. eve stages attachments and tool-result files under `.eve/attachments/` in the root and does not remove them when a session ends; delete that directory when you no longer need them.
 
 ## Paths
 

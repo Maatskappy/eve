@@ -1,7 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 
 import { buildSandboxSession, SANDBOX_AGENT_ENV } from "#execution/sandbox/session.js";
@@ -15,13 +16,23 @@ import type {
   SandboxSpawnOptions,
 } from "#shared/sandbox-session.js";
 
-/** Live process groups by session directory, so session-end cleanup reaches every handle's. */
-const liveProcessesBySession = new Map<string, Set<ChildProcess>>();
+/** Where the `bash` tool keeps a session's background jobs; see `execution/sandbox/bash.ts`. */
+const JOBS_DIRECTORY_NAME = "jobs";
+
+/**
+ * Process groups each session's commands started. A group stays here after its
+ * `bash` leader exits while any member still runs, such as `server > log &`, so
+ * stop and delete can still reach it; groups with no members left are dropped.
+ */
+const groupsBySession = new Map<string, Set<number>>();
+
+/** Kills only what one handle started, for releasing a keyed tool-session call. */
+const handleReleases = new WeakMap<SandboxProviderHandle, () => void>();
 
 /**
  * Opens a host session: real `bash` and filesystem, rooted at `workspaceRoot`.
- * Every command runs in its own process group so abort and stop can kill
- * whatever it started.
+ * Every command runs in its own process group so abort, stop, and delete can
+ * kill whatever it started.
  */
 export async function openHostSandboxHandle(input: {
   readonly appRoot: string;
@@ -31,7 +42,9 @@ export async function openHostSandboxHandle(input: {
   readonly workspaceRoot: string;
 }): Promise<SandboxProviderHandle<SandboxSession>> {
   const environmentRoot = (await findEveProjectRoot(input.appRoot)) ?? input.appRoot;
-  const processes = new Set<ChildProcess>();
+  const jobRoot = join(input.sessionDirectory, JOBS_DIRECTORY_NAME);
+  const sessionGroups = sessionGroupSet(input.sessionDirectory);
+  const handleGroups = new Set<number>();
   const resolvePath = (path: string) =>
     isAbsolute(path) ? path : resolve(input.workspaceRoot, path);
 
@@ -40,13 +53,31 @@ export async function openHostSandboxHandle(input: {
     skillRoot: input.skillRoot,
     async spawn(options) {
       options.abortSignal?.throwIfAborted();
+      const cwd = resolvePath(options.workingDirectory ?? ".");
+      if ((await stat(cwd).catch(() => undefined))?.isDirectory() !== true) {
+        throw new Error(`HostSandbox working directory "${cwd}" does not exist.`);
+      }
       const child = spawn("bash", ["-c", options.command], {
-        cwd: resolvePath(options.workingDirectory ?? "."),
+        cwd,
         detached: true,
-        env: { ...hostEnvironment(environmentRoot), ...SANDBOX_AGENT_ENV, ...options.env },
+        env: {
+          ...hostEnvironment(environmentRoot),
+          ...SANDBOX_AGENT_ENV,
+          ...options.env,
+          EVE_SANDBOX_JOB_ROOT: jobRoot,
+        },
         stdio: ["ignore", "pipe", "pipe"],
       });
-      return trackProcess(child, options, [processes, sessionProcesses(input.sessionDirectory)]);
+      const group = child.pid;
+      if (group !== undefined) {
+        sessionGroups.add(group);
+        handleGroups.add(group);
+      }
+      return adaptProcess(child, options, () => {
+        if (group === undefined || isGroupAlive(group)) return;
+        sessionGroups.delete(group);
+        handleGroups.delete(group);
+      });
     },
     async readFile({ path, abortSignal }) {
       try {
@@ -66,24 +97,47 @@ export async function openHostSandboxHandle(input: {
     },
   });
 
-  return {
+  const handle: SandboxProviderHandle<SandboxSession> = {
     sandbox,
     async onRuntimeShutdown() {
-      killProcesses(processes);
+      stopHostSessionCommands(input.sessionDirectory);
     },
     async onSandboxDelete() {
       await removeHostSessionDirectory(input.sessionDirectory);
     },
     async onSandboxStop() {
-      killProcesses(processes);
+      stopHostSessionCommands(input.sessionDirectory);
     },
   };
+  handleReleases.set(handle, () => {
+    killJobGroups(jobRoot, handleGroups);
+    for (const group of handleGroups) {
+      killGroup(group);
+      sessionGroups.delete(group);
+    }
+    handleGroups.clear();
+  });
+  return handle;
 }
 
-/** Kills every live command of the session, then removes its eve-owned directory. */
+/**
+ * Stops what one handle started, including `bash` tool jobs it launched,
+ * without touching overlapping calls that share the session directory.
+ */
+export function releaseHostSandboxHandle(handle: SandboxProviderHandle): void {
+  handleReleases.get(handle)?.();
+}
+
+/** Kills every command and `bash` tool job the session still has running. */
+export function stopHostSessionCommands(sessionDirectory: string): void {
+  killJobGroups(join(sessionDirectory, JOBS_DIRECTORY_NAME));
+  for (const group of groupsBySession.get(sessionDirectory) ?? []) killGroup(group);
+  groupsBySession.delete(sessionDirectory);
+}
+
+/** Kills every command of the session, then removes its eve-owned directory. */
 export async function removeHostSessionDirectory(sessionDirectory: string): Promise<void> {
-  killProcesses(sessionProcesses(sessionDirectory));
-  liveProcessesBySession.delete(sessionDirectory);
+  stopHostSessionCommands(sessionDirectory);
   await rm(sessionDirectory, { force: true, recursive: true });
 }
 
@@ -101,16 +155,15 @@ function hostEnvironment(environmentRoot: string): NodeJS.ProcessEnv {
   return environment;
 }
 
-function trackProcess(
+function adaptProcess(
   child: ChildProcess,
   options: SandboxSpawnOptions,
-  registries: readonly Set<ChildProcess>[],
+  onClose: () => void,
 ): SandboxProcess {
-  for (const registry of registries) registry.add(child);
   let closed = false;
-  // Once the pipes close the group is gone, and its id may belong to another group.
+  // Once the pipes close this command is done; its group may live on in the session registry.
   const kill = () => {
-    if (!closed) killProcessGroup(child);
+    if (!closed && child.pid !== undefined) killGroup(child.pid);
   };
   options.abortSignal?.addEventListener("abort", kill, { once: true });
 
@@ -123,7 +176,7 @@ function trackProcess(
     });
   }).finally(() => {
     options.abortSignal?.removeEventListener("abort", kill);
-    for (const registry of registries) registry.delete(child);
+    onClose();
   });
   // Surface spawn and abort failures through `wait()`, not as unhandled rejections.
   exit.catch(() => {});
@@ -142,27 +195,63 @@ function trackProcess(
   };
 }
 
-function sessionProcesses(sessionDirectory: string): Set<ChildProcess> {
-  let processes = liveProcessesBySession.get(sessionDirectory);
-  if (processes === undefined) {
-    processes = new Set();
-    liveProcessesBySession.set(sessionDirectory, processes);
-  }
-  return processes;
-}
-
-function killProcesses(processes: ReadonlySet<ChildProcess>): void {
-  for (const child of processes) killProcessGroup(child);
-}
-
-function killProcessGroup(child: ChildProcess): void {
-  if (child.pid === undefined) return;
+/**
+ * Kills the process group of every `bash` tool job under `jobRoot` that has
+ * not written its exit code, optionally only jobs launched by `launchers`. The
+ * launcher records its own pid, which is the pid of the command that ran it.
+ */
+function killJobGroups(jobRoot: string, launchers?: ReadonlySet<number>): void {
+  let jobs: string[];
   try {
-    // The negative pid targets the detached command's whole process group,
-    // which can outlive `bash` itself until its last member closes the pipes.
-    process.kill(-child.pid, "SIGKILL");
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+    jobs = readdirSync(jobRoot);
+  } catch {
+    return;
+  }
+  for (const job of jobs) {
+    const directory = join(jobRoot, job);
+    if (existsSync(join(directory, "exit"))) continue;
+    const group = readPid(join(directory, "pid"));
+    if (group === undefined) continue;
+    if (launchers !== undefined && !launchers.has(readPid(join(directory, "launcher")) ?? -1)) {
+      continue;
+    }
+    killGroup(group);
+  }
+}
+
+function readPid(path: string): number | undefined {
+  try {
+    const pid = Number(readFileSync(path, "utf8").trim());
+    return Number.isInteger(pid) && pid > 1 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionGroupSet(sessionDirectory: string): Set<number> {
+  let groups = groupsBySession.get(sessionDirectory);
+  if (groups === undefined) {
+    groups = new Set();
+    groupsBySession.set(sessionDirectory, groups);
+  }
+  return groups;
+}
+
+// Signals target the negative pid: the command's whole process group.
+function killGroup(group: number): void {
+  try {
+    process.kill(-group, "SIGKILL");
+  } catch {
+    // ESRCH: the group is gone. EPERM: the id now belongs to another user.
+  }
+}
+
+function isGroupAlive(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 

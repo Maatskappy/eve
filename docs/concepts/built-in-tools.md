@@ -41,7 +41,7 @@ export { default } from "eve/tools/bash";
 `bash` waits up to 30 seconds for a command. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
 
 - `pid`: the process group id
-- `outputDirectory`: a directory under `/tmp/.eve/jobs/`
+- `outputDirectory`: a directory under `/tmp/.eve/jobs/`, or under the session directory with the [host sandbox](/docs/sandbox/host)
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import {
   openHostSandboxHandle,
+  releaseHostSandboxHandle,
   removeHostSessionDirectory,
 } from "#execution/sandbox/bindings/host-session.js";
 import {
@@ -46,11 +47,12 @@ type HostPreparedArtifact = { readonly templateKey: string };
 type HostSessionState = { readonly root: string; readonly version: 1 };
 
 /**
- * Creates the host provider. A template directory holds the skills, and in
- * per-session mode the seeded workspace; each session copies it once into a
- * directory derived from its session id, so keyed tool sessions and resume
- * find the same one. A shared `root` is used in place and never seeded or
- * deleted.
+ * Creates the host provider. A template directory holds the skills and, in
+ * per-session mode, the seeded workspace. Each session owns a directory derived
+ * from its session id, so keyed tool sessions and resume find it again: the
+ * workspace is copied in once, and each template generation gets its own copy
+ * of the skills, so a rebuild's skills reach existing sessions too. A shared
+ * `root` is used in place and never seeded or deleted.
  */
 export function createHostSandboxProvider(
   options: HostSandboxEnvironmentOptions = {},
@@ -114,58 +116,56 @@ export function createHostSandboxProvider(
     },
     async start(context, _openOptions, artifactValue) {
       const artifact = requireHostArtifact(artifactValue);
-      const sessionDirectory = resolveSessionDirectory(context);
-      if (!(await pathExists(sessionDirectory))) {
-        const templatePath = resolveTemplatePath(context.storagePath, artifact.templateKey);
-        if (!(await pathExists(templatePath))) {
-          throw new SandboxTemplateNotProvisionedError({
-            providerName: HOST_PROVIDER_NAME,
-            templateKey: templatePath,
-          });
-        }
-        await copyDirectoryAtomically(templatePath, sessionDirectory);
+      const templatePath = await requireTemplate(context, artifact);
+      const root = resolveWorkspaceRoot(context);
+      if (sharedRoot === undefined && !(await pathExists(root))) {
+        await copyDirectoryAtomically(join(templatePath, WORKSPACE_DIRECTORY_NAME), root);
       }
-      const root = resolveWorkspaceRoot(context, sessionDirectory);
       await requireDirectory(root);
-      return { handle: await openHandle(context, root), state: { root, version: 1 } };
+      return { handle: await openHandle(context, artifact, root), state: { root, version: 1 } };
     },
-    async resume(context, _artifact, stateValue) {
+    async resume(context, artifactValue, stateValue) {
+      const artifact = requireHostArtifact(artifactValue);
       const state = requireHostState(stateValue);
-      const sessionDirectory = resolveSessionDirectory(context);
-      if (state.root !== resolveWorkspaceRoot(context, sessionDirectory)) {
+      if (state.root !== resolveWorkspaceRoot(context)) {
         throw new Error("HostSandbox session state is incompatible with this environment.");
       }
-      await requireDirectory(sessionDirectory);
       await requireDirectory(state.root);
-      return await openHandle(context, state.root);
+      return await openHandle(context, artifact, state.root);
     },
     async onSessionEnd(context) {
       await removeHostSessionDirectory(resolveSessionDirectory(context));
     },
   };
 
-  function resolveWorkspaceRoot(
-    context: SandboxProviderSessionContext,
-    sessionDirectory: string,
-  ): string {
+  function resolveWorkspaceRoot(context: SandboxProviderSessionContext): string {
     return sharedRoot === undefined
-      ? join(sessionDirectory, WORKSPACE_DIRECTORY_NAME)
+      ? join(resolveSessionDirectory(context), WORKSPACE_DIRECTORY_NAME)
       : context.host.resolveProjectPath(sharedRoot);
   }
 
-  async function openHandle(context: SandboxProviderSessionContext, root: string) {
+  async function openHandle(
+    context: SandboxProviderSessionContext,
+    artifact: HostPreparedArtifact,
+    root: string,
+  ) {
     const sessionDirectory = resolveSessionDirectory(context);
+    const skillRoot = join(sessionDirectory, SKILLS_DIRECTORY_NAME, artifact.templateKey);
+    if (!(await pathExists(skillRoot))) {
+      const templatePath = await requireTemplate(context, artifact);
+      await copyDirectoryAtomically(join(templatePath, SKILLS_DIRECTORY_NAME), skillRoot);
+    }
     return await openHostSandboxHandle({
       appRoot: context.host.resolveProjectPath("."),
       sessionDirectory,
-      skillRoot: join(sessionDirectory, SKILLS_DIRECTORY_NAME),
+      skillRoot,
       workspaceRoot: root,
     });
   }
 
-  // Releasing a keyed call's handle stops its commands; the session directory stays.
+  // Releasing a keyed call's handle stops what it started; the session directory stays.
   return withToolSessionSandboxes(implementation, {
-    releaseHandle: (handle) => handle.onSandboxStop(),
+    releaseHandle: async (handle) => releaseHostSandboxHandle(handle),
   });
 }
 
@@ -225,6 +225,20 @@ async function writeResourceTree(
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, file.content);
   }
+}
+
+async function requireTemplate(
+  context: SandboxProviderSessionContext,
+  artifact: HostPreparedArtifact,
+): Promise<string> {
+  const templatePath = resolveTemplatePath(context.storagePath, artifact.templateKey);
+  if (!(await pathExists(templatePath))) {
+    throw new SandboxTemplateNotProvisionedError({
+      providerName: HOST_PROVIDER_NAME,
+      templateKey: templatePath,
+    });
+  }
+  return templatePath;
 }
 
 async function requireDirectory(path: string): Promise<void> {

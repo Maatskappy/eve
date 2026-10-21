@@ -109,8 +109,15 @@ itself.
 
 - `bash -c <command>` with `cwd` at the workspace root (or the resolved
   `workingDirectory`), in its own process group. Abort kills the group.
-  `stop()`, runtime shutdown, `delete()`, and releasing a keyed tool-session
-  handle kill the handle's live process groups.
+- eve tracks each session's process groups until no member is left, so a
+  redirected background job (`server > log &`) is still reachable after its
+  `bash` leader exits. The `bash` tool's launcher moves long-running commands
+  into their own groups with `set -m`; host commands set
+  `EVE_SANDBOX_JOB_ROOT=<session dir>/jobs`, and the tool keeps its job files
+  there instead of `/tmp/.eve/jobs`. `stop()`, runtime shutdown, `delete()`,
+  and session end kill the session's groups plus every job group without an
+  `exit` file. Releasing a keyed tool-session handle kills only the groups and
+  jobs that handle started.
 - Absolute paths pass through; relative paths resolve from the workspace root.
 - Commands inherit the eve process environment minus variables that eve loaded
   from `.env*` files, then `AI_AGENT=eve`, then per-call `env`. eve re-reads the
@@ -177,6 +184,10 @@ part of the public extension contract.
 - Sessions that share a `root` share its files and can overwrite each other.
 - Commands run detached in their own process group, so they outlive an eve
   process that exits without shutting down (for example after `kill -9`).
+- Process group ids are reused after every member exits. eve drops a group
+  when it sees it empty and skips jobs that wrote an `exit` file, but a group
+  that empties between checks, or a job killed with `SIGKILL`, can leave a
+  stale id that a later stop signals.
 - The model learns the absolute workspace root at its first sandbox call, not
   from the system prompt.
 - Fixtures that hardcode `/workspace` or need the eve base image (Python,

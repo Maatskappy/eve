@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { access, cp, mkdir, rename, rm, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -36,7 +37,11 @@ export async function copyDirectoryAtomically(
   await rm(temporaryTargetPath, { force: true, recursive: true });
   await mkdir(dirname(targetPath), { recursive: true });
   try {
-    await cp(sourcePath, temporaryTargetPath, { recursive: true });
+    // Clones copy-on-write where the filesystem supports it, and copies otherwise.
+    await cp(sourcePath, temporaryTargetPath, {
+      mode: constants.COPYFILE_FICLONE,
+      recursive: true,
+    });
     await rename(temporaryTargetPath, targetPath);
   } catch (error) {
     await rm(temporaryTargetPath, { force: true, recursive: true }).catch(() => {});

@@ -61,7 +61,7 @@ Skill files are copied into a directory eve owns under `.eve/sandbox-cache/host/
 
 ## Commands and environment variables
 
-eve runs each command with `bash -c` in its own process group. Aborting a command kills the process group, and `sandbox.stop()` and server shutdown kill every command that the session still has running. If the eve process exits without shutting down, for example after `kill -9`, commands it started keep running.
+eve runs each command with `bash -c` in its own process group. Aborting a command kills the process group. `sandbox.stop()`, `sandbox.delete()`, and server shutdown kill every process group the session started that still has a running process, including background jobs such as `server > log &`. The `bash` tool keeps its long-running commands in a `jobs` directory inside the session directory, and these kill those commands too. If the eve process exits without shutting down, for example after `kill -9`, commands it started keep running.
 
 Commands inherit the environment variables of the process that started eve, except values eve loaded from your `.env` files. eve also sets `AI_AGENT=eve`, and the `env` you pass to `run()` or `spawn()` overrides both. If your shell exports a variable that an `.env` file also defines with a different value, the command keeps your shell's value.
 

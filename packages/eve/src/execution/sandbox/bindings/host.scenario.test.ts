@@ -3,7 +3,9 @@ import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "#execution/sandbox/bash.js";
 
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
@@ -146,10 +148,49 @@ describe("HostSandbox", () => {
 
     await sandbox.spawn({ command: "sleep 30 & echo $! > stopped.pid; wait" });
     const stoppedChild = Number(await waitForFile(sandbox.resolvePath("stopped.pid")));
+    // The command returns at once, but its redirected background job keeps its group alive.
+    const orphan = Number(
+      (await sandbox.run({ command: "sleep 30 > /dev/null 2>&1 & echo $!" })).stdout,
+    );
+    expect(isProcessAlive(orphan)).toBe(true);
     await onSandboxStop();
 
     await expect.poll(() => isProcessAlive(abortedChild)).toBe(false);
     await expect.poll(() => isProcessAlive(stoppedChild)).toBe(false);
+    await expect.poll(() => isProcessAlive(orphan)).toBe(false);
+  });
+
+  it("stops bash tool jobs that keep running after the call returns", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const appRoot = await createScratchDirectory("eve-host-jobs-");
+      const provider = createHostProvider();
+      const { sandbox, onSandboxStop } = await provider.openSession({
+        appRoot,
+        sandboxName: "session-jobs",
+      });
+      const call = executeBashOnSandbox(sandbox, {
+        command: "sleep 60 & echo $! > job.pid; wait",
+      });
+      let job = 0;
+      await vi.waitFor(async () => {
+        job = Number((await readFile(sandbox.resolvePath("job.pid"), "utf8")).trim());
+        expect(job).toBeGreaterThan(0);
+      });
+      await vi.advanceTimersByTimeAsync(BASH_YIELD_SECONDS * 1000);
+      const result = await call;
+
+      if (result.status !== "running")
+        throw new Error(`expected running: ${JSON.stringify(result)}`);
+      expect(result.outputDirectory.startsWith(join(appRoot, "host", "sessions"))).toBe(true);
+      expect(isProcessAlive(job)).toBe(true);
+
+      await onSandboxStop();
+
+      await vi.waitFor(() => expect(isProcessAlive(job)).toBe(false), { timeout: 10_000 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses a shared root in place and never seeds or deletes it", async () => {

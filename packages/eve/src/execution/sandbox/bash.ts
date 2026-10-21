@@ -9,8 +9,12 @@ import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 /** How long a `bash` call waits before it leaves the command running in the background. */
 export const BASH_YIELD_SECONDS = 30;
 
-/** Where each command's output files live inside the sandbox. */
-const JOB_ROOT = "/tmp/.eve/jobs";
+/**
+ * Where each command's output files live inside the sandbox. A provider that
+ * keeps per-session state on a shared machine, such as the host sandbox, sets
+ * `EVE_SANDBOX_JOB_ROOT` on its commands so it can find and stop every job.
+ */
+const DEFAULT_JOB_ROOT = "/tmp/.eve/jobs";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
 
@@ -138,7 +142,7 @@ async function runCommand(
 ): Promise<BashResult> {
   signal?.throwIfAborted();
   const jobId = randomUUID().slice(0, 8);
-  const directory = `${JOB_ROOT}/${jobId}`;
+  const directory = jobDirectoryWord(jobId);
   // The call's signal also aborts after the call returns, so it is linked
   // only while the call runs; a returned `running` command must survive it.
   const controller = new AbortController();
@@ -147,7 +151,7 @@ async function runCommand(
     // Providers may stop only the launcher, and the command runs in its own process group.
     void Promise.resolve(
       sandbox.run({
-        command: `kill -TERM -- -"$(cat ${shellQuote(directory)}/pid 2>/dev/null)" 2>/dev/null; rm -rf ${shellQuote(directory)}`,
+        command: `d=${directory}; kill -TERM -- -"$(cat "$d/pid" 2>/dev/null)" 2>/dev/null; rm -rf "$d"`,
       }),
     ).catch(() => {});
   };
@@ -178,6 +182,11 @@ async function runCommand(
   }
 }
 
+/** A shell word for one job's directory, expanded inside the sandbox. */
+function jobDirectoryWord(jobId: string): string {
+  return `"\${EVE_SANDBOX_JOB_ROOT:-${DEFAULT_JOB_ROOT}}/${jobId}"`;
+}
+
 /**
  * Only a real `bash` evaluates the launcher, so interpreters without
  * background processes run the command directly.
@@ -185,7 +194,7 @@ async function runCommand(
 function launchCommand(command: string, directory: string): string {
   return [
     `if command -v bash >/dev/null 2>&1 && kill -0 "$$" 2>/dev/null; then`,
-    `  set -- ${shellQuote(directory)} ${shellQuote(command)}`,
+    `  set -- ${directory} ${shellQuote(command)}`,
     `  eval ${shellQuote(LAUNCHER)}`,
     `fi`,
     `eval ${shellQuote(command)}`,
@@ -201,17 +210,19 @@ async function claimRunningJob(
   const marker = `eve-bash:${jobId}`;
   const raw = await sandbox.run({
     command: [
-      `cd ${shellQuote(directory)} 2>/dev/null && mkdir claimed 2>/dev/null || exit 0`,
+      `d=${directory}`,
+      `cd "$d" 2>/dev/null && mkdir claimed 2>/dev/null || exit 0`,
       `kill -USR1 "$(cat launcher)" 2>/dev/null`,
-      `printf '%s %s %s %s\\n' ${marker} "$(cat pid)" "$(($(wc -c < stdout)))" "$(($(wc -c < stderr)))"`,
+      `printf '%s %s %s %s %s\\n' ${marker} "$(cat pid)" "$(($(wc -c < stdout)))" "$(($(wc -c < stderr)))" "$d"`,
       `tail -c ${MAX_OUTPUT_BYTES} stdout`,
       `tail -c ${MAX_OUTPUT_BYTES} stderr >&2`,
     ].join("\n"),
   });
   // Output a login profile prints comes before the marker.
-  const match = new RegExp(`(?:^|\\n)${marker} (\\d+) (\\d+) (\\d+)\\n`).exec(raw.stdout);
+  const match = new RegExp(`(?:^|\\n)${marker} (\\d+) (\\d+) (\\d+) ([^\\n]+)\\n`).exec(raw.stdout);
   if (match === null) return undefined;
   const pid = Number(match[1]);
+  const outputDirectory = match[4]!;
   const stdout = raw.stdout.slice(match.index + match[0].length);
   const omitted = {
     stderr: Math.max(0, Number(match[3]) - Buffer.byteLength(raw.stderr)),
@@ -221,9 +232,9 @@ async function claimRunningJob(
     ...formatStreams({ stderr: raw.stderr, stdout }, omitted),
     message:
       `The command is still running after ${BASH_YIELD_SECONDS} seconds as process group ${pid}; stdout and stderr show its output so far. ` +
-      `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
-      `Check on it with later commands such as \`tail ${directory}/stdout\` or \`cat ${directory}/exit\`, and stop it with \`kill -- -${pid}\`.`,
-    outputDirectory: directory,
+      `It keeps writing to ${outputDirectory}/stdout and ${outputDirectory}/stderr, and writes its exit code to ${outputDirectory}/exit when it finishes. ` +
+      `Check on it with later commands such as \`tail ${outputDirectory}/stdout\` or \`cat ${outputDirectory}/exit\`, and stop it with \`kill -- -${pid}\`.`,
+    outputDirectory,
     pid,
     status: "running",
   };

@@ -54,9 +54,12 @@ OIDC issuer configuration and trusts only its team, project, audience, and
 No OAuth client secret is created. The server obtains its current workload
 OIDC token for each code exchange; the user still signs in with Vercel.
 
-The generated auth configuration uses a small Better Auth plugin with its public
-OAuth exchange helper until built-in Vercel assertion support is released.
-The callback, PKCE, profile loading, and sessions remain handled by Better Auth.
+The generated auth configuration uses the built-in Vercel provider's
+`tokenEndpointAuth` option. The callback, PKCE, profile loading, and sessions
+remain handled by Better Auth. This draft pins the preview package from
+[better-auth/better-auth#11948](https://github.com/better-auth/better-auth/pull/11948)
+at commit `4da5f5f` for sign-in testing; replace it with a released version before
+merging.
 
 Retries preserve existing session secrets and complete only missing environment
 settings. Existing client-secret setups retain `client_secret_post` and their

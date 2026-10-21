@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { vercelOidcClientAuthentication } from "./vercel-oidc";
+import { getVercelOidcToken } from "@vercel/oidc";
 
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 const DEVELOPMENT_ALLOWED_HOSTS = ["localhost:*", "127.0.0.1:*"];
@@ -33,7 +33,6 @@ if (authMethod !== "oidc_token" && authMethod !== "client_secret_post") {
 }
 
 export const auth = betterAuth({
-  plugins: authMethod === "oidc_token" ? [vercelOidcClientAuthentication(clientId)] : [],
   baseURL: {
     allowedHosts: getAllowedHosts(),
     protocol: process.env.NODE_ENV === "development" ? "auto" : "https",
@@ -54,7 +53,21 @@ export const auth = betterAuth({
       clientId,
       ...(authMethod === "client_secret_post"
         ? { clientSecret: requireEnvironmentVariable("VERCEL_APP_CLIENT_SECRET") }
-        : {}),
+        : {
+            tokenEndpointAuth: {
+              method: "custom",
+              async customizeRequest({ body }) {
+                const assertion = await getVercelOidcToken();
+                if (!assertion) throw new Error("Vercel workload OIDC token is unavailable");
+                body.set("client_id", clientId);
+                body.set("client_assertion", assertion);
+                body.set(
+                  "client_assertion_type",
+                  "urn:vercel:params:oauth:client-assertion-type:oidc-bearer",
+                );
+              },
+            },
+          }),
       scope: ["openid", "email", "profile"],
     },
   },

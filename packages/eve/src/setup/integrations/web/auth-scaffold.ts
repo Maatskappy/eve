@@ -14,6 +14,8 @@ import { resolveWebPackageVersions } from "#setup/scaffold/update/web-options.js
 
 // Recognize only exact previously generated auth files; authored edits still require --overwrite.
 const LEGACY_AUTH_HASHES = [
+  // 35eb6705e: temporary OIDC bridge used by this preview PR.
+  "6ea9dc7425e713c56611dbe1e97eb6cf5520c72f57eb7213d69bfcc76b22fcbc",
   // ed98150ed: generated auth template.
   "ea76e368aded3bec47896e763182a91e02e991b5cdb1b2e96e4da6dbd4375aeb",
   // b1ce58019: generated auth template.
@@ -96,12 +98,11 @@ export async function prepareWebAuthScaffold(input: {
           "vercelOidcPackageVersion",
           resolveWebPackageVersions(undefined, "sign-in-with-vercel").vercelOidcPackageVersion,
         ),
-      "better-auth":
-        document.dependencies?.["better-auth"] ??
-        resolveVersionToken(
-          "betterAuthPackageVersion",
-          resolveWebPackageVersions(undefined, "sign-in-with-vercel").betterAuthPackageVersion,
-        ),
+      // The generated provider configuration requires this build's authentication API.
+      "better-auth": resolveVersionToken(
+        "betterAuthPackageVersion",
+        resolveWebPackageVersions(undefined, "sign-in-with-vercel").betterAuthPackageVersion,
+      ),
     };
     for (const file of writes) await writeTextFile(file.path, file.source, { force: true });
     await writeTextFile(packagePath, `${JSON.stringify(document, null, 2)}\n`, { force: true });

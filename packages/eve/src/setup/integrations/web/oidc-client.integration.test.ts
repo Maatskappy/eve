@@ -1,25 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { betterAuth, type BetterAuthPlugin } from "better-auth";
+import type { betterAuth } from "better-auth";
 import { getVercelOidcToken } from "@vercel/oidc";
 
 vi.mock("@vercel/oidc", () => ({ getVercelOidcToken: vi.fn() }));
 const moduleUrl = new URL(
-  "../../../../../../apps/docs/registry/channel/web-sign-in-with-vercel/lib/vercel-oidc.ts",
+  "../../../../../../apps/docs/registry/channel/web-sign-in-with-vercel/lib/auth.ts",
   import.meta.url,
 ).href;
-const { vercelOidcClientAuthentication } = (await import(/* @vite-ignore */ moduleUrl)) as {
-  vercelOidcClientAuthentication: (clientId: string) => BetterAuthPlugin;
-};
 const requests: URLSearchParams[] = [];
-function createAuth() {
-  return betterAuth({
-    baseURL: "http://localhost:3000",
-    secret: "test-session-secret-with-at-least-thirty-two-characters",
-    socialProviders: { vercel: { clientId: "cl_test" } },
-    plugins: [vercelOidcClientAuthentication("cl_test")],
-  });
+async function createAuth() {
+  const { auth } = (await import(/* @vite-ignore */ moduleUrl)) as {
+    auth: ReturnType<typeof betterAuth>;
+  };
+  return auth;
 }
 beforeEach(() => {
+  vi.resetModules();
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("VERCEL_APP_CLIENT_ID", "cl_test");
+  vi.stubEnv("VERCEL_APP_AUTH_METHOD", "oidc_token");
+  vi.stubEnv("BETTER_AUTH_SECRET", "test-session-secret-with-at-least-thirty-two-characters");
   requests.length = 0;
   vi.mocked(getVercelOidcToken).mockReset().mockResolvedValue("current-workload-token");
   vi.stubGlobal(
@@ -30,11 +30,14 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("generated Vercel OIDC client authentication", () => {
   it("keeps the built-in callback and PKCE, and reads a current token for every exchange", async () => {
-    const auth = createAuth();
+    const auth = await createAuth();
     const context = await auth.$context;
     const provider = context.socialProviders.find((provider) => provider.id === "vercel")!;
     const data = {
@@ -68,7 +71,7 @@ describe("generated Vercel OIDC client authentication", () => {
     }
   });
   it("stops the exchange when workload token retrieval fails", async () => {
-    const context = await createAuth().$context;
+    const context = await (await createAuth()).$context;
     vi.mocked(getVercelOidcToken).mockRejectedValue(new Error("OIDC unavailable"));
     await expect(
       context.socialProviders[0]!.validateAuthorizationCode({
@@ -97,9 +100,10 @@ it("creates a user session through the existing Vercel callback", async () => {
       return Response.json({ access_token: "user-token", token_type: "Bearer", expires_in: 3600 });
     }),
   );
-  const auth = createAuth();
+  const auth = await createAuth();
   const start = await auth.api.signInSocial({
     body: { provider: "vercel", callbackURL: "/chat" },
+    headers: new Headers({ host: "localhost:3000" }),
     asResponse: true,
   });
   expect(start.status).toBe(200);
@@ -119,9 +123,25 @@ it("creates a user session through the existing Vercel callback", async () => {
   );
   expect(response.status).toBe(302);
   expect(response.headers.get("location")).toBe("/chat");
-  const session = await auth.api.getSession({ headers: new Headers({ cookie: cookie(response) }) });
+  const session = await auth.api.getSession({
+    headers: new Headers({ host: "localhost:3000", cookie: cookie(response) }),
+  });
   expect(session?.user.email).toBe("person@example.com");
   expect(session?.user.emailVerified).toBe(true);
   expect(requests).toHaveLength(1);
   expect(requests[0]?.get("client_assertion")).toBe("current-workload-token");
+});
+
+it("retains client-secret authentication when no auth method is recorded", async () => {
+  vi.stubEnv("VERCEL_APP_AUTH_METHOD", undefined);
+  vi.stubEnv("VERCEL_APP_CLIENT_SECRET", "existing-client-secret");
+  const context = await (await createAuth()).$context;
+  await context.socialProviders[0]!.validateAuthorizationCode({
+    code: "code",
+    redirectURI: "http://localhost:3000/api/auth/callback/vercel",
+  });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.get("client_secret")).toBe("existing-client-secret");
+  expect(requests[0]?.has("client_assertion")).toBe(false);
+  expect(getVercelOidcToken).not.toHaveBeenCalled();
 });

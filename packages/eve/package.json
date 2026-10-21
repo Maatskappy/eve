@@ -587,7 +587,6 @@
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
-    "@ai-sdk/code-mode": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
@@ -652,7 +651,7 @@
     "playwright-core": "1.63.0",
     "react": "catalog:",
     "react-test-renderer": "19.2.6",
-    "run": "2.1.2",
+    "run": "2.1.8",
     "semver": "7.8.4",
     "svelte": "^5.0.0",
     "turndown": "7.2.4",

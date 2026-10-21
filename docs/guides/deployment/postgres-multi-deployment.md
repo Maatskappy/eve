@@ -5,7 +5,7 @@ description: "Release a new build of a self-hosted eve agent on the Postgres Wor
 
 Deployment routing lets several builds of one agent share a single `@workflow/world-postgres` database. Each run executes only on the build that started it, so an in-flight turn finishes on its original code while new sessions start on the new release. Idle sessions move to the new release on their next message.
 
-Deployment routing is experimental. It requires a `@workflow/world-postgres` release that supports `WORKFLOW_POSTGRES_DEPLOYMENT_ROUTING`. You must keep each deployment's processes running until its work ends: the Postgres world does not detect a deployment with no running processes.
+Deployment routing is experimental. It requires a `@workflow/world-postgres` release that supports `WORKFLOW_POSTGRES_DEPLOYMENT_ROUTING`, and `WORKFLOW_POSTGRES_INVOKE` must be unset on every process. You must keep each deployment's processes running until its work ends: the Postgres world does not detect a deployment with no running processes.
 
 Without routing, every process serves one shared deployment, and an upgrade replaces the code that executes existing runs. See [Stranded sessions](../../concepts/execution-model-and-durability#stranded-sessions) for that behavior.
 
@@ -19,6 +19,8 @@ Routing is configured per process, not per database:
 | -------------------------------------------- | ------------------------------------- | -------------------------------- | ------------------------- |
 | `WORKFLOW_POSTGRES_DEPLOYMENT_ROUTING` unset | `postgres`                            | `workflow_flows`                 | Runs recorded `postgres`  |
 | `WORKFLOW_POSTGRES_DEPLOYMENT_ROUTING=1`     | The value of `WORKFLOW_DEPLOYMENT_ID` | `workflow_flows@<deployment ID>` | Runs recorded with its ID |
+
+The job names assume the default prefix. If you set `WORKFLOW_POSTGRES_JOB_PREFIX`, it replaces `workflow_` in each name.
 
 A process with routing off is the legacy `postgres` deployment. Runs created before you enabled routing are recorded as `postgres`, so they keep executing on processes with routing off. Processes in either mode can send work to the other: a process with routing on can wake a `postgres` run, and a `postgres` process can wake a run on a routed deployment.
 
@@ -114,6 +116,7 @@ If you stop a deployment that still has active runs, nothing reports the failure
 
 ## Limitations
 
+- **No invocation delivery.** With `WORKFLOW_POSTGRES_INVOKE=1`, a process sends hook inputs only to its own deployment's runs. A message to a session owned by another deployment fails with a `409` error, so idle sessions cannot move to the new release.
 - **No availability check.** A deployment ID without running processes accepts work indefinitely. eve does not replace sessions whose deployment is gone.
 - **No bounded drain.** A session's first run keeps its original deployment in use until the session ends; see [Retire a deployment](#retire-a-deployment).
 - **One build per ID.** The Postgres world cannot tell whether every process with an ID runs the same build. Your release process must guarantee it.
@@ -126,6 +129,7 @@ If you stop a deployment that still has active runs, nothing reports the failure
 | A session accepts messages but never replies                           | Look up the session's runs in `workflow.workflow_runs` and compare their `deployment_id` with your running deployments. | Start that deployment's build with its original environment. Its queued jobs run when it starts.      |
 | A process fails at startup with `requires WORKFLOW_DEPLOYMENT_ID`      | `WORKFLOW_POSTGRES_DEPLOYMENT_ROUTING=1` is set, but the process has no deployment ID.                                  | Start the server with `eve start` from an `eve build` output, or set `WORKFLOW_DEPLOYMENT_ID`.        |
 | A process fails at startup with `Invalid Postgres World deployment id` | The configured ID is `postgres`, `latest`, too long, or contains other characters.                                      | Choose a different ID, or unset routing to run as the legacy `postgres` deployment.                   |
+| Messages to older sessions fail with a `409` error                     | Check whether `WORKFLOW_POSTGRES_INVOKE=1` is set on any process.                                                       | Unset `WORKFLOW_POSTGRES_INVOKE` on every process and restart them.                                   |
 | Old sessions stay on the previous deployment                           | Search the previous deployment's logs for `session handoff failed`.                                                     | Keep the previous deployment running. Busy sessions move after their work settles; refused ones stay. |
 | Runs on the new deployment record `postgres`                           | Check that `WORKFLOW_POSTGRES_DEPLOYMENT_ROUTING=1` is set in the runtime environment of every new process.             | Restart those processes with routing on. Runs already recorded as `postgres` need a legacy drainer.   |
 | Sessions move back to the previous deployment                          | Check whether any public route or channel webhook still reaches the previous deployment.                                | Remove the previous deployment from every public route.                                               |

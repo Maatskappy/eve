@@ -47,7 +47,7 @@ Both kinds of handoff need a Workflow world that can move a session's addresses 
 
 A session is stranded when another eve version built the workflow run that owns it. A run can only be replayed by the eve version that started it, so the conversation is still stored, but nothing on the current deployment can process a new message. On worlds without per-deployment routing, eve checks the owner before delivering channel messages and input responses, rather than committing them to a session that cannot answer.
 
-eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session can never run again:
+Unless the world routes each run to the deployment that started it (Vercel Workflow, or Postgres with experimental deployment routing), eve treats it as running one eve version at a time, so a stranded session can never run again:
 
 | World                        | When a session is stranded                                                                                                                                                                                                                                                                                                |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

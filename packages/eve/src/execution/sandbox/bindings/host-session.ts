@@ -6,8 +6,8 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import type {
-  SandboxBackendContext,
-  SandboxBackendInstance,
+  InternalSandboxBackendContext,
+  InternalSandboxBackendInstance,
   SandboxBackendProcess,
 } from "#execution/sandbox/backend.js";
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
@@ -31,13 +31,8 @@ const groupsBySession = new Map<string, Set<number>>();
  * delete can kill whatever it started.
  */
 export async function openHostSandboxInstance(
-  context: SandboxBackendContext,
-): Promise<SandboxBackendInstance> {
-  if (process.platform === "win32") {
-    throw new Error(
-      "HostSandbox requires a POSIX shell and does not run on Windows; use WSL or DockerSandbox.",
-    );
-  }
+  context: InternalSandboxBackendContext,
+): Promise<InternalSandboxBackendInstance> {
   const appRoot = context.resolveProjectPath(".");
   const environmentRoot = (await findEveProjectRoot(appRoot)) ?? appRoot;
   const sessionDirectory = context.directory;

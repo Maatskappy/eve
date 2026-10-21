@@ -9,9 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "#execution/sandbox/bash.js";
 
 import { createHostSandboxProvider } from "#execution/sandbox/bindings/host.js";
+import { releaseToolSessionHandle } from "#execution/tool-session/sandbox.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { HostSandboxEnvironmentOptions } from "#public/sandbox/host-sandbox.js";
+import { HostSandbox } from "#sandbox/providers/host.js";
+import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { sandboxWorkspaceRoot, type SandboxSession } from "#shared/sandbox-session.js";
 import {
@@ -123,9 +127,10 @@ describe("HostSandbox", () => {
       sandboxName: "session-a",
     });
     expect(await resumed.sandbox.readTextFile({ path: "owner.txt" })).toBe("a");
+    // Another session's state names another sandbox, which this session cannot find.
     await expect(
       provider.openSession({ appRoot, existing: second.state, sandboxName: "session-a" }),
-    ).rejects.toThrow("incompatible");
+    ).rejects.toBeInstanceOf(SandboxSessionGoneError);
 
     await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
     await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
@@ -136,7 +141,7 @@ describe("HostSandbox", () => {
     expect(await fresh.sandbox.readTextFile({ path: "owner.txt" })).toBeNull();
   });
 
-  it("reports a removed session directory as gone, and start seeds a fresh one", async () => {
+  it("reports a removed workspace as gone, and start seeds a fresh one", async () => {
     const appRoot = await createScratchDirectory("eve-host-resume-");
     const provider = createHostProvider();
     await provider.prepare({
@@ -147,7 +152,8 @@ describe("HostSandbox", () => {
     const { handle, state } = await provider.start(session);
     await handle.sandbox.writeTextFile({ content: "lost", path: "notes.txt" });
     await handle.onSandboxStop();
-    await rm(join(sandboxWorkspaceRoot(handle.sandbox), ".."), { force: true, recursive: true });
+    // Only the workspace goes; the rest of the session directory stays behind.
+    await rm(sandboxWorkspaceRoot(handle.sandbox), { force: true, recursive: true });
 
     // eve clears the session's state on this error and reruns the selector, which starts again.
     await expect(provider.openSession({ ...session, existing: state })).rejects.toBeInstanceOf(
@@ -158,6 +164,23 @@ describe("HostSandbox", () => {
     expect(fresh.state).toEqual(state);
     expect(await fresh.handle.sandbox.readTextFile({ path: "seed.md" })).toBe("seeded");
     expect(await fresh.handle.sandbox.readTextFile({ path: "notes.txt" })).toBeNull();
+  });
+
+  it("prepares on Windows but fails to open with the fix", async () => {
+    const appRoot = await createScratchDirectory("eve-host-windows-");
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const provider = createHostProvider({ prepare: async () => {} });
+      await provider.prepare({ appRoot, seedFiles: [{ content: "x", path: "/workspace/a.md" }] });
+
+      await expect(
+        provider.openSession({ appRoot, sandboxName: "session-windows" }),
+      ).rejects.toThrow("use WSL or DockerSandbox");
+      expect(existsSync(join(appRoot, "host"))).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
   });
 
   it("never treats a missing shared root as gone", async () => {
@@ -349,13 +372,19 @@ describe("HostSandbox", () => {
 
     it("releasing one keyed handle stops only the jobs that handle started", async () => {
       const appRoot = await createScratchDirectory("eve-host-release-");
-      const provider = createHostProvider();
+      // Releases through the same registry lookup `invokeTool` uses after a keyed call.
+      const environment = HostSandbox.environment();
+      const registry = createStubSandboxRegistry(environment);
+      const provider = createSandboxProviderHarness(
+        getSandboxEnvironmentRuntime(environment).implementation,
+        undefined,
+      );
       const released = await provider.openSession({ appRoot, sandboxName: "session-keyed" });
       const kept = await provider.openSession({ appRoot, sandboxName: "session-keyed" });
       const releasedJob = (await startBashJob(released.sandbox, "released.pid")).job;
       const keptJob = (await startBashJob(kept.sandbox, "kept.pid")).job;
 
-      await provider.releaseToolSession(released);
+      await releaseToolSessionHandle(registry, released);
 
       await vi.waitFor(() => expect(isProcessAlive(releasedJob)).toBe(false), {
         timeout: 10_000,

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -6,7 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createSandboxBackendImplementation,
-  type SandboxBackendContext,
+  defineSandboxBackend,
+  type InternalSandboxBackendDefinition,
   type SandboxBackendDefinition,
   type SandboxBackendEnvironmentOptions,
   type SandboxBackendExecOptions,
@@ -22,29 +24,33 @@ import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 const createScratchDirectory = useTemporaryDirectories();
 
 const HOME = "/home/memory";
+const SKILLS = `${HOME}/.agents/skills`;
 const text = (bytes: Uint8Array | undefined) =>
   bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+const emptyStream = () => new ReadableStream<Uint8Array>({ start: (c) => c.close() });
 
 type Exec = (
   options: SandboxBackendExecOptions,
-) => SandboxBackendExecResult | SandboxBackendProcess | Promise<SandboxBackendProcess>;
+) => SandboxBackendExecResult | SandboxBackendProcess | Promise<SandboxBackendExecResult>;
 
-// Answers eve's `$HOME` probe; every other command succeeds silently.
-const probeOnly: Exec = (options) => ({
-  exitCode: 0,
-  stderr: "",
-  stdout: options.command.startsWith("printf") ? `${HOME}\n\n` : "",
-});
+/** Runs commands the test does not script in a real shell whose `$HOME` is the fake's. */
+const shell: Exec = (options) => {
+  const result = spawnSync("bash", ["-c", options.command], {
+    encoding: "utf8",
+    env: { ...process.env, ...options.env, HOME },
+  });
+  return { exitCode: result.status ?? 1, stderr: result.stderr, stdout: result.stdout };
+};
 
 interface MemorySandbox {
   readonly execs: SandboxBackendExecOptions[];
   readonly files: Map<string, Uint8Array>;
-  stops: number;
 }
 
 /** A backend whose sandboxes are in-memory file maps keyed by the session's sandbox key. */
-function createMemoryBackend(exec: Exec = probeOnly) {
+function createMemoryBackend(exec: Exec = shell) {
   const sandboxes = new Map<string, MemorySandbox>();
+  const events: string[] = [];
   const instance = (sandbox: MemorySandbox): SandboxBackendInstance => ({
     exec(options) {
       sandbox.execs.push(options);
@@ -60,7 +66,7 @@ function createMemoryBackend(exec: Exec = probeOnly) {
       }
     },
     stop() {
-      sandbox.stops += 1;
+      events.push("stop");
     },
   });
   const definition: SandboxBackendDefinition = {
@@ -69,7 +75,7 @@ function createMemoryBackend(exec: Exec = probeOnly) {
     async open(context) {
       const existing = sandboxes.get(context.key);
       if (existing !== undefined) return { instance: instance(existing) };
-      const sandbox: MemorySandbox = { execs: [], files: new Map(), stops: 0 };
+      const sandbox: MemorySandbox = { execs: [], files: new Map() };
       sandboxes.set(context.key, sandbox);
       return { created: true, instance: instance(sandbox) };
     },
@@ -78,14 +84,15 @@ function createMemoryBackend(exec: Exec = probeOnly) {
       return sandbox === undefined ? undefined : instance(sandbox);
     },
     async remove(context) {
+      events.push("remove");
       sandboxes.delete(context.key);
     },
   };
-  return { definition, sandboxes };
+  return { definition, events, sandboxes };
 }
 
 function harness(
-  definition: SandboxBackendDefinition,
+  definition: InternalSandboxBackendDefinition<object>,
   options: SandboxBackendEnvironmentOptions = {},
 ) {
   return createSandboxProviderHarness(
@@ -96,29 +103,31 @@ function harness(
 
 /** A directory-backed backend: sandbox paths live under `context.directory`. */
 function createDirectoryBackend(): SandboxBackendDefinition {
-  const instance = (context: SandboxBackendContext): SandboxBackendInstance => ({
-    exec: probeOnly,
-    readFile: async (path) => await readFile(join(context.directory, path)).catch(() => null),
-    async writeFile(path, content) {
-      await mkdir(dirname(join(context.directory, path)), { recursive: true });
-      await writeFile(join(context.directory, path), content);
-    },
-    async removePath({ path }) {
-      await rm(join(context.directory, path), { force: true, recursive: true });
-    },
-  });
   return {
     name: "directory",
-    directoryTemplate: true,
     workspaceRoot: "/workspace",
+    directoryTemplate: true,
     async open(context) {
-      return { instance: instance(context) };
+      const path = (sandboxPath: string) => join(context.directory, sandboxPath);
+      return {
+        instance: {
+          exec: shell,
+          readFile: async (sandboxPath) => await readFile(path(sandboxPath)).catch(() => null),
+          async writeFile(sandboxPath, content) {
+            await mkdir(dirname(path(sandboxPath)), { recursive: true });
+            await writeFile(path(sandboxPath), content);
+          },
+          async removePath({ path: sandboxPath }) {
+            await rm(path(sandboxPath), { force: true, recursive: true });
+          },
+        },
+      };
     },
   };
 }
 
 describe("defineSandboxBackend", () => {
-  it("starts as an upsert, seeding only the sandbox it creates and refreshing skills on rebuild", async () => {
+  it("seeds only the sandbox open creates, and refreshes authored skills on a rebuild", async () => {
     const appRoot = await createScratchDirectory("eve-backend-upsert-");
     const { definition, sandboxes } = createMemoryBackend();
     const prepare = vi.fn(async (sandbox: SandboxSession) => {
@@ -130,22 +139,19 @@ describe("defineSandboxBackend", () => {
       seedFiles: [
         { content: "first", path: "/workspace/notes/seed.md" },
         { content: "# Weather v1", path: "$HOME/.agents/skills/weather/SKILL.md" },
+        { content: "# Retired", path: "$HOME/.agents/skills/retired/SKILL.md" },
       ],
       sourceRevision: "first",
     });
-
-    const [a, b] = await Promise.all([
-      provider.start({ appRoot, sandboxName: "session-a" }),
-      provider.start({ appRoot, sandboxName: "session-a" }),
-    ]);
-    const files = sandboxes.get(a.state.key)!.files;
-
-    expect(b.state).toEqual(a.state);
-    expect(sandboxes.size).toBe(1);
-    expect(prepare).toHaveBeenCalledTimes(1);
+    const first = await provider.start({ appRoot, sandboxName: "session-a" });
+    // A dynamic skill shares the skill root with the authored ones.
+    await first.handle.sandbox.writeTextFile({
+      content: "# Tenant",
+      path: `${SKILLS}/tenant/SKILL.md`,
+    });
+    const files = sandboxes.get(first.state.key)!.files;
     expect(text(files.get("/workspace/notes/seed.md"))).toBe("first");
     expect(text(files.get("/workspace/prepared.txt"))).toBe("yes");
-    expect(text(files.get(`${HOME}/.agents/skills/weather/SKILL.md`))).toBe("# Weather v1");
 
     const rebuilt = await provider.prepare({
       appRoot,
@@ -157,10 +163,12 @@ describe("defineSandboxBackend", () => {
     });
     const again = await provider.start({ appRoot, prepared: rebuilt, sandboxName: "session-a" });
 
-    expect(again.state).toEqual(a.state);
+    expect(again.state).toEqual(first.state);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(text(files.get("/workspace/notes/seed.md"))).toBe("first");
-    expect(text(files.get(`${HOME}/.agents/skills/weather/SKILL.md`))).toBe("# Weather v2");
+    expect(text(files.get(`${SKILLS}/weather/SKILL.md`))).toBe("# Weather v2");
+    expect(files.has(`${SKILLS}/retired/SKILL.md`)).toBe(false);
+    expect(text(files.get(`${SKILLS}/tenant/SKILL.md`))).toBe("# Tenant");
   });
 
   it("runs commands with AI_AGENT=eve and normalizes finished and streaming output", async () => {
@@ -173,14 +181,14 @@ describe("defineSandboxBackend", () => {
         return {
           exited: Promise.resolve(0),
           kill() {},
-          stderr: new ReadableStream({ start: (controller) => controller.close() }),
+          stderr: emptyStream(),
           stdout: (async function* () {
             yield "a";
             yield new TextEncoder().encode("b");
           })(),
         };
       }
-      return probeOnly(options);
+      return shell(options);
     });
     const { handle, state } = await harness(definition).start({ appRoot, sandboxName: "exec" });
 
@@ -198,56 +206,78 @@ describe("defineSandboxBackend", () => {
     });
   });
 
-  it("kills a streaming command when its signal aborts", async () => {
+  it("rejects an aborted command, killing a streaming one and signalling a finished one", async () => {
     const appRoot = await createScratchDirectory("eve-backend-abort-");
     const kill = vi.fn();
     const { definition } = createMemoryBackend((options) => {
-      if (options.command !== "long") return probeOnly(options);
-      let finish = (_code: number) => {};
-      return {
-        exited: new Promise<number>((resolve) => (finish = resolve)),
-        kill() {
-          kill();
-          finish(137);
-        },
-        stderr: new ReadableStream({ start: (controller) => controller.close() }),
-        stdout: new ReadableStream({ start: (controller) => controller.close() }),
-      };
+      if (options.command === "streaming") {
+        let finish = (_code: number) => {};
+        return {
+          exited: new Promise<number>((resolve) => (finish = resolve)),
+          kill() {
+            kill();
+            finish(137);
+          },
+          stderr: emptyStream(),
+          stdout: emptyStream(),
+        };
+      }
+      if (options.command === "finished") {
+        // An engine that honors the signal and returns once the command stops.
+        return new Promise<SandboxBackendExecResult>((resolve) =>
+          options.signal?.addEventListener("abort", () =>
+            resolve({ exitCode: 130, stderr: "", stdout: "" }),
+          ),
+        );
+      }
+      return shell(options);
     });
     const { handle } = await harness(definition).start({ appRoot, sandboxName: "abort" });
-    const controller = new AbortController();
-    const process = await handle.sandbox.spawn({ abortSignal: controller.signal, command: "long" });
 
-    controller.abort(new Error("stop the build"));
-
-    await expect(process.wait()).rejects.toThrow("stop the build");
+    for (const command of ["streaming", "finished"]) {
+      const controller = new AbortController();
+      const process = await handle.sandbox.spawn({ abortSignal: controller.signal, command });
+      controller.abort(new Error(`stop ${command}`));
+      await expect(process.wait()).rejects.toThrow(`stop ${command}`);
+    }
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
-  it("reports a sandbox that no longer exists as gone, and rejects another session's state", async () => {
+  it("stops the sandbox for stop and shutdown, and stops then removes it for delete", async () => {
+    const appRoot = await createScratchDirectory("eve-backend-lifecycle-");
+    const { definition, events } = createMemoryBackend();
+    const { handle } = await harness(definition).start({ appRoot, sandboxName: "lifecycle" });
+
+    await handle.onSandboxStop();
+    await handle.onRuntimeShutdown();
+    await handle.onSandboxDelete();
+
+    expect(events).toEqual(["stop", "stop", "stop", "remove"]);
+  });
+
+  it("removes what is left of a sandbox that no longer exists, and treats another key as gone", async () => {
     const appRoot = await createScratchDirectory("eve-backend-gone-");
-    const { definition, sandboxes } = createMemoryBackend();
+    const { definition, events, sandboxes } = createMemoryBackend();
     const provider = harness(definition);
     const first = await provider.start({ appRoot, sandboxName: "session-a" });
     const second = await provider.start({ appRoot, sandboxName: "session-b" });
 
+    // A key from elsewhere, such as before the app moved, names a sandbox this session cannot find.
     await expect(
       provider.openSession({ appRoot, existing: second.state, sandboxName: "session-a" }),
-    ).rejects.toThrow("incompatible");
+    ).rejects.toBeInstanceOf(SandboxSessionGoneError);
+    expect(events).toEqual([]);
+
     sandboxes.delete(first.state.key);
     await expect(
       provider.openSession({ appRoot, existing: first.state, sandboxName: "session-a" }),
     ).rejects.toBeInstanceOf(SandboxSessionGoneError);
+    expect(events).toEqual(["remove"]);
 
-    // Without `find`, the session's directory decides.
-    const directoryBackend = harness({ ...createDirectoryBackend(), directoryTemplate: false });
-    const { handle, state } = await directoryBackend.start({ appRoot, sandboxName: "session-c" });
-    await handle.sandbox.writeTextFile({ content: "kept", path: "notes.txt" });
-    const directory = join(appRoot, "directory", "sessions");
-    await expect(
-      directoryBackend.openSession({ appRoot, existing: state, sandboxName: "session-c" }),
-    ).resolves.toBeDefined();
-    await rm(directory, { force: true, recursive: true });
+    // A `directoryTemplate` backend without `find` is gone once its directory is.
+    const directoryBackend = harness(createDirectoryBackend());
+    const { state } = await directoryBackend.start({ appRoot, sandboxName: "session-c" });
+    await rm(join(appRoot, "directory", "sessions"), { force: true, recursive: true });
     await expect(
       directoryBackend.openSession({ appRoot, existing: state, sandboxName: "session-c" }),
     ).rejects.toBeInstanceOf(SandboxSessionGoneError);
@@ -255,7 +285,7 @@ describe("defineSandboxBackend", () => {
 
   it("removes a sandbox whose seeding fails, so the next start creates a fresh one", async () => {
     const appRoot = await createScratchDirectory("eve-backend-seed-failure-");
-    const { definition, sandboxes } = createMemoryBackend();
+    const { definition, events, sandboxes } = createMemoryBackend();
     let failures = 1;
     const provider = harness(definition, {
       async prepare(sandbox) {
@@ -267,6 +297,7 @@ describe("defineSandboxBackend", () => {
     await expect(provider.start({ appRoot, sandboxName: "session-a" })).rejects.toThrow(
       "prepare failed",
     );
+    expect(events).toEqual(["stop", "remove"]);
     expect(sandboxes.size).toBe(0);
 
     const { state } = await provider.start({ appRoot, sandboxName: "session-a" });
@@ -276,13 +307,9 @@ describe("defineSandboxBackend", () => {
   it("removes the session directory by default, idempotently, when the session ends", async () => {
     const appRoot = await createScratchDirectory("eve-backend-remove-");
     const provider = harness(createDirectoryBackend());
-    await provider.prepare({
-      appRoot,
-      seedFiles: [{ content: "seeded", path: "/workspace/a.md" }],
-    });
     await provider.start({ appRoot, sandboxName: "session-a" });
     const sessions = join(appRoot, "directory", "sessions");
-    expect(existsSync(sessions)).toBe(true);
+    expect(await readdir(sessions)).toHaveLength(1);
 
     await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
     await provider.endSession({ appRoot, sandboxName: "session-a", state: null });
@@ -291,29 +318,46 @@ describe("defineSandboxBackend", () => {
     expect(await readdir(sessions)).toEqual([]);
   });
 
-  it("prepares a directory template once per build and copies it into each session", async () => {
+  it("prepares a directory template once per build input and copies it into each session", async () => {
     const appRoot = await createScratchDirectory("eve-backend-template-");
     const prepare = vi.fn(async (sandbox: SandboxSession) => {
       await sandbox.writeTextFile({ content: "prepared", path: "prepared.txt" });
     });
     const provider = harness(createDirectoryBackend(), { prepare });
-    await provider.prepare({
-      appRoot,
-      seedFiles: [{ content: "seeded", path: "/workspace/seed.md" }],
-    });
+    const build = (sourceRevision: string) =>
+      provider.prepare({
+        appRoot,
+        seedFiles: [{ content: "seeded", path: "/workspace/seed.md" }],
+        sourceRevision,
+      });
 
+    const artifact = await build("first");
+    expect(await build("first")).toEqual(artifact);
+    expect(prepare).toHaveBeenCalledTimes(1);
     const sessions = await Promise.all(
       ["session-a", "session-b"].map(
-        async (sandboxName) => (await provider.start({ appRoot, sandboxName })).handle.sandbox,
+        async (sandboxName) =>
+          (await provider.start({ appRoot, prepared: artifact, sandboxName })).handle.sandbox,
       ),
     );
-
-    expect(prepare).toHaveBeenCalledTimes(1);
     for (const sandbox of sessions) {
       expect(await sandbox.readTextFile({ path: "seed.md" })).toBe("seeded");
       expect(await sandbox.readTextFile({ path: "prepared.txt" })).toBe("prepared");
     }
     await sessions[0]!.writeTextFile({ content: "a", path: "owner.txt" });
     expect(await sessions[1]!.readTextFile({ path: "owner.txt" })).toBeNull();
+
+    expect(await build("second")).not.toEqual(artifact);
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(existsSync(join(appRoot, "directory", "templates"))).toBe(true);
+  });
+
+  it("rejects built-in provider names and a backend it could not find again", () => {
+    const { definition } = createMemoryBackend();
+    expect(() => defineSandboxBackend({ ...definition, name: "host" })).toThrow("built-in");
+    const { find: _find, ...unfindable } = definition;
+    expect(() => defineSandboxBackend(unfindable as SandboxBackendDefinition)).toThrow(
+      "must define find()",
+    );
   });
 });

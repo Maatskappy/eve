@@ -4,9 +4,9 @@ import { join } from "node:path";
 
 import {
   createSandboxBackendImplementation,
+  type InternalSandboxBackendContext,
+  type InternalSandboxBackendDefinition,
   type SandboxBackendArtifact,
-  type SandboxBackendContext,
-  type SandboxBackendDefinition,
   type SandboxBackendState,
 } from "#execution/sandbox/backend.js";
 import {
@@ -34,7 +34,7 @@ const WORKSPACE_DIRECTORY_NAME = "workspace";
  * `bash` tool jobs. eve prepares it once per build as a directory template
  * and copies it in for each new session; a removed workspace is gone.
  */
-const SESSION_HOST_BACKEND: SandboxBackendDefinition<HostSandboxEnvironmentOptions> = {
+const SESSION_HOST_BACKEND: InternalSandboxBackendDefinition<HostSandboxEnvironmentOptions> = {
   name: HOST_PROVIDER_NAME,
   directoryTemplate: true,
   keyedToolSessions: true,
@@ -56,7 +56,7 @@ const SESSION_HOST_BACKEND: SandboxBackendDefinition<HostSandboxEnvironmentOptio
  * seeds, creates, or deletes. The session directory still holds skills and
  * jobs. Without a directory template, eve writes no workspace files.
  */
-const SHARED_HOST_BACKEND: SandboxBackendDefinition<HostSandboxEnvironmentOptions> = {
+const SHARED_HOST_BACKEND: InternalSandboxBackendDefinition<HostSandboxEnvironmentOptions> = {
   name: HOST_PROVIDER_NAME,
   keyedToolSessions: true,
   workspaceRoot: sharedRoot,
@@ -79,10 +79,29 @@ export function createHostSandboxProvider(
   SandboxBackendState,
   SandboxSession
 > {
+  if (process.platform === "win32") return windowsHostProvider();
   return createSandboxBackendImplementation(
     options.root === undefined ? SESSION_HOST_BACKEND : SHARED_HOST_BACKEND,
     options,
   );
+}
+
+/**
+ * HostSandbox needs a POSIX shell. On Windows, preparing succeeds so builds of
+ * environments that never open still work, and opening fails with the fix.
+ */
+function windowsHostProvider(): ReturnType<typeof createHostSandboxProvider> {
+  const fail = async (): Promise<never> => {
+    throw new Error(
+      "HostSandbox requires a POSIX shell and does not run on Windows; use WSL or DockerSandbox.",
+    );
+  };
+  return {
+    prepare: async () => ({ templateKey: "windows" }),
+    start: fail,
+    resume: fail,
+    onSessionEnd: async () => {},
+  };
 }
 
 /** Removes stale host template directories for one application. */
@@ -136,7 +155,7 @@ async function isDirectory(path: string): Promise<boolean> {
 }
 
 function sharedRoot(
-  context: SandboxBackendContext,
+  context: InternalSandboxBackendContext,
   options: HostSandboxEnvironmentOptions,
 ): string {
   return context.resolveProjectPath(options.root ?? ".");

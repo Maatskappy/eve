@@ -37,20 +37,19 @@ type MaybePromise<T> = T | Promise<T>;
 /** Where eve keeps a session's sandbox, passed to every {@link SandboxBackendDefinition} hook. */
 export interface SandboxBackendContext {
   /**
-   * The session's sandbox directory under the app's sandbox cache. eve owns it:
-   * the default `remove` deletes it, and a backend without `find` treats the
-   * sandbox as gone when it is missing. eve creates its parent, and creates the
-   * directory itself only for a `directoryTemplate` backend.
-   */
-  readonly directory: string;
-  /**
-   * A stable id for the session's sandbox, unique per app and session, built
-   * from lowercase letters, digits, and hyphens. Every open for the session
-   * gets the same key, so it can name a container or VM to find again.
+   * A stable id for the session's sandbox, unique per app directory and
+   * session, built from lowercase letters, digits, and hyphens. Every open for
+   * the session gets the same key, so it can name a container or VM to find
+   * again.
    */
   readonly key: string;
-  /** Resolves a path relative to the app root. */
-  resolveProjectPath(path: string): string;
+  /**
+   * The session's directory under the app's `.eve/sandbox-cache/<name>/sessions/`.
+   * eve owns it: the default `remove` deletes it. eve creates its parent, and
+   * creates the directory itself only for a `directoryTemplate` backend, by
+   * copying the template into it.
+   */
+  readonly directory: string;
   /** The session the sandbox belongs to; absent while eve prepares a `directoryTemplate`. */
   readonly session: SandboxSelectorContext["session"] | undefined;
 }
@@ -106,10 +105,10 @@ export interface SandboxBackendInstance {
   exec(
     options: SandboxBackendExecOptions,
   ): MaybePromise<SandboxBackendExecResult | SandboxBackendProcess>;
-  /** Releases this instance without stopping the sandbox, after a keyed `invokeTool` call. */
-  dispose?(): MaybePromise<void>;
   /** Returns a file's content, or `null` when it does not exist. */
   readFile(path: string): MaybePromise<SandboxBackendData | null>;
+  /** Writes a file, creating its parent directories. */
+  writeFile(path: string, content: Uint8Array): MaybePromise<void>;
   /** Removes a file or directory. Defaults to running `rm` through `exec`. */
   removePath?(options: {
     readonly force: boolean;
@@ -118,8 +117,36 @@ export interface SandboxBackendInstance {
   }): MaybePromise<void>;
   /** Stops the sandbox's compute, for `sandbox.stop()`, `sandbox.delete()`, and server shutdown. */
   stop?(): MaybePromise<void>;
-  /** Writes a file, creating its parent directories. */
-  writeFile(path: string, content: Uint8Array): MaybePromise<void>;
+}
+
+interface SandboxBackendDefinitionBase<Options extends object> {
+  /** The provider name, made of lowercase letters, digits, and hyphens. */
+  readonly name: string;
+  /**
+   * The absolute path where commands start and relative paths resolve, such
+   * as `/workspace`. eve writes the agent's workspace files under it.
+   */
+  readonly workspaceRoot: string;
+  /**
+   * Finds or creates the session's sandbox. Concurrent calls for the same
+   * session, even from separate processes, must end up with the same sandbox.
+   * Set `created` when this call created it: eve then writes the workspace
+   * files and skills and runs the environment's `prepare`, and removes the
+   * sandbox if that fails. eve seeds after `open` returns, so another process
+   * that opens the same sandbox meanwhile can use it before seeding finishes;
+   * hold a lock around `open` and seeding if your setup runs several eve
+   * processes against one engine.
+   */
+  open(
+    context: SandboxBackendContext,
+    options: Readonly<Options>,
+  ): Promise<{ readonly created?: boolean; readonly instance: SandboxBackendInstance }>;
+  /**
+   * Removes the session's sandbox when the session ends, the agent deletes
+   * it, or `find` reports it gone. It must succeed when nothing exists.
+   * Defaults to deleting `context.directory`.
+   */
+  remove?(context: SandboxBackendContext, options: Readonly<Options>): Promise<void>;
 }
 
 /**
@@ -127,57 +154,44 @@ export interface SandboxBackendInstance {
  * opens, finds, and removes its engine's sandbox for a session; eve provides
  * the rest of the sandbox provider contract.
  */
-export interface SandboxBackendDefinition<Options extends object = Record<never, never>> {
-  /**
-   * Prepare a template directory once per build instead of seeding each
-   * sandbox. eve writes the workspace files and skills into a template opened
-   * with `open`, runs `prepare` there, and copies the result into
-   * `context.directory` before the first `open` of each session. Use it for
-   * engines whose whole state lives in `context.directory`.
-   */
-  readonly directoryTemplate?: boolean;
-  /**
-   * Finds the session's existing sandbox when eve resumes it. Return
-   * `undefined` when it no longer exists: eve then starts a fresh one. Without
-   * `find`, eve reopens with `open` while `context.directory` exists.
-   */
-  find?(
-    context: SandboxBackendContext,
-    options: Readonly<Options>,
-  ): Promise<SandboxBackendInstance | undefined>;
-  /**
-   * Lets `invokeTool` calls with a `key` keep this backend's sandbox between
-   * calls. Those sandboxes never reach session end, so nothing removes them;
-   * enable it only when they stay cheap, such as directories on local disk.
-   */
-  readonly keyedToolSessions?: boolean;
-  /** The provider name, made of lowercase letters, digits, and hyphens. */
-  readonly name: string;
-  /**
-   * Finds or creates the session's sandbox. Concurrent calls for the same
-   * session, even from separate processes, must end up with the same sandbox.
-   * Set `created` when this call created it: eve then writes the workspace
-   * files and skills and runs the environment's `prepare`, and removes the
-   * sandbox if that fails.
-   */
-  open(
-    context: SandboxBackendContext,
-    options: Readonly<Options>,
-  ): Promise<{ readonly created?: boolean; readonly instance: SandboxBackendInstance }>;
-  /**
-   * Removes the session's sandbox when the session ends or the agent deletes
-   * it. It must succeed when nothing exists. Defaults to deleting
-   * `context.directory`.
-   */
-  remove?(context: SandboxBackendContext, options: Readonly<Options>): Promise<void>;
-  /**
-   * The absolute path where commands start and relative paths resolve, such
-   * as `/workspace`. eve writes the agent's workspace files under it.
-   */
-  readonly workspaceRoot:
-    | string
-    | ((context: SandboxBackendContext, options: Readonly<Options>) => string);
-}
+export type SandboxBackendDefinition<Options extends object = Record<never, never>> =
+  SandboxBackendDefinitionBase<Options> &
+    (
+      | {
+          /**
+           * Finds the session's existing sandbox when eve resumes it. Return
+           * `undefined` when it no longer exists: eve removes what is left with
+           * `remove` and starts a fresh sandbox.
+           */
+          find(
+            context: SandboxBackendContext,
+            options: Readonly<Options>,
+          ): Promise<SandboxBackendInstance | undefined>;
+          readonly directoryTemplate?: false;
+        }
+      | {
+          /**
+           * Finds the session's existing sandbox when eve resumes it. Defaults
+           * to reopening with `open` while `context.directory` exists.
+           */
+          find?(
+            context: SandboxBackendContext,
+            options: Readonly<Options>,
+          ): Promise<SandboxBackendInstance | undefined>;
+          /**
+           * Prepare a template directory once per build instead of seeding
+           * each sandbox. eve writes the workspace files and skills into a
+           * template opened with `open`, runs `prepare` there, and copies the
+           * result into `context.directory` before the first `open` of each
+           * session. Use it for engines whose whole state lives in
+           * `context.directory`. A template is rebuilt when the workspace
+           * files, the skills, or `agent/sandbox/sandbox.ts` change; edits to
+           * files that `sandbox.ts` imports do not rebuild it, so delete
+           * `.eve/sandbox-cache/<name>/templates/` after changing them.
+           */
+          readonly directoryTemplate: true;
+        }
+    );
 
 /** The options a backend's `environment()` accepts: the backend's own, plus `prepare`. */
 export type SandboxBackendEnvironmentOptions<Options extends object = Record<never, never>> =
@@ -189,6 +203,41 @@ export type SandboxBackendEnvironmentOptions<Options extends object = Record<nev
     readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
   };
 
+/** The backend context eve's own providers receive. */
+export interface InternalSandboxBackendContext extends SandboxBackendContext {
+  /** Resolves a path relative to the app root. */
+  resolveProjectPath(path: string): string;
+}
+
+/** The backend instance eve's own providers return. */
+export interface InternalSandboxBackendInstance extends SandboxBackendInstance {
+  /** Releases this instance without stopping the sandbox, after a keyed `invokeTool` call. */
+  dispose?(): MaybePromise<void>;
+}
+
+/**
+ * The backend definition eve's own providers use: a workspace root derived
+ * from the session, and keyed tool-session support, which only providers
+ * whose kept sandboxes stay bounded may enable.
+ */
+export interface InternalSandboxBackendDefinition<Options extends object> {
+  readonly name: string;
+  readonly workspaceRoot:
+    | string
+    | ((context: InternalSandboxBackendContext, options: Readonly<Options>) => string);
+  open(
+    context: InternalSandboxBackendContext,
+    options: Readonly<Options>,
+  ): Promise<{ readonly created?: boolean; readonly instance: InternalSandboxBackendInstance }>;
+  find?(
+    context: InternalSandboxBackendContext,
+    options: Readonly<Options>,
+  ): Promise<InternalSandboxBackendInstance | undefined>;
+  remove?(context: InternalSandboxBackendContext, options: Readonly<Options>): Promise<void>;
+  readonly directoryTemplate?: boolean;
+  readonly keyedToolSessions?: boolean;
+}
+
 /** The prepared artifact of a backend: its template's cache key. */
 export type SandboxBackendArtifact = { readonly templateKey: string };
 
@@ -196,6 +245,8 @@ export type SandboxBackendArtifact = { readonly templateKey: string };
 export type SandboxBackendState = { readonly key: string; readonly version: 1 };
 
 const PROVIDER_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+// Built-in providers own these names and their cache directories.
+const RESERVED_PROVIDER_NAMES = new Set(["docker", "host", "vercel"]);
 const RESOURCES_DIRECTORY_NAME = "resources";
 const TEMPLATE_DIRECTORY_NAME = "sandbox";
 const SKILLS_MARKER_NAME = ".eve-authored-skills.json";
@@ -206,9 +257,16 @@ const SKILLS_MARKER_NAME = ".eve-authored-skills.json";
  * provider contract: it derives a stable key and directory per session,
  * writes workspace files and skills into new sandboxes, runs `prepare`,
  * normalizes commands and file access into a `SandboxSession`, sets
- * `AI_AGENT=eve`, and stops, removes, and resumes the sandbox. Use
- * `defineSandboxProvider` instead for full control, such as snapshots or
- * network policies.
+ * `AI_AGENT=eve`, and stops, removes, and resumes the sandbox. On every open,
+ * eve runs one command that reads `$HOME` (or `EVE_SANDBOX_SKILL_ROOT`) to
+ * find the skill directory; with neither, skills go under `skills/` in the
+ * workspace root.
+ *
+ * Backends are for engines on the machine running eve: eve keeps each build's
+ * files under the app's `.eve/sandbox-cache/<name>/`, and `ctx.key` derives
+ * from the app's absolute path, so build and run the app on the same machine.
+ * Use `defineSandboxProvider` instead for full control, such as remote
+ * sandboxes, snapshots, or network policies.
  *
  * @example
  * ```ts
@@ -216,8 +274,8 @@ const SKILLS_MARKER_NAME = ".eve-authored-skills.json";
  *   name: "my-engine",
  *   workspaceRoot: "/workspace",
  *   async open(ctx) {
- *     const { sandbox, created } = await engine.findOrCreate(ctx.key);
- *     return { created, instance: sandbox };
+ *     const { vm, created } = await engine.findOrCreate(ctx.key);
+ *     return { created, instance: vm };
  *   },
  *   find: (ctx) => engine.find(ctx.key),
  *   remove: (ctx) => engine.remove(ctx.key),
@@ -227,6 +285,10 @@ const SKILLS_MARKER_NAME = ".eve-authored-skills.json";
 export function defineSandboxBackend<Options extends object = Record<never, never>>(
   definition: SandboxBackendDefinition<Options>,
 ): SandboxProvider<SandboxBackendEnvironmentOptions<Options>, undefined, SandboxSession> {
+  if (RESERVED_PROVIDER_NAMES.has(definition.name)) {
+    throw new Error(`Sandbox backend name "${definition.name}" belongs to a built-in provider.`);
+  }
+  assertBackendDefinition(definition);
   return defineSandboxProvider<
     SandboxBackendEnvironmentOptions<Options>,
     undefined,
@@ -242,9 +304,22 @@ export function defineSandboxBackend<Options extends object = Record<never, neve
   });
 }
 
+function assertBackendDefinition(definition: InternalSandboxBackendDefinition<never>): void {
+  if (!PROVIDER_NAME_PATTERN.test(definition.name)) {
+    throw new Error(
+      `Sandbox backend name "${definition.name}" must use lowercase letters, digits, and hyphens.`,
+    );
+  }
+  if (definition.find === undefined && definition.directoryTemplate !== true) {
+    throw new Error(
+      `Sandbox backend "${definition.name}" must define find() unless it sets directoryTemplate.`,
+    );
+  }
+}
+
 /** The provider implementation for one backend environment. */
 export function createSandboxBackendImplementation<Options extends object>(
-  definition: SandboxBackendDefinition<Options>,
+  definition: InternalSandboxBackendDefinition<Options>,
   options: SandboxBackendEnvironmentOptions<Options>,
 ): SandboxProviderImplementation<
   undefined,
@@ -252,15 +327,11 @@ export function createSandboxBackendImplementation<Options extends object>(
   SandboxBackendState,
   SandboxSession
 > {
-  if (!PROVIDER_NAME_PATTERN.test(definition.name)) {
-    throw new Error(
-      `Sandbox backend name "${definition.name}" must use lowercase letters, digits, and hyphens.`,
-    );
-  }
+  assertBackendDefinition(definition);
   const name = definition.name;
-  const instances = new WeakMap<SandboxProviderHandle, SandboxBackendInstance>();
+  const instances = new WeakMap<SandboxProviderHandle, InternalSandboxBackendInstance>();
 
-  function sessionContext(context: SandboxProviderSessionContext): SandboxBackendContext {
+  function sessionContext(context: SandboxProviderSessionContext): InternalSandboxBackendContext {
     const sessionKey = createSandboxProviderIdentity({
       sessionId: context.session.id,
       version: 1,
@@ -277,20 +348,34 @@ export function createSandboxBackendImplementation<Options extends object>(
     };
   }
 
-  function workspaceRoot(context: SandboxBackendContext): string {
+  function templatePathFor(storagePath: string, templateKey: string): string {
+    return resolveLocalProviderTemplateRootPath(storagePath, name, templateKey);
+  }
+
+  function workspaceRoot(context: InternalSandboxBackendContext): string {
     return typeof definition.workspaceRoot === "string"
       ? definition.workspaceRoot
       : definition.workspaceRoot(context, options);
   }
 
-  async function remove(context: SandboxBackendContext): Promise<void> {
+  async function remove(context: InternalSandboxBackendContext): Promise<void> {
     if (definition.remove !== undefined) await definition.remove(context, options);
     else await rm(context.directory, { force: true, recursive: true });
   }
 
+  async function find(
+    context: InternalSandboxBackendContext,
+  ): Promise<InternalSandboxBackendInstance | undefined> {
+    if (definition.find !== undefined) return await definition.find(context, options);
+    // Only a `directoryTemplate` backend has no `find`, and its directory is a template copy.
+    return (await pathExists(context.directory))
+      ? (await definition.open(context, options)).instance
+      : undefined;
+  }
+
   /** Brings a new sandbox up to the build: workspace files, then skills, then `prepare`. */
   async function initialize(input: {
-    readonly context: SandboxBackendContext;
+    readonly context: InternalSandboxBackendContext;
     readonly instance: SandboxBackendInstance;
     readonly log?: (message: string) => void;
     readonly sandbox: SandboxSession;
@@ -315,8 +400,8 @@ export function createSandboxBackendImplementation<Options extends object>(
   }
 
   function createHandle(
-    context: SandboxBackendContext,
-    instance: SandboxBackendInstance,
+    context: InternalSandboxBackendContext,
+    instance: InternalSandboxBackendInstance,
     sandbox: SandboxSession,
   ): SandboxProviderHandle<SandboxSession> {
     const handle: SandboxProviderHandle<SandboxSession> = {
@@ -338,21 +423,15 @@ export function createSandboxBackendImplementation<Options extends object>(
 
   const implementation: ReturnType<typeof createSandboxBackendImplementation<Options>> = {
     async prepare(context) {
+      // Options stay out of the key: `sourceRevision` already covers `sandbox.ts`.
       const templateKey = createSandboxProviderIdentity({
         directoryTemplate: definition.directoryTemplate === true,
         name,
-        options: JSON.stringify(options, (_key, value: unknown) =>
-          typeof value === "function" ? undefined : value,
-        ),
         resources: sandboxProviderResourceIdentity(context.resources),
         sourceRevision: context.sourceRevision,
         version: 1,
       }).slice(0, 24);
-      const templatePath = resolveLocalProviderTemplateRootPath(
-        context.storagePath,
-        name,
-        templateKey,
-      );
+      const templatePath = templatePathFor(context.storagePath, templateKey);
       if (await pathExists(templatePath)) {
         await touchDirectory(templatePath);
         context.log?.("reusing cached template directory");
@@ -370,7 +449,7 @@ export function createSandboxBackendImplementation<Options extends object>(
           context.resources.skills,
         );
         if (definition.directoryTemplate === true) {
-          const backendContext: SandboxBackendContext = {
+          const backendContext: InternalSandboxBackendContext = {
             directory: join(draft, TEMPLATE_DIRECTORY_NAME),
             key: `eve-${name}-template-${templateKey}`,
             resolveProjectPath: (path) => context.host.resolveProjectPath(path),
@@ -404,14 +483,11 @@ export function createSandboxBackendImplementation<Options extends object>(
     async start(providerContext, _openOptions, artifactValue) {
       const { templateKey } = requireArtifact(name, artifactValue);
       const context = sessionContext(providerContext);
-      const templatePath = resolveLocalProviderTemplateRootPath(
-        providerContext.storagePath,
-        name,
-        templateKey,
-      );
+      const templatePath = templatePathFor(providerContext.storagePath, templateKey);
+      // Checked before `open`, so a missing build never creates a sandbox it cannot seed.
+      await requireTemplate(name, templatePath);
       await mkdir(dirname(context.directory), { recursive: true });
       if (definition.directoryTemplate === true && !(await pathExists(context.directory))) {
-        await requireTemplate(name, templatePath);
         await copyDirectoryAtomically(
           join(templatePath, TEMPLATE_DIRECTORY_NAME),
           context.directory,
@@ -422,7 +498,6 @@ export function createSandboxBackendImplementation<Options extends object>(
       const seed = created === true && definition.directoryTemplate !== true;
       try {
         if (seed) {
-          await requireTemplate(name, templatePath);
           await initialize({ context, instance, sandbox, templateKey, templatePath });
         } else {
           await refreshAuthoredSkills({
@@ -450,18 +525,17 @@ export function createSandboxBackendImplementation<Options extends object>(
     async resume(providerContext, artifactValue, stateValue) {
       const { templateKey } = requireArtifact(name, artifactValue);
       const context = sessionContext(providerContext);
+      // A different key means the app moved since the sandbox was created; its old sandbox
+      // cannot be found from this session, so a fresh one replaces it.
       if (requireState(name, stateValue).key !== context.key) {
-        throw new Error(
-          `Sandbox backend "${name}" session state is incompatible with this session.`,
+        throw new SandboxSessionGoneError(
+          `The "${name}" sandbox for this session was created for another app location.`,
         );
       }
-      const instance =
-        definition.find !== undefined
-          ? await definition.find(context, options)
-          : (await pathExists(context.directory))
-            ? (await definition.open(context, options)).instance
-            : undefined;
+      const instance = await find(context);
       if (instance === undefined) {
+        // Clears whatever is left, so the next start creates the sandbox from scratch.
+        await remove(context);
         throw new SandboxSessionGoneError(
           `The "${name}" sandbox for this session no longer exists.`,
         );
@@ -471,7 +545,7 @@ export function createSandboxBackendImplementation<Options extends object>(
         instance,
         name,
         resources: join(
-          resolveLocalProviderTemplateRootPath(providerContext.storagePath, name, templateKey),
+          templatePathFor(providerContext.storagePath, templateKey),
           RESOURCES_DIRECTORY_NAME,
         ),
         sandbox,

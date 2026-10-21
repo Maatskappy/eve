@@ -1,6 +1,5 @@
 import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
-import { releaseProviderToolSessionHandle } from "#execution/tool-session/sandbox.js";
 import {
   createSandboxProviderResources,
   type SandboxPreparedArtifact,
@@ -99,10 +98,6 @@ export function createSandboxProviderHarness<
         return (await implementation.start(context, options, artifact)).handle;
       }
       return await implementation.resume(context, artifact, input.existing);
-    },
-    /** Releases a keyed tool-session handle the way `invokeTool` does after a call. */
-    async releaseToolSession(handle: SandboxProviderHandle<Session>): Promise<void> {
-      await releaseProviderToolSessionHandle(implementation, handle);
     },
     async start(input: {
       readonly appRoot: string;

@@ -61,7 +61,7 @@ export default selfModification({
   target: { branch: "main" },
   credentials: { pat: true },
   authorize: ({ channel, principal }) =>
-    channel.kind === "http" && principal?.principalId === "release-bot",
+    channel.kind === "channel:eve" && principal?.principalId === "release-bot",
 });
 ```
 

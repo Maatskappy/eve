@@ -70,7 +70,7 @@ describe("self-modification setup", () => {
     expect(source).not.toContain("deployed: {");
     expect(source).toContain('return await getToken("github/selfmod-acme-agents"');
     expect(source).toContain("async resolve({ capability, repository })");
-    expect(source).toContain('case "http"');
+    expect(source).toContain('case "channel:eve"');
     expect(source).toContain("const projectId = process.env.VERCEL_PROJECT_ID");
     expect(source).toContain('principal?.authenticator === "oidc"');
     expect(source).toContain("principal.attributes.project_id === projectId");
@@ -176,21 +176,21 @@ describe("self-modification setup", () => {
       principalType: "service",
     };
 
-    expect(authorize({ channel: { kind: "http" }, principal })).toBe(allowed);
+    expect(authorize({ channel: { kind: "channel:eve" }, principal })).toBe(allowed);
     expect(
       authorize({
-        channel: { kind: "http" },
+        channel: { kind: "channel:eve" },
         principal: { ...principal, attributes: { project_id: "prj_other" } },
       }),
     ).toBe(false);
     expect(
       authorize({
-        channel: { kind: "http" },
+        channel: { kind: "channel:eve" },
         principal: { ...principal, authenticator: "jwt-hmac" },
       }),
     ).toBe(false);
     expect(authorize({ channel: { kind: "channel:slack" }, principal })).toBe(false);
-    expect(authorize({ channel: { kind: "http" }, principal: null })).toBe(false);
+    expect(authorize({ channel: { kind: "channel:eve" }, principal: null })).toBe(false);
   });
 
   it("renders no HTTP authorization branch without a Vercel backend", () => {

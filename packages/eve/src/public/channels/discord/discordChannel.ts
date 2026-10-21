@@ -292,7 +292,6 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     DiscordReceiveTarget,
     DiscordInstrumentationMetadata
   >({
-    kindHint: "discord",
     turnPolicy: config.turnPolicy,
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,

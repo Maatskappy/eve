@@ -55,6 +55,9 @@ has no open options and no `setNetworkPolicy`.
 find the same directory. Templates live under
 `.eve/sandbox-cache/host/templates/<key>`, keyed by resources and source
 revision, published atomically, and pruned with the other local templates.
+The session directory also holds `skills/<template key>/`, copied from the
+template the first time a session opens on that generation so rebuilt skills
+reach existing sessions in both modes, and `jobs/` for the `bash` tool.
 
 Session state is `{ root, version }`. Resume checks that `root` matches what the
 environment derives for the session and that it still exists.

@@ -242,6 +242,33 @@ Open options belong to `start()` and are not serialized or passed to `resume()`.
 
 Preparation discovers authored files through `ctx.files`; core keeps project layout and artifact storage keys private. Keep provider SDK values behind the provider. `environment.open()` preserves the provider's sandbox capability type, while the heterogeneous runtime registry erases it to eve's common session surface.
 
+### Build a session from primitives
+
+A handle's `sandbox` must implement the full `SandboxSession` surface. When your engine only exposes processes and raw file bytes, pass those operations to `createSandboxSession()` and let eve derive `run()`, the binary and text read and write variants, text encodings, and line ranges:
+
+```ts
+import { createSandboxSession, type SandboxProviderHandle } from "eve/sandbox/provider";
+
+function createHandle(remote: AcmeRemote): SandboxProviderHandle {
+  return {
+    sandbox: createSandboxSession({
+      resolvePath: (path) => (path.startsWith("/") ? path : `/workspace/${path}`),
+      spawn: (options) => remote.spawn(options),
+      readFile: ({ path }) => remote.readFile(path),
+      writeFile: ({ path, content }) => remote.writeFile(path, content),
+      removePath: ({ path, recursive, force }) => remote.remove(path, { recursive, force }),
+    }),
+    onRuntimeShutdown: () => remote.disconnect(),
+    onSandboxDelete: () => remote.destroy(),
+    onSandboxStop: () => remote.stop(),
+  };
+}
+```
+
+eve passes every path through `resolvePath()` before it calls `readFile`, `writeFile`, or `removePath`. `resolvePath()` also declares the sandbox's workspace root: relative paths resolve from it, and `resolvePath(".")` is the directory that `glob`, `grep`, attachment staging, and error messages use. Return `null` from `readFile` when the file does not exist.
+
+eve writes skill packages to `$HOME/.agents/skills`, using the sandbox's own `$HOME`. To keep skills somewhere else, pass an absolute `skillRoot` directory to `createSandboxSession()`.
+
 ## Providers
 
 | Provider                             | Use it for                                                                              |

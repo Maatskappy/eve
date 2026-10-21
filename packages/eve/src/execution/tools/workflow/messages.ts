@@ -81,6 +81,7 @@ export interface WorkflowToolRunWithdrawMessage {
 export interface WorkflowToolRunAgentStartedMessage {
   readonly from: WorkflowToolRunRef;
   readonly session: AgentSessionAddress;
+  readonly context: AgentSessionContext;
 }
 
 /**

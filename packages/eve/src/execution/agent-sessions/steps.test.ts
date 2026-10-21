@@ -8,6 +8,7 @@ import {
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
+  stopLateAgentSessionStep,
 } from "#execution/agent-sessions/steps.js";
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
+  resumeHook: vi.fn(),
+  startWorkflow: vi.fn(),
+  logError: vi.fn(),
   runtimeConfig: undefined as unknown,
   targetKind: "local" as "local" | "remote",
   waitForCommandHookOwner: vi.fn(),
@@ -33,8 +37,17 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
     return { createSession: mocks.createSession };
   },
   dispatchWorkflowSessionCommand: mocks.dispatch,
+  startWorkflowOnCurrentDeployment: mocks.startWorkflow,
   waitForCommandHookOwner: mocks.waitForCommandHookOwner,
   waitForSessionInbox: mocks.waitForSessionInbox,
+}));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
+  resumeHook: mocks.resumeHook,
+}));
+vi.mock("#internal/logging.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/logging.js")>()),
+  logError: mocks.logError,
 }));
 vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-inbox/resume.js")>()),
@@ -220,6 +233,25 @@ describe("commands to a session that opened without waiting", () => {
     expect(mocks.resolveSessionInbox).toHaveBeenCalledWith("child-continuation");
     expect(mocks.dispatch).toHaveBeenLastCalledWith(
       expect.objectContaining({ sessionId: "child-2" }),
+    );
+  });
+
+  it("logs an unavailable late child without scheduling another workflow", async () => {
+    const unavailable = new HookNotFoundError("child-inbox");
+    mocks.resumeHook.mockRejectedValue(unavailable);
+
+    await expect(stopLateAgentSessionStep(session)).resolves.toBeUndefined();
+
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ kind: "reset" }),
+    );
+    expect(mocks.startWorkflow).not.toHaveBeenCalled();
+    expect(mocks.logError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("late child"),
+      unavailable,
+      { sessionId: "child-1" },
     );
   });
 

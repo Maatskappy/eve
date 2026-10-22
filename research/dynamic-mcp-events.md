@@ -42,6 +42,7 @@ export default defineDynamic({
         instanceKey: account.connectionKey,
         auth: connect(account.connector),
         experimental_events: {
+          management: "creator",
           onEvent: handleBirdEvent,
         },
       });
@@ -148,16 +149,20 @@ crash and must deduplicate effects using `deliveryId`.
 
 ## Stopping a removed connection
 
-Callback reconstruction must not be required to disable delivery. Dynamic
-subscribe results return two dedicated management names, `eve__event_watch_get`
+Applications can set `experimental_events.management: "creator"` to authorize
+get/stop without reconstructing the connection. Opted-in subscribe results
+return two dedicated management names, `eve__event_watch_get`
 and `eve__event_watch_stop`, callable through `eve__tool` with the saved eve
 watch ID. Keep these names distinct from connection tools so a replacement
 account or a same-named static connection cannot capture the call. This first
 version does not add cross-session watch listing or rediscovery.
 
-These are creator-authorized housekeeping operations, independent of the current
-connection's discovery, auth, tool filters, and approval closures. Existing
-connection get/stop actions retain those controls. Validate root-agent scope,
+These are explicitly app-authorized housekeeping operations, independent of
+the current connection's discovery, auth, tool filters, and approval closures.
+Save the opt-in with the original watch, including when a repeated subscribe
+returns that watch. Without it, these actions reject access and are not
+advertised. Changing the definition only changes future watches. Existing
+connection get/stop actions retain their controls. Validate root-agent scope,
 the watch ID, and the current execution principal against the saved owner before
 using its connector and subscription ID. Do not expose removed catalogs or
 create subscriptions through this path.
@@ -189,7 +194,8 @@ with the runtime implementation; check extension contracts if types change.
 The implementation must prove that unverified requests never invoke resolvers,
 users cannot cross account boundaries, cold-start recovery preserves creator
 identity, transient failures retry, and removal retires without switching accounts.
-A removed connection's watch must remain stoppable. Preserve static events,
+An opted-in watch must remain stoppable after connection removal, while a watch
+without opt-in must reject the housekeeping path. Preserve static events,
 early delivery, idempotency, expiry, and lifecycle callbacks. Cover the built
 receiver in a deterministic fixture without real Bird credentials.
 
@@ -204,7 +210,7 @@ receiver in a deterministic fixture without real Bird credentials.
   events. Reuse that owner if it lands first. This proposal only adds dynamic
   connection support; it does not introduce another subscription primitive.
 
-Review the initial session-only scope, creator-authorized management independent
-of connection tool policies, and project-authorized cleanup for saved watch IDs.
+Review the initial session-only scope, the explicit opt-in to creator-authorized
+management independent of connection tool policies, and project-authorized cleanup for saved watch IDs.
 Shared callbacks are the supported authoring contract, not a promise that
 arbitrary closures can be serialized or recovered.

@@ -181,14 +181,19 @@ export async function bootInitialOwner(
   let sessionState: DurableSessionState | undefined;
   let preparedContext = serializedContext;
   let prewarm: AbortController | undefined;
-  let interrupted = false;
+  let interrupted:
+    | Extract<
+        SessionInboxPayload,
+        { readonly kind: "reset" | "session-timeout" | "session-failure" }
+      >
+    | undefined;
   const unsubscribe = inbox.onInterrupt((payload) => {
     if (
       payload.kind === "reset" ||
       payload.kind === "session-timeout" ||
       payload.kind === "session-failure"
     ) {
-      interrupted = true;
+      interrupted ??= payload;
       prewarm?.abort();
     }
   });
@@ -241,7 +246,7 @@ export async function bootInitialOwner(
     const caller = unwrapSettled(callerResolution);
     if (created.prewarm === true) {
       prewarm = new AbortController();
-      if (interrupted) prewarm.abort();
+      if (interrupted !== undefined) prewarm.abort();
       const prepared = await prewarmSessionStep({
         abortSignal: prewarm.signal,
         serializedContext,
@@ -260,9 +265,14 @@ export async function bootInitialOwner(
         deploymentId: input.ownerDeploymentId,
         history: created.history,
         start:
-          input.input.message === undefined
-            ? { kind: "first-message" }
-            : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
+          interrupted !== undefined
+            ? {
+                kind: "interrupted",
+                error: interrupted.kind === "session-failure" ? interrupted.error : undefined,
+              }
+            : input.input.message === undefined
+              ? { kind: "first-message" }
+              : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
         initialTurnControl: prepared.turnControl,
         retention: input.retention,
         serializedContext: preparedContext,

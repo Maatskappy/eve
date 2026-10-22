@@ -147,58 +147,68 @@ describe("workflowEntry integration", () => {
     },
   );
 
-  it("aborts preparation and cleans up a sandbox reset before any message", async () => {
-    const ready = Promise.withResolvers<void>();
-    let aborted = false;
-    const runtime = await createTestRuntime({
-      modules: [
-        {
-          logicalPath: "hooks/prepare.ts",
-          loadNamespace: async () => ({
-            default: defineHook({
-              async prewarm(ctx) {
-                await ctx.preload("sandbox");
-                ready.resolve();
-                await new Promise<void>((resolve) => {
-                  ctx.abortSignal.addEventListener(
-                    "abort",
-                    () => {
-                      aborted = true;
-                      resolve();
-                    },
-                    { once: true },
-                  );
-                });
-              },
+  it.each([false, true])(
+    "aborts preparation and cleans up on reset without starting a turn (initial message: %s)",
+    async (initialMessage) => {
+      const ready = Promise.withResolvers<void>();
+      let aborted = false;
+      let starts = 0;
+      const runtime = await createTestRuntime({
+        modules: [
+          {
+            logicalPath: "hooks/prepare.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "session.started": () => {
+                    starts += 1;
+                  },
+                },
+                async prewarm(ctx) {
+                  await ctx.preload("sandbox");
+                  ready.resolve();
+                  await new Promise<void>((resolve) => {
+                    ctx.abortSignal.addEventListener(
+                      "abort",
+                      () => {
+                        aborted = true;
+                        resolve();
+                      },
+                      { once: true },
+                    );
+                  });
+                },
+              }),
             }),
-          }),
-        },
-      ],
-    });
-    await runtime.run(async () => {
-      const run = await startSessionOwner(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: {},
-          serializedContext: buildSerializedContext({ channelKind: "http" }),
-        },
-      ]);
-      let completed = false;
-      try {
-        await withTimeout(ready.promise, "prewarm sandbox startup");
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "reset",
-        });
-        await withTimeout(run.returnValue, "reset prewarmed session");
-        completed = true;
-        expect(aborted).toBe(true);
-        expect(runtime.sandboxCleanups).toContain(run.runId);
-      } finally {
-        if (!completed) await run.cancel();
-      }
-    });
-  });
+          },
+        ],
+      });
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: initialMessage ? { message: "Greet Alice briefly." } : {},
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+          },
+        ]);
+        let completed = false;
+        try {
+          await withTimeout(ready.promise, "prewarm sandbox startup");
+          await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+            kind: "reset",
+          });
+          await withTimeout(run.returnValue, "reset prewarmed session");
+          completed = true;
+          expect(aborted).toBe(true);
+          expect(starts).toBe(0);
+          expect(runtime.sandboxCleanups).toContain(run.runId);
+        } finally {
+          if (!completed) await run.cancel();
+        }
+      });
+    },
+  );
 
   it("does not start a sandbox for a model-only turn with packaged dynamic skills", async () => {
     const references: (string | null)[] = [];

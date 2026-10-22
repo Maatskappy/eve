@@ -47,6 +47,8 @@ export type SessionAnchor =
 
 /** What an owner does before it first waits on its inbox. */
 export type SessionStart =
+  /** A terminal command arrived during bootstrap; no initial delivery may run. */
+  | { readonly kind: "interrupted"; readonly error?: string }
   /** Runs a turn first; `input` is absent for a session started without a message. */
   | { readonly kind: "turn"; readonly input: DeliverHookPayload | undefined }
   /** A prewarmed session parks on the inbox before any session-scoped lifecycle work. */
@@ -327,6 +329,9 @@ async function runSessionLoop(
   };
   const runInitialAction = async (): Promise<SessionActionResult> => {
     switch (boot.start.kind) {
+      case "interrupted":
+        if (boot.start.error !== undefined) throw new Error(boot.start.error);
+        return { kind: "terminal", outcome: { kind: "expired" } };
       case "first-message":
         return await awaitPrewarmedAction();
       case "parked":

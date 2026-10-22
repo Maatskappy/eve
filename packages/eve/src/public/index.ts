@@ -33,3 +33,9 @@ export {
   type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";
+
+export type {
+  AgentBuildDefinition,
+  AgentPromptCacheDefinition,
+  AgentToolExposure,
+} from "#shared/agent-definition.js";

@@ -9,6 +9,7 @@ import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import type { EveCliTelemetry } from "#cli/telemetry/index.js";
 import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
+import { createBunDevServerError } from "#shared/eve-server-runtime.js";
 
 import { createDevBootProgressReporter } from "./boot-progress.js";
 import type { DevelopmentCliOptions } from "./command-options.js";
@@ -222,6 +223,7 @@ export function registerDevelopmentCommand(input: {
     )
     .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode)
     .action(async (options: DevelopmentCliOptions) => {
+      if (process.versions.bun !== undefined) throw createBunDevServerError();
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       telemetry.trackDevContext({ target: "local", ui: mode });

@@ -8,6 +8,7 @@ import {
   DEV_SERVER_CLOSE_BUDGET_MS,
 } from "#cli/dev/local-server-process.js";
 import { FORCED_EXIT_BACKSTOP_MS } from "#cli/shutdown.js";
+import { serializeError } from "#shared/errors.js";
 import { CONSOLE_RECORD_PREFIX, setConsoleRecordSubscriber } from "./console-records.js";
 
 const mocks = vi.hoisted(() => ({ fork: vi.fn(), loadEnv: vi.fn() }));
@@ -81,6 +82,27 @@ describe("createDevelopmentServer", () => {
 
     await closing;
     expect(child.unref).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the cause chain of a startup failure reported by the child", async () => {
+    const server = createDevelopmentServer("/tmp/app");
+    const started = server.start();
+    await vi.waitFor(() => expect(mocks.fork).toHaveBeenCalled());
+    const failure = new Error("Failed to evaluate authored module", {
+      cause: new SyntaxError("Export named 'missing' not found"),
+    });
+    // IPC delivers a structured clone, which drops Error prototypes and `cause`.
+    child.emit("message", structuredClone({ type: "failed", error: serializeError(failure) }));
+
+    const error = await started.then(
+      () => expect.unreachable("start() should reject"),
+      (reason: unknown) => reason as Error,
+    );
+    expect(error.message).toBe("Failed to evaluate authored module");
+    expect(error.cause).toMatchObject({
+      name: "SyntaxError",
+      message: "Export named 'missing' not found",
+    });
   });
 
   it("can route child stdout to stderr for protocol-owning parents", async () => {

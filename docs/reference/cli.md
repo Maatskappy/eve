@@ -266,6 +266,8 @@ eve dev [options]
 
 Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect --url <url>`.
 
+`eve dev` runs on Node.js and exits with an error when started on Bun's runtime, such as with `bun --bun eve dev`. Bun can still install dependencies and run scripts: `bun run dev` with an `eve dev` script runs eve on Node.js.
+
 | Flag                                | Type   | Default            | Description                                                     |
 | ----------------------------------- | ------ | ------------------ | --------------------------------------------------------------- |
 | `--host <host>`                     | string | all interfaces     | Host interface to bind                                          |

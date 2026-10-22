@@ -63,21 +63,18 @@ describe("eve dev server with bun", () => {
   // Bun cannot run the dev server today: Nitro wires crossws's Node adapter
   // into every dev worker, and that adapter refuses to initialize when the
   // Bun global exists. Until that support lands upstream, the contract is a
-  // fast, explanatory startup failure instead of a hang or a half-broken
-  // server. Replace this with a boot-and-stream assertion when `bun eve dev`
-  // becomes supported.
+  // fast failure that tells the user to run eve dev on Node.js. Replace this
+  // with a boot-and-stream assertion when `bun eve dev` becomes supported.
   it.skipIf(!bunAvailable)(
-    "fails fast with the worker readiness error when the CLI runs under bun",
+    "fails fast with a Node.js requirement when the CLI runs under bun",
     async () => {
       const app = await scenarioApp(BUN_LAYOUT_DESCRIPTOR);
 
-      const result = await runEveDevToExit(app.appRoot, {
-        defaultExtensions: false,
-        runtime: "bun",
-      });
+      const result = await runEveDevToExit(app.appRoot, { runtime: "bun" });
 
       expect(result.code).not.toBe(0);
-      expect(result.output).toContain("failed before readiness");
+      expect(result.output).toContain("eve dev needs Node.js");
+      expect(result.output).toContain("cannot run under Bun");
     },
     BUN_DEV_SERVER_TIMEOUT_MS,
   );

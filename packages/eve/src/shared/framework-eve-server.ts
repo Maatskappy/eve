@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
+import { resolveEveDevServerCommand } from "#shared/eve-server-runtime.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /** Default time to wait for an eve server spawned by a framework integration. */
@@ -428,6 +429,7 @@ function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
 
 function startEveDevServer(input: {
   readonly appRoot: string;
+  readonly host: EveFrameworkHost;
   readonly logLabel?: string;
   readonly timeoutMs: number;
   readonly workspaceAgentName?: string;
@@ -441,7 +443,7 @@ function startEveDevServer(input: {
       "0",
       ...(input.workspaceAgentName === undefined ? [] : ["--agent", input.workspaceAgentName]),
     ],
-    command: process.execPath,
+    command: resolveEveDevServerCommand(input.host.label),
     cwd: input.appRoot,
     logLabel: input.logLabel,
     timeoutMs: input.timeoutMs,
@@ -514,6 +516,7 @@ export async function resolveSharedEveDevServer(input: {
 
     const handle = await startEveDevServer({
       appRoot: input.appRoot,
+      host: input.host,
       logLabel: input.logLabel,
       timeoutMs,
       workspaceAgentName: input.workspaceAgentName,

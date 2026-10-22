@@ -32,6 +32,7 @@ import type {
   DevelopmentServerHandle,
   DevelopmentServerOptions,
 } from "#internal/nitro/host/types.js";
+import { deserializeError, type SerializedError } from "#shared/errors.js";
 
 type ChildMessage =
   | {
@@ -39,7 +40,7 @@ type ChildMessage =
       event: Parameters<NonNullable<DevelopmentServerOptions["onBootProgress"]>>[0];
     }
   | { type: "started"; handle: DevelopmentServerHandle }
-  | { type: "failed"; message: string; stack?: string };
+  | { type: "failed"; error: SerializedError };
 
 const childPath = fileURLToPath(new URL("./local-server-child.js", import.meta.url));
 
@@ -158,9 +159,7 @@ export function createDevelopmentServer(
         }
         if (message.type === "failed" && !settled) {
           settled = true;
-          const error = new Error(message.message);
-          if (message.stack !== undefined) error.stack = message.stack;
-          reject(error);
+          reject(deserializeError(message.error));
         }
       });
     });

@@ -1,6 +1,7 @@
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 import { getDevelopmentSandboxRunId } from "#execution/sandbox/development-run.js";
 import { prewarmDevelopmentBuildProcess } from "#internal/nitro/host/dev-build-host.js";
+import { serializeError } from "#shared/errors.js";
 
 // The first build process loads the compiler while this process loads the server.
 prewarmDevelopmentBuildProcess();
@@ -68,8 +69,7 @@ const intentReady = server.start().then(
     if (handle.kind === "existing" && process.connected) process.disconnect?.();
   },
   (error: unknown) => {
-    const value = error instanceof Error ? error : new Error(String(error));
-    send({ type: "failed", message: value.message, stack: value.stack });
+    send({ type: "failed", error: serializeError(error) });
     process.exitCode = 1;
     if (process.connected) process.disconnect?.();
   },

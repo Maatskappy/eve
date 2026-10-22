@@ -5,13 +5,13 @@ import {
   type DevelopmentBuildRequest,
   type DevelopmentBuildResponse,
   type DevelopmentPrepareInput,
-  serializeError,
 } from "#internal/nitro/host/dev-build-host.js";
 import {
   buildDevelopmentHost,
   prepareDevelopmentBuild,
 } from "#internal/nitro/host/dev-build-operations.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import { serializeError } from "#shared/errors.js";
 
 // IPC disconnect is the dev server's death signal: it fires however that process exits.
 process.once("disconnect", () => process.exit(0));

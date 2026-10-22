@@ -57,6 +57,42 @@ export function toError(raw: unknown): Error {
   return error;
 }
 
+/** Structured-clone-safe error shape that keeps the `cause` chain across IPC. */
+export interface SerializedError {
+  cause?: SerializedError;
+  message: string;
+  name: string;
+  stack?: string;
+}
+
+const MAX_SERIALIZED_CAUSE_DEPTH = 8;
+
+export function serializeError(error: unknown, depth = 0): SerializedError {
+  const value = toError(error);
+  const cause = (value as { cause?: unknown }).cause;
+  const serialized: SerializedError = { message: value.message, name: value.name };
+
+  if (value.stack !== undefined) {
+    serialized.stack = value.stack;
+  }
+
+  if (cause !== undefined && depth < MAX_SERIALIZED_CAUSE_DEPTH) {
+    serialized.cause = serializeError(cause, depth + 1);
+  }
+
+  return serialized;
+}
+
+export function deserializeError(serialized: SerializedError): Error {
+  const error = toError(serialized);
+
+  if (serialized.cause !== undefined) {
+    (error as Error & { cause?: unknown }).cause = deserializeError(serialized.cause);
+  }
+
+  return error;
+}
+
 /**
  * Yields the error itself and every object on its `cause` chain, once
  * each. Cycles terminate the walk instead of looping.

@@ -180,16 +180,8 @@ const channelPresentations: Record<string, ChannelPresentation> = {
 npx create-assistant-ui@latest -t eve my-app
 \`\`\`
 
-For an existing eve app, first add the Next.js Web Chat scaffold if the app does not already have one. The assistant-ui registry item requires that scaffold's \`@/*\` alias and \`@/lib/utils\` helper:
-
-\`\`\`bash
-eve add channel/web
-eve registry add @assistant-ui=https://r.assistant-ui.com/{name}.json
-eve add @assistant-ui/eve-chat --overwrite
-\`\`\``,
-    quickStart: `The template configures the eve agent, mounts \`withEve(withAui(...))\` in \`next.config.ts\`, and creates the assistant-ui runtime page. The registry item installs the runtime packages, replaces \`app/page.tsx\`, and writes its thread components and \`ask_question\` renderer. \`--overwrite\` replaces existing UI files, so install on a clean tree and review the diff before keeping it.
-
-Use \`eve registry view @assistant-ui/eve-chat\` to inspect the item before installing it. Follow the [assistant-ui eve quickstart](https://www.assistant-ui.com/docs/runtimes/eve/quickstart) for its required CSS and the complete manual setup path.`,
+For an existing app, follow the maintained [assistant-ui eve quickstart](https://www.assistant-ui.com/docs/runtimes/eve/quickstart). It owns the required eve agent, Next.js integration, UI components, and CSS setup.`,
+    quickStart: `The template configures the eve agent, mounts \`withEve(withAui(...))\` in \`next.config.ts\`, and creates the assistant-ui runtime page. For an existing app, use the [assistant-ui eve quickstart](https://www.assistant-ui.com/docs/runtimes/eve/quickstart) before adding the runtime page so the eve server, UI components, and required styles are in place.`,
     configure: `The adapter uses eve's native HTTP channel and its existing session routes; it does not add a server channel or its own authentication. Configure the eve channel to authenticate browser users before production. The default eve policy rejects production browser traffic until you replace it with your application's auth policy.
 
 If the app uses connections that can request authorization, mount the \`authorization\` data-part renderer described in the [assistant-ui eve runtime docs](https://www.assistant-ui.com/docs/runtimes/eve/overview#connector-authorization). The standard thread leaves unmatched authorization parts unrendered, so users cannot complete connector sign-in without it.`,

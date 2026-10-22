@@ -1,4 +1,4 @@
-import { SHARE_ENV, Worker } from "node:worker_threads";
+import { Worker } from "node:worker_threads";
 
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
 import {
@@ -19,6 +19,8 @@ export const DEVELOPMENT_COMPILE_MESSAGE_KIND = "eve:development-compile";
 
 export interface DevelopmentCompileRequest {
   readonly dockerAvailability: boolean | undefined;
+  /** The dev server's environment, including `.env` changes staged for this rebuild. */
+  readonly environment: Readonly<Record<string, string | undefined>>;
   readonly id: number;
   readonly input: DevelopmentCompileInput;
   readonly kind: typeof DEVELOPMENT_COMPILE_MESSAGE_KIND;
@@ -92,6 +94,7 @@ async function compileInWorker(input: DevelopmentCompileInput): Promise<Developm
   try {
     response = await requestCompilation(worker, {
       dockerAvailability,
+      environment: { ...process.env },
       id: ++nextRequestId,
       input,
       kind: DEVELOPMENT_COMPILE_MESSAGE_KIND,
@@ -124,10 +127,7 @@ async function compileInWorker(input: DevelopmentCompileInput): Promise<Developm
 }
 
 function startCompileWorker(): Worker {
-  const worker = new Worker(new URL("./dev-compile-worker.js", import.meta.url), {
-    // Environment files staged for a rebuild must reach the warm worker.
-    env: SHARE_ENV,
-  });
+  const worker = new Worker(new URL("./dev-compile-worker.js", import.meta.url));
   const forget = () => {
     if (compileWorker === worker) compileWorker = undefined;
   };

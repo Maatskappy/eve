@@ -23,6 +23,10 @@ parentPort?.on("message", async (request: Partial<DevelopmentCompileRequest> | n
     adoptLinuxDockerDaemonAvailability(request.dockerAvailability);
   }
 
+  if (request.environment !== undefined) {
+    replaceEnvironment(request.environment);
+  }
+
   // While a build runs, only its own work keeps this thread alive. A build that
   // can never settle then exits the worker and fails, instead of hanging.
   parentPort?.unref();
@@ -46,3 +50,14 @@ parentPort?.on("message", async (request: Partial<DevelopmentCompileRequest> | n
   };
   parentPort?.postMessage(response);
 });
+
+// Each build sees exactly the dev server's environment, and nothing an earlier build set.
+function replaceEnvironment(environment: Readonly<Record<string, string | undefined>>): void {
+  for (const key of Object.keys(process.env)) {
+    if (environment[key] === undefined) delete process.env[key];
+  }
+
+  for (const [key, value] of Object.entries(environment)) {
+    if (value !== undefined) process.env[key] = value;
+  }
+}

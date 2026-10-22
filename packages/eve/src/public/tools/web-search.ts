@@ -1,5 +1,3 @@
-import webSearchDefinition from "#tools/provided/web-search.js";
-
 export {
   type WebSearchFallbackProvider,
   type WebSearchProvider,
@@ -7,5 +5,3 @@ export {
   type WebSearchToolInput,
   webSearch,
 } from "#tools/provided/web-search.js";
-
-export default webSearchDefinition;

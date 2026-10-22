@@ -104,7 +104,7 @@ export async function executeGrepSearch(
     path: searchRealPath,
     pattern: input.pattern,
   });
-  const result = await sandbox.run({ abortSignal, command });
+  const result = await sandbox.run({ signal: abortSignal, command });
   const commandOutput = truncateUtf8(result.stdout, MAX_GREP_COMMAND_BYTES);
   const commandTruncated = commandOutput.truncated;
   if (

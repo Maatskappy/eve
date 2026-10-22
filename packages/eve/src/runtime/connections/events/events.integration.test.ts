@@ -165,7 +165,7 @@ beforeEach(async () => {
             url: connection.url,
             description: connection.description,
             auth: connection.authorization,
-            experimental_events: { onEvent: callback, onGap: gap, onTerminated: terminated },
+            experimental: { events: { onEvent: callback, onGap: gap, onTerminated: terminated } },
           }),
         }),
       },

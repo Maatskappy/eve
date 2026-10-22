@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { resolveDynamicSkills } from "#context/dynamic-skill-lifecycle.js";
+import { sessionSkills } from "#execution/catalog/skills.js";
 import {
   StaticModelReferenceKey,
   DynamicSkillManifestKey,
@@ -109,7 +110,7 @@ function makeSkill(
   markdown = description,
   files?: Record<string, string>,
 ): SkillPackageDefinition {
-  return defineSkill({ description, files, markdown });
+  return defineSkill({ description, files, content: markdown });
 }
 
 async function dispatch(ctx: ContextContainer, ...resolvers: ResolvedDynamicSkillResolver[]) {
@@ -121,6 +122,43 @@ function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
 }
 
 describe("resolveDynamicSkills", () => {
+  it("loads skill metadata saved with the checkpoint's markdown field", async () => {
+    const restored = await deserializeContext({
+      [DynamicSkillManifestKey.name]: {
+        policy: [
+          {
+            name: "policy",
+            description: "Policy",
+            markdown: "---\nname: policy\n---\n# Saved policy",
+          },
+        ],
+      },
+    });
+    expect(sessionSkills(restored).get("policy")?.markdown).toBe("# Saved policy");
+  });
+
+  it("isolates invalid authored skill fields while valid resolvers still apply", async () => {
+    const logs = captureLogRecords();
+    const { ctx } = createCtx();
+    await expect(
+      dispatch(
+        ctx,
+        createResolver("broken", () =>
+          defineSkill({ description: "Old authoring", markdown: "Old field" } as never),
+        ),
+        createResolver("valid", () => makeSkill("Valid policy")),
+      ),
+    ).resolves.toBeUndefined();
+    expect(ctx.get(DynamicSkillManifestKey)?.broken).toBeUndefined();
+    expect(ctx.get(DynamicSkillManifestKey)?.valid?.[0]?.name).toBe("valid");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        fields: { error: expect.stringContaining("markdown") },
+      }),
+    );
+  });
+
   it("stores SKILL.md as authored, including frontmatter", async () => {
     const { ctx } = createCtx();
     await dispatch(

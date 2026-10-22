@@ -719,7 +719,7 @@ async function converse(
       signInTool("read_mail"),
       {
         logicalPath: "tools/ask_question.ts",
-        loadNamespace: async () => ({ default: askQuestion() }),
+        loadNamespace: async () => ({ default: askQuestion }),
       },
       gatedTool(
         GATED_TOOL,

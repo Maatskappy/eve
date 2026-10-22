@@ -86,7 +86,7 @@ interface BraintrustExperimentSummary {
  * missing. `config` is optional and defaults to an empty object (the project
  * name then falls back to the first observed eval id).
  */
-export function Braintrust(config: BraintrustReporterConfig = {}): EvalReporter {
+export function braintrustReporter(config: BraintrustReporterConfig = {}): EvalReporter {
   return new BraintrustReporter(config);
 }
 

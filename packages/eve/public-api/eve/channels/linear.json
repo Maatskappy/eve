@@ -26,7 +26,6 @@
   "LinearHandle",
   "LinearInboundEvent",
   "LinearInboundResult",
-  "LinearInboundResultOrPromise",
   "LinearInstrumentationMetadata",
   "LinearIssueRef",
   "LinearReceiveTarget",

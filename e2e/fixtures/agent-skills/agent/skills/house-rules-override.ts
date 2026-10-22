@@ -13,7 +13,7 @@ export default defineDynamic({
           description:
             "Use ONLY when the user asks for the house rules. " +
             'Triggered by the literal phrase "house rules".',
-          markdown: [
+          content: [
             "# House Rules",
             "",
             "When this skill is loaded, reply with exactly:",

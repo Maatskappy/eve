@@ -43,7 +43,7 @@ export default defineDynamic({
       }
 
       return defineInstructions({
-        markdown: renderInstructions([
+        content: renderInstructions([
           roleInstructions,
           sourceWorkspaceInstructions,
           sourceEditingInstructions,

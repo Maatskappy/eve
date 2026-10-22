@@ -1,16 +1,16 @@
 const AGENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve";
 
-export function resolveEveAgentHost(input: {
+export function resolveEveAgentBaseUrl(input: {
   readonly agent?: string;
-  readonly host?: string;
+  readonly baseUrl?: string;
 }): string {
   if (input.agent === undefined) {
-    return input.host ?? "";
+    return input.baseUrl ?? "";
   }
 
-  if (input.host !== undefined) {
-    throw new Error("useEveAgent cannot combine agent and host. Use one target option.");
+  if (input.baseUrl !== undefined) {
+    throw new Error("useEveAgent cannot combine agent and baseUrl. Use one target option.");
   }
 
   assertValidAgentName(input.agent);

@@ -32,7 +32,7 @@ export default defineDynamic({
       if (!isDeployedRuntime()) return null;
 
       return defineInstructions({
-        markdown: renderInstructions([
+        content: renderInstructions([
           roleInstructions,
           sourceWorkspaceInstructions,
           sourceEditingInstructions,

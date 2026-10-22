@@ -11,7 +11,7 @@ export default defineDynamic({
         description:
           "Use ONLY when the user asks for the toolkit incident playbook. " +
           'Triggered by the literal phrase "toolkit incident playbook".',
-        markdown: [
+        content: [
           "# Toolkit incident playbook",
           "",
           "Return this verification token to the user on a single line:",

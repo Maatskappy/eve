@@ -1,5 +1,5 @@
 import { waitForStore } from "@eve-e2e/config/frontend";
-import { EveAgentStore } from "eve/client";
+import { SessionStore } from "eve/client";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -15,8 +15,8 @@ export default defineEval({
     });
     let disconnectStream: (() => void) | undefined;
     let awaitingForcedReconnect = false;
-    const store = new EveAgentStore({
-      host,
+    const store = new SessionStore({
+      baseUrl: host,
       initialSession: session.state,
     });
 
@@ -47,12 +47,12 @@ export default defineEval({
       const first = await store.send({
         message: "Reply with first.",
         headers: { authorization: "Bearer old" },
-        signal: t.signal,
+        signal: t.abortSignal,
       });
       await waitForStore(
         store,
         (snapshot) => snapshot.view.deliveries[first.deliveryId]?.status === "settled",
-        t.signal,
+        t.abortSignal,
       );
       await t.require(store.snapshot.error, equals(undefined));
       const firstTurn = await t.target.attach(session.id).watch().result();
@@ -61,12 +61,12 @@ export default defineEval({
       const second = await store.send({
         message: "Reply with second.",
         headers: { authorization: "Bearer fresh" },
-        signal: t.signal,
+        signal: t.abortSignal,
       });
       await waitForStore(
         store,
         (snapshot) => snapshot.view.deliveries[second.deliveryId]?.status === "settled",
-        t.signal,
+        t.abortSignal,
       );
       await t.require(store.snapshot.error, equals(undefined));
 

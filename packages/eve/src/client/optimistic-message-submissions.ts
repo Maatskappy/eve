@@ -1,5 +1,5 @@
 import type { LocalSubmission } from "#client/conversation.js";
-import { summarizeMessage } from "#client/eve-agent-store-helpers.js";
+import { summarizeMessage } from "#client/session-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 

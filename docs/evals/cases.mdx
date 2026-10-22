@@ -185,7 +185,7 @@ Use `expectOk()` only when the next operation depends on that intermediate turn 
 
 To intentionally omit an eval for the current target, call `t.skip(reason)` before creating sessions, sending messages, or recording assertions. Skipped evals are reported separately and do not affect the exit code.
 
-Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.signal` is an `AbortSignal` that fires on timeout.
+Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.abortSignal` is an `AbortSignal` that fires on timeout.
 
 For driving sessions created outside the eval, by a channel webhook or a schedule, see [Targets](./targets).
 

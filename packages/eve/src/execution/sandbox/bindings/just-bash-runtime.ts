@@ -181,7 +181,7 @@ export async function createBashSandbox(input: {
     rootPath: input.rootPath,
     sessionKey: input.sessionKey,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
-      if (options.abortSignal?.aborted) {
+      if (options.signal?.aborted) {
         throw new DOMException("The operation was aborted.", "AbortError");
       }
       const wrapped =
@@ -198,7 +198,7 @@ export async function createBashSandbox(input: {
         cmd: "eval",
         detached: true,
         env: { ...SANDBOX_AGENT_ENV, ...options.env },
-        signal: options.abortSignal,
+        signal: options.signal,
       });
       return adaptMultiplexedCommandToSandboxProcess({
         command,

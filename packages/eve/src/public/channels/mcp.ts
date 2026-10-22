@@ -54,7 +54,7 @@ import {
   readRouteSessionCreator,
   readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
-export interface McpChannelInput {
+export interface McpChannelConfig {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /** Override the default MCP route path (`/eve/v1/mcp`). */
@@ -107,7 +107,7 @@ export type McpChannel = Channel;
  * when OAuth discovery is needed.
  * The file containing this channel must be `agent/channels/mcp.ts`.
  */
-export function mcpChannel(input: McpChannelInput): McpChannel {
+export function mcpChannel(input: McpChannelConfig): McpChannel {
   if (input?.auth === undefined) {
     throw new Error("mcpChannel requires auth. Use none() for explicit public access.");
   }
@@ -371,7 +371,7 @@ function readChallengeScheme(value: string): string | undefined {
 async function authenticateMcpRequest(
   request: Request,
   args: RouteHandlerArgs,
-  input: McpChannelInput,
+  input: McpChannelConfig,
   oauth: OAuthResourceOptions | undefined,
   publish: McpPublishOptions,
 ): Promise<Response> {

@@ -40,7 +40,7 @@ export default defineInstructions({
 });
 ```
 
-`role` is either `"system"` or `"user"` and defaults to `"system"`. The legacy `{ markdown: string }` form still creates system-role instructions, but is deprecated; do not combine `markdown` with `content` or `role`. Blank content contributes no context.
+`role` is either `"system"` or `"user"` and defaults to `"system"`. The retired `{ markdown: string }` form is rejected; use `content`. Blank content contributes no context.
 
 A module-backed definition runs once at build time. eve stores its resolved content and role in the compiled manifest, so the definition is not a runtime entry.
 

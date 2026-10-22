@@ -197,7 +197,9 @@ eve add tool/web_search
 ```
 
 ```ts title="agent/tools/web_search.ts"
-export { default } from "eve/tools/web_search";
+import { webSearch } from "eve/tools/web_search";
+
+export default webSearch({ provider: "exa" });
 ```
 
 Override the provider-managed configuration for AI Gateway:
@@ -367,7 +369,7 @@ eve add tool/ask_question
 ```ts title="agent/tools/ask_question.ts"
 import { askQuestion } from "eve/tools/ask_question";
 
-export default askQuestion();
+export default askQuestion;
 ```
 
 `ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the first open request and the message matches an option or the question allows free text; see [Several requests at once](/docs/human-in-the-loop#several-requests-at-once). A steering message that doesn't answer it withdraws the question: `ask_question` resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a [markdown schedule](/docs/schedules#markdown-form-fire-and-forget), the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
@@ -446,7 +448,7 @@ eve add tool/no_reply
 ```ts title="agent/tools/no_reply.ts"
 import { noReply } from "eve/tools/no_reply";
 
-export default noReply();
+export default noReply;
 ```
 
 `no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
@@ -464,7 +466,7 @@ eve add tool/sleep
 ```ts title="agent/tools/sleep.ts"
 import { sleep } from "eve/tools/sleep";
 
-export default sleep();
+export default sleep;
 ```
 
 Customize it by wrapping the framework definition:
@@ -474,7 +476,7 @@ import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "eve/tools/sleep";
 
 export default defineWorkflowTool({
-  ...sleep(),
+  ...sleep,
   description: "Pause before checking an external operation again.",
 });
 ```

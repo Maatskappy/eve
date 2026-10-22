@@ -11,14 +11,12 @@ export {
   type TwilioEventContext,
   type TwilioHandle,
   type TwilioInboundResult,
-  type TwilioInboundResultOrPromise,
   type TwilioInstrumentationMetadata,
   type TwilioMessagingConfig,
   type TwilioReceiveTarget,
   type TwilioSendMessageOptions,
   type TwilioVoiceConfig,
   type TwilioVoiceResult,
-  type TwilioVoiceResultOrPromise,
 } from "#public/channels/twilio/twilioChannel.js";
 
 export {
@@ -26,7 +24,6 @@ export {
   type TwilioAccountSid,
   type TwilioApiOptions,
   type TwilioApiResponse,
-  type TwilioCredentials,
   type TwilioFetch,
   type TwilioSendMessageInput,
   type TwilioUpdateCallInput,

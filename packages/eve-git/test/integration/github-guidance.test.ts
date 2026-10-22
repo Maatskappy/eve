@@ -35,10 +35,10 @@ test("without github config, GitHub goes through the shell's gh and git", async 
   assert.match(content, /Use the `gh` and `git` CLIs in `bash`/u);
   assert.doesNotMatch(content, /not available to ordinary `bash`|`gh` tool/u);
   assert.match(content, /Load the pr skill before publishing/u);
-  assert.doesNotMatch(skill.markdown, /gh-signed-commit|gh`? tool/u);
+  assert.doesNotMatch(skill.content, /gh-signed-commit|gh`? tool/u);
   assert.doesNotMatch(skill.description, /signed commit/u);
-  assert.match(skill.markdown, /commit them, and push the branch/u);
-  assert.match(skill.markdown, /gh pr create --draft/u);
+  assert.match(skill.content, /commit them, and push the branch/u);
+  assert.match(skill.content, /gh pr create --draft/u);
 });
 
 test("with github config, GitHub goes through the brokered gh tool and signed commits", async () => {
@@ -48,7 +48,7 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);
   assert.match(content, /Use the `gh` tool for every authenticated GitHub operation/u);
   assert.match(content, /Load the pr skill before publishing/u);
-  assert.match(skill.markdown, /gh-signed-commit/u);
+  assert.match(skill.content, /gh-signed-commit/u);
   assert.match(skill.description, /signed commit/u);
-  assert.match(skill.markdown, /gh pr create --draft/u);
+  assert.match(skill.content, /gh pr create --draft/u);
 });

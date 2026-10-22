@@ -42,7 +42,7 @@ const initialMembers = (): Record<MemberId, MemberState> => ({
 });
 
 export function CouncilApp() {
-  const [client] = useState(() => new Client({ host: "" }));
+  const [client] = useState(() => new Client({ baseUrl: "" }));
   const completedMembersRef = useRef(new Set<MemberId>());
   const memberCallsRef = useRef(new Map<string, MemberId>());
   const runIdRef = useRef(0);

@@ -4,15 +4,15 @@ import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { MessageContent } from "#shared/message-content.js";
 
 import {
-  attachEveAgentStore,
-  detachEveAgentStore,
-  EveAgentStore,
-  type EveAgentStoreCallbacks,
-  type EveAgentStoreSnapshot,
-  type EveAgentStoreStatus,
+  attachSessionStore,
+  detachSessionStore,
+  SessionStore,
+  type SessionStoreCallbacks,
+  type SessionStoreSnapshot,
+  type SessionStoreStatus,
   type PrepareSend,
-} from "#client/eve-agent-store.js";
-import { resolveEveAgentHost } from "#client/agent-host.js";
+} from "#client/session-store.js";
+import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
 import type {
   ClientAuth,
@@ -29,7 +29,7 @@ export type { PrepareSend };
  * (catching up on an attached session), or `"busy"` (a send is in flight, or a turn, task, or
  * sign-in is pending). Failures are reported separately in `error`.
  */
-export type UseEveAgentStatus = EveAgentStoreStatus;
+export type UseEveAgentStatus = SessionStoreStatus;
 
 /**
  * Point-in-time projected state for an eve agent session: the conversation (`messages`,
@@ -38,7 +38,7 @@ export type UseEveAgentStatus = EveAgentStoreStatus;
  * `useEveAgent` passes this shape to callbacks such as `onFinish`, but exposes
  * the same fields as individual reactive refs on its return value.
  */
-export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
+export type UseEveAgentSnapshot = SessionStoreSnapshot;
 
 /**
  * Reactive return value from `useEveAgent`.
@@ -47,12 +47,12 @@ export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<Delivery>;
   /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
-  readonly previews: ComputedRef<EveAgentStoreSnapshot["previews"]>;
-  readonly messages: ComputedRef<EveAgentStoreSnapshot["messages"]>;
-  readonly agents: ComputedRef<EveAgentStoreSnapshot["agents"]>;
+  readonly previews: ComputedRef<SessionStoreSnapshot["previews"]>;
+  readonly messages: ComputedRef<SessionStoreSnapshot["messages"]>;
+  readonly agents: ComputedRef<SessionStoreSnapshot["agents"]>;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
-  readonly view: ComputedRef<EveAgentStoreSnapshot["view"]>;
+  readonly view: ComputedRef<SessionStoreSnapshot["view"]>;
   /** Raw server events from this session (authoritative stream). */
   readonly events: ComputedRef<readonly SessionStreamEvent[]>;
   /** Resolves at the durable tail; the session stream keeps following afterward. */
@@ -87,20 +87,20 @@ export interface UseEveAgentReturn {
  * Configuration for creating or binding a Vue eve agent session.
  *
  * Session configuration is read once when the composable creates its internal
- * store; to change the host or session, remount the component. For
+ * store; to change the base URL or session, remount the component. For
  * credentials or headers that must change without remounting, pass function
  * values to `auth` or `headers`; the client resolves those before each request.
  *
  * Lifecycle callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`,
- * `prepareSend`) are inherited from {@link EveAgentStoreCallbacks} and synced on
+ * `prepareSend`) are inherited from {@link SessionStoreCallbacks} and synced on
  * every render.
  */
-export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
+export interface UseEveAgentOptions extends SessionStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
    * `agent: "support"` targets same-origin routes under
-   * `/eve/support/v1/...`. Do not combine with `host`.
+   * `/eve/support/v1/...`. Do not combine with `baseUrl`.
    */
   readonly agent?: string;
   /** Authentication configuration; a function value is resolved per request. */
@@ -116,7 +116,7 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
    *
    * @default ""
    */
-  readonly host?: string;
+  readonly baseUrl?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly SessionStreamEvent[];
   /** Prior session cursor to resume from on mount. */
@@ -165,10 +165,10 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
   }
-  const store = new EveAgentStore({
+  const store = new SessionStore({
     auth: options.auth,
     headers: options.headers,
-    host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
+    baseUrl: resolveEveAgentBaseUrl({ agent: options.agent, baseUrl: options.baseUrl }),
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
@@ -186,18 +186,18 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     prepareSend: options.prepareSend,
   });
 
-  const snapshot = shallowRef<EveAgentStoreSnapshot>(store.snapshot);
+  const snapshot = shallowRef<SessionStoreSnapshot>(store.snapshot);
 
   if ("window" in globalThis) {
     const unsubscribe = store.subscribe(() => {
       snapshot.value = store.snapshot;
     });
-    attachEveAgentStore(store);
+    attachSessionStore(store);
     if (options.resume) void store.resume().catch(() => {});
 
     onScopeDispose(() => {
       unsubscribe();
-      detachEveAgentStore(store);
+      detachSessionStore(store);
     });
   }
 

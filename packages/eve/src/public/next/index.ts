@@ -66,7 +66,7 @@ type EveNextConfig = NextConfig;
  * a `context` containing `defaultConfig`, and returns a config (or a promise of
  * one). This is the form {@link withEve} returns.
  */
-export type WithEveConfigFunction<TConfig extends EveNextConfig = EveNextConfig> = (
+export type WithEveConfigFunction<TConfig extends object = object> = (
   phase: string,
   context: {
     readonly defaultConfig: TConfig;
@@ -76,7 +76,7 @@ export type WithEveConfigFunction<TConfig extends EveNextConfig = EveNextConfig>
 /**
  * Next.js config input that {@link withEve} accepts.
  */
-export type WithEveConfigInput<TConfig extends EveNextConfig = EveNextConfig> =
+export type WithEveConfigInput<TConfig extends object = object> =
   | WithEveConfigFunction<TConfig>
   | TConfig;
 
@@ -298,7 +298,7 @@ function isRewriteSections(rewrites: EveNextRewrites): rewrites is EveNextRewrit
   return !Array.isArray(rewrites);
 }
 
-async function resolveNextConfig<TConfig extends EveNextConfig>(
+async function resolveNextConfig<TConfig extends object>(
   configOrFunction: WithEveConfigInput<TConfig>,
   phase: string,
   context: {
@@ -306,7 +306,7 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
   },
 ): Promise<TConfig> {
   return typeof configOrFunction === "function"
-    ? await configOrFunction(phase, context)
+    ? await (configOrFunction as WithEveConfigFunction<TConfig>)(phase, context)
     : configOrFunction;
 }
 
@@ -430,7 +430,7 @@ async function buildAgentWorkspaceExtensions(
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
  * to the origin serving the eve service namespace.
  */
-export function withEve<TConfig extends EveNextConfig>(
+export function withEve<TConfig extends object>(
   configOrFunction: WithEveConfigInput<TConfig>,
   options: WithEveOptions = {},
 ): WithEveConfigFunction<TConfig> {
@@ -445,7 +445,7 @@ export function withEve<TConfig extends EveNextConfig>(
     if (phase === NEXT_PHASE_PRODUCTION_BUILD) {
       await buildAgentWorkspaceExtensions(agents);
     }
-    const existingRewrites = nextConfig.rewrites;
+    const existingRewrites = (nextConfig as NextConfig).rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({
       agents: agents.map((agent) => {
         const outputAgent: {

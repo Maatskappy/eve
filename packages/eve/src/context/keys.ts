@@ -352,7 +352,7 @@ export interface DurableDynamicSkillMetadata {
   /** Listed in the catalog instead of the dynamic skill announcement. */
   readonly deferred?: true;
   readonly description: string;
-  /** `SKILL.md` content as authored; loading strips any frontmatter. */
+  /** Checkpoint storage keeps `markdown`; the authoring API uses `content`. */
   readonly markdown: string;
   /**
    * Content hash of the package files. Present only for packages with

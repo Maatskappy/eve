@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { Console } from "#evals/runner/reporters/console.js";
+import { consoleReporter } from "#evals/runner/reporters/console.js";
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
 
-describe("Console", () => {
+describe("consoleReporter", () => {
   it("reports skipped evals and their reason", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
     const result = skippedResult();
 
     reporter.onEvalComplete(result);
@@ -19,7 +19,7 @@ describe("Console", () => {
 
   it("indents multiline assertion failure details", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -59,7 +59,7 @@ describe("Console", () => {
 
   it("warns when repeated soft assertions merge different scores and leaves gates quiet", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [
@@ -100,7 +100,7 @@ describe("Console", () => {
 
   it("aggregates repeated soft scores as one value per eval in the run summary", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
     const result: EveEvalResult = {
       assertions: [
         { name: "judge.boolean", passed: true, errored: false, score: 0.9, severity: "soft" },
@@ -128,7 +128,7 @@ describe("Console", () => {
 
   it("does not print diagnostics for passing assertions", () => {
     const lines: string[] = [];
-    const reporter = Console({ color: false, log: (line) => lines.push(line) });
+    const reporter = consoleReporter({ color: false, log: (line) => lines.push(line) });
 
     reporter.onEvalComplete({
       assertions: [

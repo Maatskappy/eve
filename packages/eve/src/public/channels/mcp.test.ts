@@ -14,7 +14,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { MCP_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
-import { mcpChannel, type McpChannelInput } from "#public/channels/mcp.js";
+import { mcpChannel, type McpChannelConfig } from "#public/channels/mcp.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
@@ -723,7 +723,7 @@ describe("mcpChannel tools", () => {
     };
     const forwardedBob = { ...bob, attributes: { "eve:forwarded-by": "user-1" } };
     function post(
-      options: Partial<McpChannelInput>,
+      options: Partial<McpChannelConfig>,
       header: string | undefined,
       tool: string,
       overrides: { createSession?: () => Promise<never>; invokeTool?: InvokeToolFn },
@@ -747,7 +747,7 @@ describe("mcpChannel tools", () => {
     }
     // [label, header, channel options, expected status or the [current, initiator] the tool runs as, error]
     type Ran = readonly [object, object];
-    const rows: Array<[string, string?, Partial<McpChannelInput>?, (number | Ran)?, string?]> = [
+    const rows: Array<[string, string?, Partial<McpChannelConfig>?, (number | Ran)?, string?]> = [
       ["no header", undefined, trusted, [principal, principal]],
       ["a valid header", valid, trusted, [forwardedAlice, forwardedAlice]],
       ["a header naming an initiator", withInitiator, trusted, [forwardedAlice, forwardedBob]],

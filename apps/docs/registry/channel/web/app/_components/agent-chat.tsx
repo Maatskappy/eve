@@ -1,7 +1,15 @@
 "use client";
 
 import { ClientError, type MessagePart } from "eve/client";
-import { activity, failure, interaction, interactions, turns, type Activity } from "eve/events";
+import {
+  activeTurn,
+  activity,
+  failure,
+  interaction,
+  interactions,
+  turns,
+  type Activity,
+} from "eve/events";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -69,6 +77,8 @@ export function AgentChat({
   });
 
   const isBusy = agent.status === "busy";
+  // A turn waiting on a person is open while the store is idle; it still takes steering and Stop.
+  const turnOpen = activeTurn(agent.view) !== undefined;
   const isResuming = agent.status === "resuming";
   const isEmpty = agent.messages.length === 0;
   const lastMessage = agent.messages.at(-1);
@@ -118,7 +128,7 @@ export function AgentChat({
     setCancellationError(undefined);
     hasSubmittedMessage.current = true;
     if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId);
-    const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
+    const options = turnOpen ? { turnPolicy: "steer" as const } : undefined;
 
     if (message.files.length === 0) {
       await agent.send(text, options);
@@ -150,7 +160,7 @@ export function AgentChat({
       />
       <ComposerAction
         hasInputText={hasInputText}
-        isBusy={isBusy}
+        canCancel={turnOpen}
         isResuming={isResuming}
         onCancel={requestCancellation}
       />
@@ -225,19 +235,19 @@ export function AgentChat({
 
 function ComposerAction({
   hasInputText,
-  isBusy,
+  canCancel,
   isResuming,
   onCancel,
 }: {
   readonly hasInputText: boolean;
-  readonly isBusy: boolean;
+  readonly canCancel: boolean;
   readonly isResuming: boolean;
   readonly onCancel: () => void;
 }) {
   const attachments = usePromptInputAttachments();
   const canSubmit = hasInputText || attachments.files.length > 0;
 
-  if (!isBusy || canSubmit) {
+  if (!canCancel || canSubmit) {
     return <PromptInputSubmit disabled={isResuming} />;
   }
 

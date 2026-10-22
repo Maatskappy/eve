@@ -1,7 +1,13 @@
 "use client";
 
 import type { ClientSessionState, SessionStoreSnapshot, SessionStreamEvent } from "eve/client";
-import { activity, openInteractions, session as sessionState, type Interaction } from "eve/events";
+import {
+  activeTurn,
+  activity,
+  openInteractions,
+  session as sessionState,
+  type Interaction,
+} from "eve/events";
 import type { EveMessage } from "eve/react";
 import { useEveAgent } from "eve/react";
 import {
@@ -395,7 +401,7 @@ export function AgentChatSession({
 
       try {
         await agent.send(message, {
-          turnPolicy: agent.status === "busy" ? "steer" : undefined,
+          turnPolicy: activeTurn(agent.view) !== undefined ? "steer" : undefined,
           clientContext: createConnectionClientContext(
             enabledConnections,
             setupStatus.connectionsAvailable,

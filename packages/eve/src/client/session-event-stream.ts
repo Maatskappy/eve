@@ -41,6 +41,7 @@ export class SessionEventStream {
         }
         this.#caughtUp.resolve();
       } catch (error) {
+        this.#ended = true;
         this.#caughtUp.reject(error);
         if (!this.#controller.signal.aborted) options.onError(error);
       } finally {

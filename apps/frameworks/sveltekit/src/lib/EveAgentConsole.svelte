@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { activeTurn } from "eve/events";
   import { useEveAgent, type EveMessagePart } from "eve/svelte";
 
   import ReasoningBlock from "$lib/ReasoningBlock.svelte";
@@ -11,6 +12,7 @@
   type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
   let isBusy = $derived(agent.status === "busy");
+  let turnOpen = $derived(activeTurn(agent.view) !== undefined);
   let isResuming = $derived(agent.status === "resuming");
   let isInputDisabled = $derived(isBusy || isResuming);
   let isEmpty = $derived(agent.messages.length === 0);
@@ -276,7 +278,7 @@
           class="min-h-20 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
           onkeydown={onKeydown}
         ></textarea>
-        {#if isBusy}
+        {#if turnOpen}
           <button
             type="button"
             aria-label="Stop response"

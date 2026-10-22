@@ -62,6 +62,7 @@ export class Conversation {
   readonly view: SessionView = emptySessionView();
   readonly previews: SessionPreviews = emptyPreviews();
   #through: { readonly line: number; readonly index: number } | undefined;
+  #committedThrough: { readonly line: number; readonly index: number } | undefined;
   #uncommitted: SessionStreamEvent[] = [];
   readonly #pendingAnswers = new Map<string, { readonly answer: Answer; deliveryId?: string }>();
   #submissions: readonly LocalSubmission[] = [];
@@ -93,6 +94,7 @@ export class Conversation {
     if (event.meta?.endOfLine === false) return true;
     const committed = this.#uncommitted;
     this.#uncommitted = [];
+    this.#committedThrough = this.#through;
     for (const fact of committed) {
       foldReceivedEvent(this.view, fact, this.previews);
       if (fact.type === "delivery.consumed" && (fact.data.history?.length ?? 0) > 0)
@@ -106,6 +108,12 @@ export class Conversation {
     this.#forgetAdmittedAnswers();
     this.#state = undefined;
     return true;
+  }
+
+  /** Forgets a partly received line so a reader replaying from the folded cursor admits it again. */
+  discardUncommitted(): void {
+    this.#uncommitted = [];
+    this.#through = this.#committedThrough;
   }
 
   /** Projects an answer only until its accepted delivery appears in the view. */

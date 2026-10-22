@@ -20,7 +20,7 @@ function toolPart(part: EveToolPart): EveToolUIPart {
   };
   if (part.state === "completed")
     return { ...base, state: "output-available", output: part.output };
-  if (["completed", "failed", "rejected", "cancelled"].includes(part.state))
+  if (["failed", "rejected", "cancelled"].includes(part.state))
     return {
       ...base,
       state: "output-error",

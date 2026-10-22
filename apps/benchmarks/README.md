@@ -42,6 +42,65 @@ Results are written under `apps/benchmarks/results/`. Each run includes the nati
 grader output, summary, copied project files, and validation output. Vercel Sandbox and AI Gateway
 credentials are required.
 
+## Profile sandbox latency
+
+Use the opt-in sandbox profiler to compare eve's actual Vercel provider with direct SDK
+creation from the same prepared snapshot. No model calls or deployed-agent changes are involved.
+Every run requires an explicit team and project and creates billable resources in that project.
+
+```sh
+pnpm --filter eve build:js
+pnpm profile:sandbox --team team_YOUR_TEAM --project prj_YOUR_PROJECT --dry
+
+# Set VERCEL_TOKEN or VERCEL_OIDC_TOKEN in your environment first.
+pnpm profile:sandbox --team team_YOUR_TEAM --project prj_YOUR_PROJECT --samples 10
+```
+
+The defaults are two excluded warmups and ten measured samples per variant, run sequentially
+with alternating variant order, using 2 vCPUs in `iad1`. Setup creates a minimal eve-prepared
+template once, outside the measured samples. It does not recreate d0's authored workspace,
+v's browser template, or e0's desktop template. To profile a particular prepared template, pass
+`--snapshot snap_YOUR_SNAPSHOT`; the profiler never deletes a supplied snapshot.
+
+The `eve` variant calls the current provider's `start()` implementation, including its lookup
+and initialization work. The `sdk` variant calls `Sandbox.create()` directly, without those
+steps. Both then run a readiness command, another command, and a file write/read round trip.
+SDK acquisition is a lower-level baseline, not a semantically equivalent replacement for eve.
+The run does not include workflow scheduling, selector hooks, or authored post-open setup.
+
+Artifacts are saved under `apps/benchmarks/results/sandbox-profile/`:
+
+- `summary.md`: min, p50, p95, and p99 for acquisition, first command, acquisition through first
+  command, subsequent command, and file operations. Failures are counted separately.
+- `profile.json`: configuration, source revision/dirty state, raw phase timings, HTTP paths,
+  statuses, UTC start times, request IDs, and any resources left after cleanup.
+- `trace.json`: Chrome/Perfetto trace events showing phases and their nested HTTP requests.
+  Open the file in a local trace viewer. Artifacts can contain private resource identifiers.
+
+HTTP durations end when response headers arrive. Operation phases include SDK processing and
+body/command waits, so do not add nested HTTP durations to the enclosing phase. Use request IDs
+and UTC timestamps to find the corresponding server logs/traces; this profiler does not expose
+server-side provisioning stages. Request headers, query strings, bodies, and exception messages
+are not written to the artifacts.
+
+`--region` selects the sandbox region, not the client's location. A laptop run includes the
+laptop's network path and is not directly comparable with hosted `iad1` measurements. Run the
+same entrypoint from a controlled `iad1` Node.js host for that comparison; `clientRegion` is only
+populated automatically when `VERCEL_REGION` is available. A prepared eve checkout is required
+on that host. Compare revisions with `--eve-dir /path/to/other/packages/eve` after rebuilding
+each checkout. Keep the snapshot, client location, CPU count, and sampling options fixed.
+Small samples are useful for debugging, not stable p99 estimates.
+
+The profiler attempts to stop/delete only sandboxes created during its run, then deletes its
+own prepared snapshot. Cleanup also runs after failures, SIGINT, or SIGTERM, independently of
+the cancelled measurement signal. A failed run exits nonzero and preserves its partial report.
+Requests time out after 90 seconds; the run stops starting work after 30 minutes. Forced process
+termination can bypass cleanup. Sandboxes have a five-minute execution timeout, but named records
+and snapshots can remain: inspect `remainingSandboxes` and `remainingSnapshot` after failures.
+
+Use `--variant eve` or `--variant sdk` for one path, `--cpus` for another resource size, and
+`--out` for a new artifact directory. `pnpm profile:sandbox --help` lists all options.
+
 ## Publish canonical results
 
 Canonical publication compares the `baseline` and `guided` treatments with the same immutable eve

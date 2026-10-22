@@ -21,6 +21,7 @@
     "guard:invariants": "node ./scripts/guard-invariants.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
+    "profile:sandbox": "pnpm --filter @eve-internal/benchmarks profile:sandbox",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "sync:template-files": "node ./scripts/sync-template-files.mjs",
     "test": "pnpm test:unit && pnpm test:integration",

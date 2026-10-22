@@ -1,12 +1,17 @@
-import { getSessionUsage } from "#harness/turn-tag-state.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import { signInInteractionId } from "#harness/interaction-facts.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
-import { readHitlState, writeHitlState, type RelayChange } from "#harness/hitl/requests.js";
+import {
+  readHitlState,
+  writeHitlState,
+  type RelayChange,
+  type ResponderChange,
+} from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
 import type { SessionView } from "./view.js";
 
@@ -19,7 +24,7 @@ import type { SessionView } from "./view.js";
 /** What a machine transition returns; approval storage still has direct writers. */
 export interface Transition {
   readonly turn: TurnState;
-  readonly events: readonly UnstampedMessageStreamEvent[];
+  readonly events: readonly SessionEvent[];
   /** Messages the transition commits to the end of history. */
   readonly commit?: readonly ModelMessage[];
   /** The transition empties history, as `clear` does. */
@@ -28,11 +33,16 @@ export interface Transition {
   readonly signIns?: readonly AuthorizationChallenge[];
   /** Relay routes the transition records or retires. */
   readonly relays?: RelayChange;
+  /** Responder records the transition writes or retires. */
+  readonly responders?: ResponderChange;
 }
 
-/** Publishes one event; `messages` is the conversation hooks see with it. */
+/**
+ * Publishes one event, or one transition's events as one commit; `messages` is the conversation
+ * the participants of the events that read history see.
+ */
 export type Publish = (
-  event: UnstampedMessageStreamEvent,
+  publication: SessionEvent | readonly SessionEvent[],
   messages?: readonly ModelMessage[],
 ) => Promise<void>;
 
@@ -44,25 +54,35 @@ export function sessionView(
   return {
     projection,
     relayedRequestIds: new Set(hitl.relays.keys()),
-    signIns: hitl.signIns,
+    responders: hitl.responders,
+    // A sign-in whose interaction closed, as when its call settles without it, is no longer one
+    // the session waits on.
+    signIns: hitl.signIns.filter(
+      (challenge) =>
+        projection.view.interactions[signInInteractionId(challenge)]?.status !== "settled",
+    ),
     turn: readTurnState(state),
-    usage: getSessionUsage({ state }),
   };
 }
 
 /**
- * The events hooks and resolvers read the conversation at: a turn's and a step's boundaries. The
- * session starts before any history, so `session.started` never carries the turn's input.
+ * The facts participants read the conversation at: a turn's start and end, and each model run's
+ * request. The session starts before any history, so `session.started` never carries it.
  */
 const READS_HISTORY: ReadonlySet<string> = new Set([
   "turn.started",
-  "step.started",
-  "turn.completed",
+  "model.requested",
+  "turn.settled",
 ]);
 
+/** True for an event whose participants read the conversation. */
+export function readsHistory(type: string): boolean {
+  return READS_HISTORY.has(type);
+}
+
 /**
- * Publishes a transition's events, then saves what it changed. A transition that changes history
- * needs a session restored with it.
+ * Publishes a transition's events as one commit, then saves what it changed. A transition that
+ * changes history needs a session restored with it.
  */
 export async function applyTransition<T extends { readonly state?: SessionStateMap }>(
   session: T,
@@ -74,15 +94,13 @@ export async function applyTransition<T extends { readonly state?: SessionStateM
   return saveTransition(session, transition);
 }
 
-/** Publishes a transition's events, in order. */
+/** Publishes a transition's events as one commit. */
 export async function publishTransition(
   transition: Transition,
   publish: Publish,
   messages?: readonly ModelMessage[],
 ): Promise<void> {
-  for (const event of transition.events) {
-    await publish(event, READS_HISTORY.has(event.type) ? messages : undefined);
-  }
+  if (transition.events.length > 0) await publish(transition.events, messages);
 }
 
 /** Saves what a transition changes once its events are published. */
@@ -103,14 +121,25 @@ export function saveTransition<T extends { readonly state?: SessionStateMap }>(
   return { ...next, history };
 }
 
-/** Drops the private records whose owner the projection shows closed. */
+/**
+ * Drops the private records whose row the projection shows done, the one way they retire: a
+ * relay's route once its asker settles the interaction, and a responder's once their answer
+ * settled. Admitted answers can still be refused while the rest of their batch waits.
+ */
 export function dropClosedRecords<T extends HarnessSessionBase>(
   session: T,
   projection: SessionProjection,
 ): T {
-  const closed = [...readHitlState(session.state).relays.keys()].filter((requestId) => {
-    const input = projection.inputs[requestId];
-    return input === undefined || input.status === "settled";
+  const hitl = readHitlState(session.state);
+  if (hitl.relays.size === 0 && Object.keys(hitl.responders).length === 0) return session;
+  const closed = [...hitl.relays.keys()].filter((requestId) => {
+    const row = projection.view?.interactions[requestId];
+    return row === undefined || row.status === "settled";
   });
-  return writeHitlState(session, { relays: { retire: closed } });
+  // A responder's record lives while their answer stands: a policy weighs it, or it waits to
+  // decide its approval, whose call reads who approved it.
+  const weighed = Object.keys(hitl.responders).filter(
+    (responseId) => (projection.view?.responses[responseId]?.status ?? "settled") === "settled",
+  );
+  return writeHitlState(session, { relays: { retire: closed }, responders: { retire: weighed } });
 }

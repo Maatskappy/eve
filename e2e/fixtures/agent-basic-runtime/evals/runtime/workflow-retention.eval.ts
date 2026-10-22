@@ -13,7 +13,7 @@ export default defineEval({
         : {};
       const turn = await t.send(message, { headers });
       turn.expectOk();
-      turn.event("message.completed", { count: 1 });
+      turn.event("content.completed", { count: 1, data: { kind: "text", phase: "reply" } });
       const sessionPath = `/eve/v1/session/${encodeURIComponent(turn.sessionId)}`;
       const readHistory = () =>
         t.target.fetch(`${sessionPath}/stream?follow=false&startIndex=0`, {
@@ -41,7 +41,15 @@ export default defineEval({
       let purged = false;
       for (const delayMs of [0, 50, 100, 200, 400, 800, 1_600, 3_200]) {
         await t.sleep(delayMs);
-        const history = await readHistory();
+        let history: Response;
+        try {
+          history = await readHistory();
+        } catch (error) {
+          // Purging the run can also interrupt a read before response headers arrive.
+          if (!(error instanceof TypeError)) throw error;
+          t.abortSignal.throwIfAborted();
+          continue;
+        }
         if (history.status === 410) {
           await t.require((await history.json()).code, equals("session_expired"));
           purged = true;

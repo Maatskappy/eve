@@ -37,7 +37,10 @@ export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 
-/** The task block for a child or schedule session, whose caller reads only the final reply. */
+/**
+ * The task block for a child or schedule session, whose caller reads only the final reply: a held
+ * turn's text there is narration.
+ */
 export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
   `- Only your final reply reaches your caller. While tasks work, call ${TASK_WAIT_TOOL_NAME} instead of replying. Start every independent task first, then wait.`,

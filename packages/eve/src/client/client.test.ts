@@ -8,7 +8,8 @@ import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import { encodeTestLine } from "#internal/testing/events.js";
 
 const AGENT_INFO = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
@@ -31,6 +32,13 @@ function testBinding(
     logicalPath,
     owner,
   };
+}
+
+/** A stream whose one line ends the session. */
+function endedStream(): Response {
+  return new Response(encodeTestLine({ data: { outcome: "completed" }, type: "session.ended" }), {
+    headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+  });
 }
 
 afterEach(() => {
@@ -70,11 +78,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({
       host: "https://eve.test?x-vercel-protection-bypass=secret",
     });
@@ -101,11 +105,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({ host: "https://eve.test", redirect: "manual" });
 
     await client.info();
@@ -141,11 +141,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
-      .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
-          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-        }),
-      );
+      .mockResolvedValueOnce(endedStream());
     const client = new Client({
       host: "https://eve.test",
       auth: { vercelOidc: { token: "oidc-tok" } },
@@ -164,6 +160,41 @@ describe("Client request policy", () => {
       expect(sent.get("authorization")).toBe("Bearer application-user");
       expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
     }
+  });
+
+  it("sends a file part's bytes as a data: URL", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(endedStream());
+    const client = new Client({ host: "https://eve.test" });
+    const hello = new TextEncoder().encode("hello");
+
+    await (
+      await client.sessions.create({
+        message: [
+          { text: "Two copies of a note.", type: "text" },
+          { data: hello, mediaType: "text/plain", type: "file" },
+          { data: hello.buffer, filename: "note.txt", mediaType: "text/plain", type: "file" },
+          { data: new URL("https://files.test/note.txt"), mediaType: "text/plain", type: "file" },
+        ],
+      })
+    ).response.result();
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.message).toEqual([
+      { text: "Two copies of a note.", type: "text" },
+      { data: "data:text/plain;base64,aGVsbG8=", mediaType: "text/plain", type: "file" },
+      {
+        data: "data:text/plain;base64,aGVsbG8=",
+        filename: "note.txt",
+        mediaType: "text/plain",
+        type: "file",
+      },
+      { data: "https://files.test/note.txt", mediaType: "text/plain", type: "file" },
+    ]);
   });
 
   it("includes response headers in info request errors", async () => {

@@ -114,7 +114,7 @@ export const Route = createFileRoute("/")({
 function Chat() {
   const agent = useEveAgent();
   const [draft, setDraft] = useState("");
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isBusy = agent.status === "busy";
   const isInputDisabled = isBusy || agent.status === "resuming";
 
   return (
@@ -127,7 +127,7 @@ function Chat() {
         void agent.send(text);
       }}
     >
-      {agent.data.messages.map((message) => (
+      {agent.messages.map((message) => (
         <article key={message.id}>
           <header>{message.role}</header>
           {message.parts.map((part, index) =>

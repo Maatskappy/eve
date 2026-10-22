@@ -15,7 +15,8 @@ import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/wo
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
-import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { DynamicSessionOrTurnEvent } from "#dynamic/definition.js";
+import type { SessionStartedPoint as SessionStartedStreamEvent } from "#harness/session-machine/change-points.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -25,13 +26,13 @@ import type { AgentToolExposure } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("dynamic-subagents");
-const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set(["session.started", "turn.started"]);
 
 type DynamicSubagentSelections = Readonly<Record<string, DurableDynamicSubagentSelection>>;
+/** The scopes a subagent resolver answers. */
 
 async function resolveSelections(input: {
   readonly ctx: ContextContainer;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<DynamicSubagentSelections> {
@@ -42,7 +43,10 @@ async function resolveSelections(input: {
         return [resolver.nodeId, null] as const;
       }
 
-      const result = await handler(input.event, buildResolveContext(input.ctx, input.messages));
+      const result = await handler(
+        input.event.fact,
+        buildResolveContext(input.ctx, input.messages),
+      );
       if (result === null || result === undefined) {
         return [resolver.nodeId, null] as const;
       }
@@ -158,16 +162,13 @@ function isRemoteAgentDefinition(value: unknown): boolean {
   );
 }
 
-export async function dispatchDynamicSubagentEvent(input: {
+/** Runs the dynamic subagent resolvers for a session or a turn. */
+export async function resolveDynamicSubagents(input: {
   readonly ctx: ContextContainer;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: DynamicSessionOrTurnEvent;
   readonly messages: readonly ModelMessage[];
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<void> {
-  if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(input.event.type)) {
-    return;
-  }
-
   const matching = input.resolvers.filter((resolver) =>
     resolver.eventNames.includes(input.event.type),
   );
@@ -217,13 +218,6 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
   }
 
   return tools;
-}
-
-export function getDynamicSubagentSelection(
-  input: ContextReader,
-  nodeId: string,
-): Exclude<DurableDynamicSubagentSelection, null> | undefined {
-  return readDynamicSubagentSelections(input)[nodeId] ?? undefined;
 }
 
 /**

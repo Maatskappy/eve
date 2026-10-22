@@ -17,7 +17,6 @@ const DEPLOY_INPUT_SCHEMA = toInputSchema({
 });
 
 export function buildWorkflowToolSerializedContext(input: {
-  readonly acceptedDeploymentId?: string;
   readonly continuationToken: string;
   readonly requestInput?: boolean;
 }): Record<string, unknown> {
@@ -27,16 +26,12 @@ export function buildWorkflowToolSerializedContext(input: {
     "eve.stateLayout": 1,
     "eve.capabilities": { requestInput: input.requestInput ?? false },
     "eve.channel": { kind: "http", state: {} },
-    ...(input.acceptedDeploymentId === undefined
-      ? {}
-      : {
-          "eve.channelDelivery": {
-            acceptedDeploymentId: input.acceptedDeploymentId,
-            channelKind: "http",
-            channelName: "test",
-            deliveryId: "delivery-initial",
-          },
-        }),
+    // Raw workflow fixtures bypass channel dispatch and supply its initial identity here.
+    "eve.channelDelivery": {
+      channelKind: "http",
+      channelName: "test",
+      deliveryId: "delivery-initial",
+    },
     "eve.continuationToken": input.continuationToken,
   };
 }

@@ -17,7 +17,9 @@ export default defineEval({
     const initial = await t.target.watchTurn(accepted.sessionId).result();
     initial.succeeded();
 
-    const next = t.target.watchTurn(accepted.sessionId, { startIndex: initial.events.length });
+    const next = t.target.watchTurn(accepted.sessionId, {
+      startIndex: (initial.events.at(-1)?.meta.position.line ?? -1) + 1,
+    });
     const followup = {
       message: "Bob joins Alice and asks for a brief outline of the report.",
       idempotencyKey: "bob-outline",
@@ -25,15 +27,13 @@ export default defineEval({
     await Promise.all([send(first), send(followup), send(followup)]);
     const reply = await next.result();
     reply.succeeded();
-    await t.require(
-      reply.events
-        .filter((event) => event.type === "message.received")
-        .map((event) => event.data.message),
-      equals([followup.message]),
-    );
+    reply.event("delivery.consumed", {
+      count: 1,
+      data: { parts: [{ kind: "text", text: followup.message }] },
+    });
 
     const barrier = t.target.watchTurn(accepted.sessionId, {
-      startIndex: initial.events.length + reply.events.length,
+      startIndex: (reply.events.at(-1)?.meta.position.line ?? -1) + 1,
     });
     const sentinel = {
       message:
@@ -42,12 +42,10 @@ export default defineEval({
     await send(sentinel);
     const drained = await barrier.result();
     drained.succeeded();
-    await t.require(
-      drained.events
-        .filter((event) => event.type === "message.received")
-        .map((event) => event.data.message),
-      equals([sentinel.message]),
-    );
+    drained.event("delivery.consumed", {
+      count: 1,
+      data: { parts: [{ kind: "text", text: sentinel.message }] },
+    });
     const response = await t.target.fetch(
       `/eve/v1/session/${accepted.sessionId}/stream?follow=false`,
     );
@@ -56,7 +54,7 @@ export default defineEval({
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as { type: string });
+      .flatMap((line) => (JSON.parse(line) as { facts?: { type: string }[] }).facts ?? []);
     await t.require(events.filter((event) => event.type === "turn.started").length, equals(3));
   },
 });

@@ -1,42 +1,62 @@
 import type { ModelMessage } from "ai";
 
 import type { SessionAuth, SessionPredecessor } from "#context/keys.js";
+import type {
+  SessionStartedPoint,
+  StepStartedPoint,
+  TurnStartedPoint,
+} from "#harness/session-machine/change-points.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
-/**
- * Stream event types allowed for dynamic tool resolvers. Dispatch
- * supports any event; this extract restricts the public surface until
- * more events are validated.
- */
-export type DynamicToolEventName = Extract<
-  UnstampedMessageStreamEvent["type"],
-  "session.started" | "turn.started" | "step.started"
->;
-
-export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-  "step.started",
-]);
+/** The change points dynamic resolvers name: a session's first turn, a turn, and each model run. */
+export type DynamicToolEventName = "session.started" | "turn.started" | "step.started";
 
 /**
- * Instructions and skills are restricted to session/turn boundaries.
- * Keeping their resolved context stable within a turn avoids changing the
- * model input between tool-loop steps.
+ * What a dynamic resolver's handler receives at its change point: the point's name and where the
+ * session is. A private payload, not a stream event.
  */
-export const ALLOWED_DYNAMIC_INSTRUCTION_EVENTS: ReadonlySet<string> =
-  new Set<DynamicToolEventName>(["session.started", "turn.started"]);
+export type DynamicScopeEvent = SessionStartedPoint | TurnStartedPoint | StepStartedPoint;
 
-export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>([
-  "session.started",
-  "turn.started",
-]);
+/** A session's or a turn's start: the events every resolver but the model's and tools' answers. */
+export type DynamicSessionOrTurnEvent = Exclude<DynamicScopeEvent, { type: "step.started" }>;
 
-export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>(
-  ["session.started", "turn.started"],
-);
+/** The kinds of dynamic resolver, by the slot they're authored in. */
+export type DynamicResolverKind =
+  | "connection"
+  | "instructions"
+  | "model"
+  | "skill"
+  | "subagent"
+  | "tool";
+
+/**
+ * The events each kind of dynamic resolver handles. Instructions, skills, connections, and
+ * subagents stay stable within a turn, so the model input doesn't change between its steps.
+ */
+export const DYNAMIC_RESOLVER_EVENTS = {
+  connection: ["session.started", "turn.started"],
+  instructions: ["session.started", "turn.started"],
+  model: ["session.started", "turn.started", "step.started"],
+  skill: ["session.started", "turn.started"],
+  subagent: ["session.started", "turn.started"],
+  tool: ["session.started", "turn.started", "step.started"],
+} as const satisfies Record<DynamicResolverKind, readonly DynamicToolEventName[]>;
+
+/** Fails the build when a resolver of `kind` handles an event it never receives. */
+export function assertDynamicResolverEvents(
+  kind: DynamicResolverKind,
+  eventNames: readonly string[],
+  message: string,
+): void {
+  const supported: readonly string[] = DYNAMIC_RESOLVER_EVENTS[kind];
+  const unsupported = eventNames.find((eventName) => !supported.includes(eventName));
+  if (unsupported === undefined) return;
+  const names = supported.map((eventName) => `"${eventName}"`);
+  throw new Error(
+    `${message} Dynamic ${kind} resolvers support only ${names.slice(0, -1).join(", ")} and ${names.at(-1)!} handlers. Unsupported event: "${unsupported}".`,
+  );
+}
 
 /**
  * Context passed to a dynamic resolver's event handler.
@@ -84,6 +104,10 @@ export interface DynamicResolveContext {
  * wide so it accepts both tool-returning and skill-returning handlers:
  * the slot directory (tools/ vs skills/) determines the required return,
  * validated at runtime by the respective resolver.
+ *
+ * Each handler receives the session fact behind its key: `session.started` and `turn.started`
+ * get those facts, and `step.started` gets the run's `model.requested`, whose `scope` names its
+ * model run and the turn it serves, or the context change for a compaction's summary run.
  */
 export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (
@@ -133,11 +157,10 @@ export type DynamicSentinel<TResult = unknown> = {
  * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
  *   and expose the subagent, or `null` to omit it.
  *
- * Per-slot events: tools resolvers run at `session.started`,
- * `turn.started`, and `step.started`. Skills and connection resolvers run only
- * at `session.started` and `turn.started`; the runtime never invokes a
- * handler keyed on `step.started` in that slot. Dynamic subagents run at
- * `session.started` and `turn.started` only.
+ * Per-slot events: tool and model resolvers run at `session.started`,
+ * `turn.started`, and `step.started`. Skill, instruction, connection, and
+ * subagent resolvers run only at `session.started` and `turn.started`. A
+ * handler keyed on any other event fails the build.
  *
  * ```ts
  * import { defineDynamic, defineTool } from "eve/tools";

@@ -1,5 +1,5 @@
 import { type ChannelCors } from "#channel/cors.js";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
@@ -41,14 +41,14 @@ export type FetchFileFunction = (
  * schedule proactively routes a message to it.
  */
 export interface GenericReceiveInput<TReceiveTarget = Record<string, unknown>> {
-  readonly message: string | UserContent;
+  readonly message: MessageContent;
   readonly target: Readonly<TReceiveTarget>;
   readonly auth: SessionAuthContext | null;
 }
 
 /**
  * The object passed to {@link defineChannel}. `routes` is required; `state`
- * seeds durable adapter state, `context` builds the per-step `channel` argument
+ * seeds durable adapter state, `context` builds the per-step `ctx.channel`
  * for `events` and `deliver`, `events` handle session lifecycle, `receive`
  * accepts cross-channel handoffs, `fetchFile` stages remote file URLs,
  * `audience` classifies conversation visibility, and `metadata` projects
@@ -82,10 +82,9 @@ export interface GenericChannelDefinition<
    * register late-bound callbacks. eve writes state mutations made inside the
    * returned context back through `adapter.state`.
    *
-   * Return the channel-owned context (thread handles, API clients, etc.). The
-   * framework passes it as the `channel` argument to event handlers (with
-   * {@link ChannelContinuationOps} injected) and passes {@link SessionContext}
-   * as a separate `ctx` argument.
+   * Return the channel-owned context (thread handles, API clients, etc.). An
+   * event handler reads it as `ctx.channel`, with continuation routing added,
+   * beside the session's context.
    */
   context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
 

@@ -57,16 +57,12 @@ export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
 }
 
 /**
- * The task block, when the session offers tasks. `finalReplyOnly` is set for a
- * child or schedule session, which hides a held turn's text, so a reply before
- * a result would reach no one.
+ * The task block, when the session offers tasks. `finalReplyOnly` is set for a child or schedule
+ * session, whose caller reads only the final reply, so a reply before a result reaches no one.
  */
-export function taskSystemMessages(
-  offers: boolean,
-  options: { readonly finalReplyOnly: boolean },
-): SystemModelMessage[] {
+export function taskSystemMessages(offers: boolean, finalReplyOnly: boolean): SystemModelMessage[] {
   if (!offers) return [];
-  const content = options.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
+  const content = finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
   return [{ content, role: "system" }];
 }
 
@@ -137,7 +133,7 @@ export function workingTaskIds(session: HarnessSession): readonly string[] {
  * `task.result` message with every settled result, then the
  * `[Tasks]` note when the listing changed. The results are marked delivered
  * in the same step. The message lives only in the model's history: clients
- * read outcomes from `task.settled`.
+ * read outcomes from `call.settled`.
  */
 export async function appendTaskContext(input: {
   readonly messages: readonly HarnessModelMessage[];

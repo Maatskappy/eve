@@ -10,10 +10,10 @@
 
   type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
-  let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isBusy = $derived(agent.status === "busy");
   let isResuming = $derived(agent.status === "resuming");
   let isInputDisabled = $derived(isBusy || isResuming);
-  let isEmpty = $derived(agent.data.messages.length === 0);
+  let isEmpty = $derived(agent.messages.length === 0);
   let cancellationError = $state<string>();
   let errorMessage = $derived(cancellationError ?? agent.error?.message);
 
@@ -28,7 +28,7 @@
   }
 
   $effect(() => {
-    const messageCount = agent.data.messages.length;
+    const messageCount = agent.messages.length;
 
     if (!isNearBottom || messageCount === 0) return;
 
@@ -81,10 +81,10 @@
     }
   }
 
-  function handleInputResponses(
+  function handleAnswers(
     responses: readonly {
       readonly optionId?: string;
-      readonly requestId: string;
+      readonly interactionId: string;
       readonly text?: string;
     }[],
   ) {
@@ -93,7 +93,7 @@
   }
 
   function partKey(part: EveMessagePart, index: number): string {
-    if (part.type === "dynamic-tool") return part.toolCallId;
+    if (part.type === "tool") return part.callId;
     return `${part.type}:${index}`;
   }
 
@@ -125,7 +125,7 @@
         <span class="text-muted-foreground">/</span>
         <span class="text-muted-foreground">agent</span>
       </div>
-      <StatusDot status={agent.status} />
+      <StatusDot status={agent.status} error={!!errorMessage} />
     </div>
   </header>
 
@@ -157,7 +157,7 @@
         onscroll={onMessagesScroll}
       >
         <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6">
-          {#each agent.data.messages as message (message.id)}
+          {#each agent.messages as message (message.id)}
             <div
               class="flex w-full gap-2 {message.role === 'user'
                 ? 'ml-auto justify-end'
@@ -245,11 +245,11 @@
                         </span>
                       </div>
                     {/if}
-                  {:else if part.type === "dynamic-tool"}
+                  {:else if part.type === "tool"}
                     <ToolBlock
                       {part}
                       canRespond={!isInputDisabled}
-                      onInputResponses={handleInputResponses}
+                      onAnswers={handleAnswers}
                     />
                   {/if}
                 {/each}

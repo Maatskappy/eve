@@ -192,9 +192,6 @@ catalogs:
     '@ai-sdk/anthropic':
       specifier: ^4.0.78
       version: 4.0.78
-    '@ai-sdk/code-mode':
-      specifier: ^1.0.94
-      version: 1.0.94
     '@ai-sdk/google':
       specifier: ^4.0.93
       version: 4.0.93
@@ -296,6 +293,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@vercel/blob':
+        specifier: 2.8.0
+        version: 2.8.0
       js-yaml:
         specifier: 4.3.2
         version: 4.3.2
@@ -1768,9 +1768,6 @@ importers:
       '@ai-sdk/anthropic':
         specifier: 'catalog:'
         version: 4.0.78(zod@4.5.4)
-      '@ai-sdk/code-mode':
-        specifier: 'catalog:'
-        version: 1.0.94(ai@7.0.137(zod@4.5.4))(typescript@7.0.2)
       '@ai-sdk/google':
         specifier: 'catalog:'
         version: 4.0.93(zod@4.5.4)
@@ -1958,8 +1955,8 @@ importers:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
       run:
-        specifier: 2.1.2
-        version: 2.1.2(typescript@7.0.2)
+        specifier: 2.1.8
+        version: 2.1.8(typescript@7.0.2)
       semver:
         specifier: 7.8.4
         version: 7.8.4
@@ -2159,12 +2156,6 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/code-mode@1.0.94':
-    resolution: {integrity: sha512-4H/DVcceS0o8iMmLF+uVIW8t8PsvFB7ygMETqUsBqS6C1wEPemM8IepDFQX+tRwgsS7bK4L3N9wrew3e82A5aw==}
-    engines: {node: '>=22.13.0'}
-    peerDependencies:
-      ai: 7.0.137
 
   '@ai-sdk/deepseek@1.0.57':
     resolution: {integrity: sha512-sF+t6MnK1PTNN1oqmJpnWCm/4reVOpKryR1EcIl17O5Bu+AFstD/DpFZueRtzFk1dEZ0+uPX6gZXndjrNPAxLQ==}
@@ -4463,18 +4454,21 @@ packages:
   '@opentelemetry/sdk-trace-base@2.11.0':
     resolution: {integrity: sha512-H19x/TX/LZdqiYOjM7fqtSxwlplC5pgelavqbQdHbhdq0q/AI/TGkM2dfGuuynTXmJPeF2HoZVoPDu+TGoW78A==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.6.1':
     resolution: {integrity: sha512-r86ut4T1e8vNwB35CqCcKd45yzqH6/6Wzvpk2/cZB8PsPLlZFTvrh8yfOS3CYZYcUmAx4hHTZJ8AO8Dj8nrdhw==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-base@2.7.1':
     resolution: {integrity: sha512-NAYIlsF8MPUsKqJMiDQJTMPOmlbawC1Iz/omMLygZ1C9am8fTKYjTaI+OZM+WTY3t3Glo0wnOg/6/pac6RGPPw==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
@@ -13728,8 +13722,8 @@ packages:
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
 
-  run@2.1.2:
-    resolution: {integrity: sha512-8c5Zs3WazGnBisfv0XWItQJxVHp04N6YnNgjsdprplvvFh4Kltfwh6duVkpro4hQ5uIUmUKTAIVfTTIa0uDpuw==}
+  run@2.1.8:
+    resolution: {integrity: sha512-B+N1a8grWUEmQwS8QL+o0yoB0sjPitphQ/PaION9j0m/msDxA9j1fxgX6VC4m604/OzT3IAMAZIw7kn8zn1R0A==}
     engines: {node: '>=20.19.0'}
     peerDependencies:
       typescript: '>=5.1.6 <7'
@@ -15485,13 +15479,6 @@ snapshots:
       '@ai-sdk/provider-utils': 3.0.37(zod@4.4.3)
       zod: 4.4.3
     optional: true
-
-  '@ai-sdk/code-mode@1.0.94(ai@7.0.137(zod@4.5.4))(typescript@7.0.2)':
-    dependencies:
-      ai: 7.0.137(zod@4.5.4)
-      run: 2.1.2(typescript@7.0.2)
-    transitivePeerDependencies:
-      - typescript
 
   '@ai-sdk/deepseek@1.0.57(zod@4.4.3)':
     dependencies:
@@ -29651,7 +29638,7 @@ snapshots:
     dependencies:
       queue-microtask: 1.2.3
 
-  run@2.1.2(typescript@7.0.2):
+  run@2.1.8(typescript@7.0.2):
     optionalDependencies:
       typescript: 7.0.2
 

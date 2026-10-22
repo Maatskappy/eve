@@ -606,8 +606,6 @@ describe("app runtime dependency tracing", () => {
     expect(workflowServerSource).toContain("[Unprintable QuickJS value]");
     // The generated JavaScript sandbox runtime ships bundled inline, never traced, so
     // its quickjs dependency must not sneak into the trace either.
-    expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
-    expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("@ai-sdk/code-mode");
     expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("run");
     expect(workflowTracedPackageJson.dependencies).not.toHaveProperty("run");
     expect(sleepTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");

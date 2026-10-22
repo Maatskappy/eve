@@ -553,6 +553,59 @@ describe("mounted extension without config", () => {
   });
 });
 
+/**
+ * `eve dev` recompiles in one long-lived process after every authored change, and Node
+ * never evicts an evaluated ES module. An unchanged extension module must therefore keep
+ * its module instance across compiles instead of adding a copy per rebuild (#5203).
+ */
+describe("mounted extension across recompiles", () => {
+  it.fails("evaluates an unchanged extension module once across compiles", async () => {
+    const app = await createAppRoot("eve-mounted-extension-recompile-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/widget.mjs": 'export { default } from "@acme/widget";\n',
+        "node_modules/@acme/widget/package.json": `${JSON.stringify({
+          name: "@acme/widget",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        })}\n`,
+        "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          tool: 1,
+        }),
+        "node_modules/@acme/widget/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "export default defineExtension();",
+          "",
+        ].join("\n"),
+        "node_modules/@acme/widget/extension/tools/widget_ping.mjs": [
+          'import { defineTool } from "eve/tools";',
+          "globalThis.__eveWidgetEvaluations = (globalThis.__eveWidgetEvaluations ?? 0) + 1;",
+          "export default defineTool({",
+          '  description: "Return a fixed widget token.",',
+          "  inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
+          "  async execute() {",
+          '    return { token: "widget-ok" };',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+    });
+    const evaluations = () =>
+      (globalThis as { __eveWidgetEvaluations?: number }).__eveWidgetEvaluations;
+
+    await compileAgent({ startPath: app.appRoot });
+    const afterFirstCompile = evaluations();
+    expect(afterFirstCompile).toBe(1);
+
+    await compileAgent({ startPath: app.appRoot });
+    expect(evaluations()).toBe(afterFirstCompile);
+  });
+});
+
 describe("mounted extension with an unsupported capability contract", () => {
   it("fails compilation with the capability diagnostic", async () => {
     // One past the current epoch is unsupported by construction.

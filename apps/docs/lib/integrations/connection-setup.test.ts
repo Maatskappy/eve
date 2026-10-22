@@ -7,6 +7,7 @@ import {
 } from "./connection-setup";
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
+import tinyfish from "../../registry/connections/tinyfish";
 
 describe("Browser Use connection setup", () => {
   it("generates server-side header authentication without Connect", () => {
@@ -46,16 +47,27 @@ describe("Agentcard connection setup", () => {
 });
 
 describe("TinyFish connection setup", () => {
-  it("uses the published Connect service and documents the approval boundary", () => {
+  it("keeps the gallery quick start and registry approval policy aligned", () => {
     const integration = getIntegration("tinyfish")!;
     const setup = buildConnectionSetup(integration);
     const quickStart = setup.variants["mcp:user"];
+    const policy = tinyfish.approval;
 
     expect(quickStart).toContain('url: "https://agent.tinyfish.ai/mcp"');
     expect(quickStart).toContain('auth: connect("tinyfish")');
     expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create tinyfish");
+    expect(integration.quickStart).toContain("const READ_ONLY_TOOLS = new Set([");
+    expect(integration.quickStart).toContain("approval: ({ toolName }) =>");
     expect(integrationMarkdown(integration)).toContain("requires approval for browser automation");
     expect(integrationMarkdown(integration)).toContain("fail-closed policy");
+
+    expect(typeof policy).toBe("function");
+    if (typeof policy !== "function") throw new Error("TinyFish must define an approval policy.");
+    const approvalFor = (toolName: string) => policy({ toolName } as Parameters<typeof policy>[0]);
+
+    expect(approvalFor("tinyfish__search")).toBe("not-applicable");
+    expect(approvalFor("tinyfish__run_web_automation")).toBe("user-approval");
+    expect(approvalFor("tinyfish__future_tool")).toBe("user-approval");
   });
 });
 

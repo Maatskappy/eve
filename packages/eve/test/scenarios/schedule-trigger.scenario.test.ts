@@ -189,7 +189,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     // is the form that's forbidden from declaring a channel.
     await writeFile(
       join(agentRoot, "schedules", "heartbeat.mjs"),
-      'export default { cron: "*/1 * * * *", markdown: "Heartbeat — no channel." };\n',
+      'export default { cron: "*/1 * * * *", content: "Heartbeat — no channel." };\n',
     );
 
     await compileAgent({ startPath: appRoot });

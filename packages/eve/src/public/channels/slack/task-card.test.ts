@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -28,7 +29,7 @@ function harness(audience: "private" | "public" = "private") {
     foldLine(view, { at: `2026-10-13T00:00:${String(10 + position)}.000Z`, facts }, position, {
       retention: "operational",
     });
-    await events.committed?.({ facts, position }, { channel, view } as never);
+    await events.committed?.({ facts, position }, { channel, view: snapshotOf(view) } as never);
     position += 1;
     return view;
   }

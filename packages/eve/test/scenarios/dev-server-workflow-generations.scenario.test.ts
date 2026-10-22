@@ -190,7 +190,7 @@ describe("eve dev server workflow generations", () => {
           body: JSON.stringify({ reason: "Start a new conversation after rebuilding" }),
           signal: AbortSignal.timeout(10_000),
         });
-        expect(reset.status, await reset.text()).toBe(200);
+        expect(reset.status, await reset.text()).toBe(202);
       } finally {
         await server.stop();
       }

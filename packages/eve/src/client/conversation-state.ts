@@ -1,13 +1,8 @@
 import type { EveMessage } from "#client/message-types.js";
-import type {
-  CallRow,
-  DeliveryRow,
-  SessionView,
-  SessionPreviews,
-  TaskRow,
-} from "#protocol/session-projection/tables.js";
+import type { CallRow, DeliveryRow, TaskRow } from "#protocol/session-projection/tables.js";
+import { sessionTables, type SessionView } from "#protocol/session-projection/session-view.js";
 import { activeTurn } from "#protocol/session-projection/selectors.js";
-import { openSignIns } from "#protocol/session-reader.js";
+import { openSignIns } from "#protocol/session-projection/reader.js";
 
 export type AgentObservation =
   | { readonly status: "not-followed" }
@@ -24,23 +19,25 @@ export interface ConversationAgentSession {
   readonly observation: AgentObservation;
 }
 
-/** Lifecycle stays in its native tables; only messages and local answers are projected for display. */
+/** Immutable lifecycle observations, with renderable messages and local answers. */
 export interface ConversationState {
   readonly view: SessionView;
-  readonly previews: SessionPreviews;
   readonly messages: readonly EveMessage[];
   readonly agents: Readonly<Record<string, ConversationAgentSession>>;
 }
 
 export function hasPendingAuthorizations(state: ConversationState): boolean {
-  return openSignIns(state.view).some((row) => row.request.signIn?.callbackUrl !== undefined);
+  return openSignIns(sessionTables(state.view)).some(
+    (row) => row.request.signIn?.callbackUrl !== undefined,
+  );
 }
 
 export function agentToolTask(
   state: ConversationState,
   agent: ConversationAgentSession,
 ): TaskRow | undefined {
-  const task = agent.taskId === undefined ? undefined : state.view.tasks[agent.taskId];
+  const task =
+    agent.taskId === undefined ? undefined : sessionTables(state.view).tasks[agent.taskId];
   return task?.kind === "agent" ? task : undefined;
 }
 
@@ -55,7 +52,7 @@ export function agentToolSession(
 
 /** Direct model calls served by this task, in call order. */
 export function taskCalls(view: SessionView, taskId: string): readonly CallRow[] {
-  return Object.values(view.calls).filter((call) => call.taskId === taskId);
+  return Object.values(sessionTables(view).calls).filter((call) => call.taskId === taskId);
 }
 
 /** Root completion can precede the child's last committed line. */
@@ -69,8 +66,12 @@ export function isAgentSessionCaughtUp(
   const calls = taskCalls(state.view, task.taskId);
   if (calls.some((call) => call.status !== "settled")) return false;
   const child = agent.observation.conversation;
-  if (activeTurn(child.view) !== undefined) return false;
-  if (Object.values(child.view.interactions).some((input) => input.status !== "settled"))
+  if (activeTurn(sessionTables(child.view)) !== undefined) return false;
+  if (
+    Object.values(sessionTables(child.view).interactions).some(
+      (input) => input.status !== "settled",
+    )
+  )
     return false;
   if (hasPendingAuthorizations(child)) return false;
   return !calls.some((call) => isAgentCallContentPending(calls, call, child));
@@ -81,7 +82,7 @@ function callDeliveries(
   calls: readonly CallRow[],
   conversation: ConversationState,
 ): ReadonlyMap<string, readonly DeliveryRow[]> | undefined {
-  const rows = Object.values(conversation.view.deliveries)
+  const rows = Object.values(sessionTables(conversation.view).deliveries)
     .filter((row) => row.source !== undefined && "channel" in row.source)
     .sort((a, b) => a.introducedAt - b.introducedAt);
   const named = rows.flatMap((row) => {
@@ -126,7 +127,7 @@ export function agentCallTurns(
   }
   const turns = new Map<string, string[]>(callIds.map((callId) => [callId, []]));
   let owner: string | undefined;
-  for (const turnId of Object.keys(conversation.view.turns)) {
+  for (const turnId of Object.keys(sessionTables(conversation.view).turns)) {
     owner = owners.get(turnId) ?? owner;
     if (owner !== undefined) turns.get(owner)?.push(turnId);
   }
@@ -140,7 +141,7 @@ export function isAgentCallContentPending(
   conversation: ConversationState,
 ): boolean {
   const turnIds = agentCallTurns(calls, conversation).get(call.callId) ?? [];
-  const turnId = activeTurn(conversation.view)?.turnId;
+  const turnId = activeTurn(sessionTables(conversation.view))?.turnId;
   if (turnId !== undefined && turnIds.includes(turnId)) return true;
   const byCall = callDeliveries(calls, conversation);
   if (byCall !== undefined) {

@@ -4,7 +4,7 @@
 
 import type { RelayedInteractionEvent } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { askedCall } from "#protocol/session-reader.js";
+import { askedCall } from "#protocol/session-projection/reader.js";
 import { defined, fact } from "#harness/facts.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { interactionBatches } from "#protocol/session-projection/selectors.js";

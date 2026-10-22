@@ -22,7 +22,7 @@ import { eventsOf } from "#harness/publication.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { currentView, enteredView } from "#harness/session-machine/current.js";
 import { isTerminalType } from "#protocol/session-events/catalog.js";
-import { askedCall, decidingAnswer } from "#protocol/session-reader.js";
+import { askedCall, decidingAnswer } from "#protocol/session-projection/reader.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
 import type { HandleEventFn } from "#harness/types.js";

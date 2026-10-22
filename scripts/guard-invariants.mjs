@@ -153,7 +153,6 @@
  *             value: schemas serve tests and development only.
  *
  *   rule 55 — Public named exports match checker-generated per-entry lists.
- *             Additions and removals require an explicit, reviewable API diff.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file

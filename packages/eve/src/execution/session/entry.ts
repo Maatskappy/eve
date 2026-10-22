@@ -471,8 +471,8 @@ function createInitialDelivery(
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
   return {
-    idempotencyKey: input.idempotencyKey,
     auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
+    idempotencyKey: input.idempotencyKey,
     schedule: readSerializedSessionSchedule(serializedContext),
     deliveryMetadata:
       serializedContext["eve.channelDelivery"] === undefined

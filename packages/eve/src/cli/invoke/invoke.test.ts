@@ -313,19 +313,18 @@ it("follows successive sign-ins in the original turn without reading the next tu
   expect(receipt.resume.pauseLine).toBeUndefined();
   attach.mockImplementation(() => ({
     state: { sessionId: "session-1", streamIndex: 0 },
-    send: async () =>
-      Object.assign(
-        (async function* () {
-          yield* stampTestEvents([
-            ...events.slice(12),
-            {
-              type: "delivery.settled",
-              data: { deliveryId: "delivery-next", turnId: "turn-2", outcome: "handled" },
-            },
-          ]);
-        })(),
-        { deliveryId: "delivery-next" },
-      ),
+    send: async () => ({
+      deliveryId: "delivery-next",
+      stream: async function* () {
+        yield* stampTestEvents([
+          ...events.slice(12),
+          {
+            type: "delivery.settled",
+            data: { deliveryId: "delivery-next", turnId: "turn-2", outcome: "handled" },
+          },
+        ]);
+      },
+    }),
   }));
   const next = await runInvoke({
     target,

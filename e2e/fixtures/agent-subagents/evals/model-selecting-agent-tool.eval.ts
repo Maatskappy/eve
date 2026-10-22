@@ -1,8 +1,5 @@
-import {
-  isCurrentTurnBoundaryEvent,
-  type AgentStartedStreamEvent,
-  type MessageStreamEvent,
-} from "eve/client";
+import { endsTurn, type SessionStreamEvent } from "eve/client";
+import type { ChildOpened } from "eve/events";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -27,37 +24,48 @@ export default defineEval({
       },
     });
 
-    const started = await requireSelectedChild(t, turn);
-    const childEvents: MessageStreamEvent[] = [];
-    for await (const event of turn.session.agent(started).stream()) {
+    const opened = await requireSelectedChild(t, turn);
+    const childEvents: SessionStreamEvent[] = [];
+    for await (const event of turn.session.agent(opened).stream()) {
       childEvents.push(event);
-      if (isCurrentTurnBoundaryEvent(event)) break;
+      if (endsTurn(event)) break;
     }
 
     await t.require(
       childEvents,
       satisfies(
-        (events: readonly MessageStreamEvent[]) =>
+        (events: readonly SessionStreamEvent[]) =>
           events.some(
             (event) =>
-              event.type === "step.started" && event.data.modelId === MODEL_AGENT_SELECTED_MODEL,
+              event.type === "model.started" && event.data.modelId === MODEL_AGENT_SELECTED_MODEL,
           ),
         `the custom agent tool starts its child with ${MODEL_AGENT_SELECTED_MODEL}`,
       ),
     );
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });
 
-async function requireSelectedChild(
-  t: EveEvalContext,
-  turn: EveEvalTurn,
-): Promise<AgentStartedStreamEvent> {
+async function requireSelectedChild(t: EveEvalContext, turn: EveEvalTurn): Promise<ChildOpened> {
+  const call = turn.events.find(
+    (event) => event.type === "call.started" && event.data.callId === "model-agent-call",
+  );
+  if (call?.type !== "call.started") throw new Error("The custom agent call did not start.");
+  const owner =
+    call.data.taskId === undefined ? { callId: call.data.callId } : { taskId: call.data.taskId };
   for (const event of turn.events) {
-    if (event.type === "agent.started" && event.data.callId === "model-agent-call") return event;
+    if (
+      event.type === "child.opened" &&
+      ("callId" in owner
+        ? "callId" in event.data.owner && event.data.owner.callId === owner.callId
+        : "taskId" in event.data.owner && event.data.owner.taskId === owner.taskId)
+    ) {
+      return event;
+    }
   }
   return await t.target
-    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .waitForEvent("agent.started", { data: { callId: "model-agent-call" } });
+    .attach(turn.sessionId, { startIndex: turn.session.state.streamIndex })
+    .watch()
+    .waitForEvent("child.opened", { data: { owner } });
 }

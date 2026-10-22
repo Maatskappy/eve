@@ -3,8 +3,6 @@
   "AskedCall",
   "ConversationAgentSession",
   "ConversationState",
-  "Delivery",
-  "DeliveryResult",
   "EveInteractionPart",
   "EveMessage",
   "EveMessageMetadata",

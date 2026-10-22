@@ -2,14 +2,19 @@ import {
   failure,
   reply,
   emptySessionView,
-  emptyPreviews,
+  turns,
+  runs as modelRuns,
+  parts as contentParts,
+  calls as observedCalls,
+  deliveries,
+  children,
+  contentPreviews,
   foldEvents,
-  type CallRow,
-  type PartRow,
-  type RunRow,
-  type SessionPreviews,
+  type CallObservation,
+  type ContentObservation,
+  type RunObservation,
   type SessionView,
-  type TurnRow,
+  type TurnObservation,
 } from "eve/events";
 
 import type {
@@ -30,24 +35,17 @@ import type {
 export function buildTraceTurnsFromTranscript(
   events: readonly TranscriptStreamEvent[],
 ): readonly TraceTurn[] {
-  const view = emptySessionView();
-  const previews = emptyPreviews();
-  foldEvents(view, events, { previews });
-  return Object.values(view.turns)
-    .sort((a, b) => a.introducedAt - b.introducedAt)
-    .map((turn) => traceTurn(view, previews, turn, events));
+  const view = foldEvents(emptySessionView(), events);
+  return turns(view).map((turn) => traceTurn(view, turn, events));
 }
 
 function traceTurn(
   view: SessionView,
-  previews: SessionPreviews,
-  turn: TurnRow,
+  turn: TurnObservation,
   events: readonly TranscriptStreamEvent[],
 ): TraceTurn {
-  const runs = Object.values(view.runs)
-    .filter((run) => "turnId" in run.owner && run.owner.turnId === turn.turnId)
-    .sort((a, b) => a.introducedAt - b.introducedAt);
-  const steps = runs.map((run, stepIndex) => traceStep(view, previews, turn, run, stepIndex));
+  const runs = modelRuns(view, { turnId: turn.turnId });
+  const steps = runs.map((run, stepIndex) => traceStep(view, turn, run, stepIndex));
   const answer = textOf(reply(view, turn.turnId));
   const failureMessage = failure(view, turn.turnId)?.message;
   return {
@@ -68,18 +66,13 @@ function traceTurn(
 
 function traceStep(
   view: SessionView,
-  previews: SessionPreviews,
-  turn: TurnRow,
-  run: RunRow,
+  turn: TurnObservation,
+  run: RunObservation,
   stepIndex: number,
 ): TraceStep {
-  const parts = Object.values(view.parts)
-    .filter((part) => part.runId === run.runId)
-    .sort((a, b) => a.introducedAt - b.introducedAt);
-  const streaming = Object.values(previews.parts).filter((part) => part.runId === run.runId);
-  const calls = Object.values(view.calls)
-    .filter((call) => "runId" in call.owner && call.owner.runId === run.runId)
-    .sort((a, b) => a.introducedAt - b.introducedAt);
+  const parts = contentParts(view, { runId: run.runId });
+  const streaming = contentPreviews(view, { runId: run.runId });
+  const calls = observedCalls(view, { runId: run.runId });
   const actions = calls.map((call) => traceAction(call, turn));
   const response =
     textOf(parts.filter((part) => part.kind === "text")) ||
@@ -94,8 +87,8 @@ function traceStep(
       .map((part) => part.text)
       .join("");
   const callIds = new Set(calls.map((call) => call.callId));
-  const subagentCount = Object.values(view.children).filter(
-    (child) => "callId" in child.owner && callIds.has(child.owner.callId),
+  const subagentCount = children(view).filter(
+    (child) => child.callId !== undefined && callIds.has(child.callId),
   ).length;
   return {
     actionCount: actions.length,
@@ -115,7 +108,7 @@ function traceStep(
   };
 }
 
-function traceAction(call: CallRow, turn: TurnRow): TraceAction {
+function traceAction(call: CallObservation, turn: TurnObservation): TraceAction {
   return {
     callId: call.callId,
     durationMs: durationBetween(call.startedAt, call.endedAt),
@@ -123,8 +116,8 @@ function traceAction(call: CallRow, turn: TurnRow): TraceAction {
     error:
       call.error === undefined ? undefined : { code: call.error.code, message: call.error.message },
     input: call.input,
-    kind: actionKind(call.capability.kind),
-    name: call.capability.name,
+    kind: actionKind(call.kind),
+    name: call.name,
     output: call.output,
     startTime: call.startedAt,
     status: actionStatus(call, turn),
@@ -144,17 +137,14 @@ function actionKind(kind: string): TraceActionKind {
   }
 }
 
-function actionStatus(call: CallRow, turn: TurnRow): TraceAction["status"] {
-  if (call.status === "settled") {
-    if (call.outcome === "completed") return "completed";
-    if (call.outcome === "failed" || call.outcome === "rejected") return "failed";
-    return "aborted";
-  }
-  if (turn.status === "settled") return "aborted";
-  return call.status === "requested" ? "requested" : "running";
+function actionStatus(call: CallObservation, turn: TurnObservation): TraceAction["status"] {
+  if (call.state === "completed") return "completed";
+  if (call.state === "failed" || call.state === "rejected") return "failed";
+  if (call.state === "cancelled" || turn.status === "settled") return "aborted";
+  return call.state === "requested" || call.state === "approval" ? "requested" : "running";
 }
 
-function stepStatus(run: RunRow, turn: TurnRow): TraceStep["status"] {
+function stepStatus(run: RunObservation, turn: TurnObservation): TraceStep["status"] {
   if (run.status === "settled") {
     if (run.outcome === "completed") return "completed";
     if (run.outcome === "failed") return "failed";
@@ -163,19 +153,17 @@ function stepStatus(run: RunRow, turn: TurnRow): TraceStep["status"] {
   return turn.status === "settled" ? "aborted" : "running";
 }
 
-function turnStatus(turn: TurnRow): TraceTurn["status"] {
+function turnStatus(turn: TurnObservation): TraceTurn["status"] {
   if (turn.status !== "settled") return "running";
   return turn.outcome === "failed" ? "failed" : "completed";
 }
 
-function textOf(parts: readonly PartRow[]): string {
+function textOf(parts: readonly ContentObservation[]): string {
   return parts.flatMap((part) => (typeof part.value === "string" ? [part.value] : [])).join("");
 }
 
 function userMessageOf(view: SessionView, turnId: string): string | undefined {
-  const text = Object.values(view.deliveries)
-    .filter((delivery) => delivery.turnId === turnId)
-    .sort((a, b) => a.introducedAt - b.introducedAt)
+  const text = deliveries(view, { turnId })
     .flatMap((delivery) => delivery.parts ?? [])
     .flatMap((part) => (part.kind === "text" ? [part.text] : []))
     .join("\n");

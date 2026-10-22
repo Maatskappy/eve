@@ -1,8 +1,8 @@
 import { expect, expectTypeOf, it } from "vitest";
 import * as client from "#client/index.js";
-import type { ClientSession, SessionStreamOptions } from "#client/index.js";
+import type { ClientSession } from "#client/index.js";
 import type { SessionInfo, SessionSchedule } from "#public/context/index.js";
-import type { SessionReader } from "#public/server/index.js";
+import type { SessionReader, SessionStreamOptions } from "#public/sessions/index.js";
 
 it("exposes client-created handles as types, not public constructors", () => {
   expect(client).not.toHaveProperty("ClientSession");

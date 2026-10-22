@@ -303,7 +303,7 @@ export function createStreamChecker(
         (fact?.type === "delivery.settled" && fact.data.outcome === "awaiting-input")
           ? fact.data.turnId
           : undefined;
-      if (turnId !== undefined && waiting(view, turnId)?.on !== "person")
+      if (turnId !== undefined && waiting(view, turnId)?.on !== "interaction")
         report("paused-on-person", `${fact.type} announces a wait turn ${turnId} doesn't have.`, {
           index,
         });

@@ -36,6 +36,10 @@ export class ConversationClient {
     this.#conversation.confirmSubmission(id, deliveryId);
   }
 
+  holdUnconfirmedMessages(hold: boolean): void {
+    this.#conversation.holdUnconfirmedMessages(hold);
+  }
+
   get following(): boolean {
     return this.#follower !== undefined;
   }
@@ -130,11 +134,14 @@ export class ConversationClient {
       this.#stream.setOptions(options);
       return this.#stream;
     }
-    this.#stream = new SessionEventStream(session, options);
+    this.#stream = new SessionEventStream(session, {
+      ...options,
+      startIndex: options.startIndex ?? this.#conversation.view.position,
+    });
     return this.#stream;
   }
 
-  /** Closes the root stream; the next `stream()` call reopens it from the session cursor. */
+  /** Closes the root stream; the next read starts at this conversation's folded cursor. */
   closeStream(): void {
     this.#stream?.close();
     this.#stream = undefined;

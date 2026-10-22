@@ -1,5 +1,6 @@
 import { waitForStore } from "@eve-e2e/config/frontend";
 import { SessionStore, type EveToolPart } from "eve/client";
+import { delivery, interaction } from "eve/events";
 import { defineEval, type EveEvalContext } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -62,7 +63,7 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, interacti
   );
   await waitForStore(
     store,
-    (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
+    (snapshot) => delivery(snapshot.view, accepted.deliveryId)?.status === "settled",
     t.abortSignal,
   );
   const events = store.snapshot.events.slice(start);
@@ -129,7 +130,7 @@ export default defineEval({
         );
         await waitForStore(
           page,
-          (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
+          (snapshot) => delivery(snapshot.view, accepted.deliveryId)?.status === "settled",
           t.abortSignal,
         );
         const parked = (await t.target.attach(session.id).watch().result()).expectOk();
@@ -180,7 +181,7 @@ export default defineEval({
           reload,
           (snapshot) =>
             snapshot.status === "idle" &&
-            snapshot.view.interactions[interactionId]?.status === "settled",
+            interaction(snapshot.view, interactionId)?.status === "settled",
           t.abortSignal,
         );
         await t.require(reload.snapshot.status, equals("idle"));

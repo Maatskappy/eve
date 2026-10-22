@@ -88,7 +88,6 @@ export interface LinqChannelConfig {
     ctx: IMessageTapbackContext,
     tapback: IMessageTapback,
   ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
-
   /** Override the default webhook route (`/eve/v1/linq`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */

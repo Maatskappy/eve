@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import { firstOpenRequest } from "#channel/interaction-prompts.js";
 import { promptQueue } from "#channel/prompt-queue.js";
 import type { StoredLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldLines } from "#protocol/session-projection/fold.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 
 const at = "2026-10-09T00:00:00.000Z";
 const turnId = "turn_0";
@@ -89,9 +90,9 @@ describe("showing one request at a time", () => {
       shown.push(request.interactionId);
     });
     const channel = { state: {} };
-    await committed(undefined, { channel, view: viewWith() });
-    await committed(undefined, { channel, view: viewWith() });
-    await committed(undefined, { channel, view: viewWith(answerA) });
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
+    await committed(undefined, { channel, view: snapshotOf(viewWith(answerA)) });
 
     expect(shown).toEqual(["approval-a", "approval-b"]);
   });
@@ -104,9 +105,9 @@ describe("showing one request at a time", () => {
       shown.push(request.interactionId);
     });
     const channel = { state: {} };
-    await committed(undefined, { channel, view: viewWith() });
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
     fails = false;
-    await committed(undefined, { channel, view: viewWith() });
+    await committed(undefined, { channel, view: snapshotOf(viewWith()) });
 
     expect(shown).toEqual(["approval-a"]);
   });

@@ -4,7 +4,7 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /**
  * What a step announces as it ends, from the tables before and after it: that the open turn
- * waits on people — `turn.paused` with the interactions, and `awaiting-input` for the
+ * waits on interactions — `turn.paused` with the interactions, and `awaiting-input` for the
  * deliveries the turn answers for now. It announces when the step leaves the turn waiting on
  * someone it didn't wait on before, or a delivery arrived or moved during the step and can go
  * no further: one answer of a batch still waiting for the rest, or a message queued behind a
@@ -19,10 +19,10 @@ export function announceWaiting(before: SessionView, after: SessionView): Sessio
   const turnId = activeTurn(after)?.turnId;
   if (turnId === undefined) return [];
   const now = waiting(after, turnId);
-  if (now?.on !== "person") return [];
+  if (now?.on !== "interaction") return [];
   const was = waiting(before, turnId);
   const asked = new Set(
-    was?.on === "person" ? was.interactions.map((row) => row.interactionId) : [],
+    was?.on === "interaction" ? was.interactions.map((row) => row.interactionId) : [],
   );
   const answered = openWork(after, { turnId }).deliveries.map((row) => row.deliveryId);
   // A delivery that arrived or moved during the step, as an answer of a batch still waiting

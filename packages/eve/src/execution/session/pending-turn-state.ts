@@ -3,16 +3,16 @@ import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js
 import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
-import { openSignIns } from "#protocol/session-reader.js";
+import { openSignIns } from "#protocol/session-projection/reader.js";
 
 /**
  * What a paused turn waits on, which is one kind of thing at a time. The turn keeps it to resume;
  * the stream reports the pause as `turn.paused`.
  */
 export type TurnPause =
-  /** Sign-ins whose callbacks resume the turn, and questions and approvals a person answers. */
+  /** Sign-ins whose callbacks resume the turn, and open questions and approvals. */
   | {
-      readonly on: "person";
+      readonly on: "interaction";
       readonly attemptIds: readonly string[];
       readonly requestIds: readonly string[];
     }
@@ -29,14 +29,17 @@ export type TurnPause =
       readonly taskToolCalls: readonly TaskToolCall[];
     };
 
-/** The turn waits on the sign-ins and the answers it asked a person for. */
-export function pausedOnPerson(session: HarnessSession, projection: SessionProjection): TurnPause {
+/** The turn waits on sign-ins and answers to its interactions. */
+export function pausedOnInteraction(
+  session: HarnessSession,
+  projection: SessionProjection,
+): TurnPause {
   const challenges = sessionView(projection, session.state).signIns;
   return {
     attemptIds: challenges.flatMap((challenge) =>
       challenge.attemptId === undefined ? [] : [challenge.attemptId],
     ),
-    on: "person",
+    on: "interaction",
     requestIds: [...ownOpenRequestIds(sessionView(projection, session.state))],
   };
 }

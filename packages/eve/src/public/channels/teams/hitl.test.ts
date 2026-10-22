@@ -11,7 +11,7 @@ import {
   TEAMS_HITL_REQUEST_KIND_KEY,
 } from "#public/channels/teams/hitl.js";
 import { parseTeamsActivity } from "#public/channels/teams/inbound.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 
 describe("Teams HITL helpers", () => {
   it("renders approval tool input in the card and fallback text", () => {

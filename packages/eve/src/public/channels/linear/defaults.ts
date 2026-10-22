@@ -1,3 +1,4 @@
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { signInEndedText, signInOf } from "#channel/sign-in.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import { failureNotice } from "#public/channels/reply.js";
@@ -131,7 +132,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     async "interaction.opened"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;
-      const event = signInOf(ctx.view, data.interactionId);
+      const event = signInOf(sessionTables(ctx.view), data.interactionId);
       if (event === undefined) return;
       const { displayName, url } = event;
       const userId = linearUserId(ctx);
@@ -161,7 +162,7 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     async "interaction.settled"(fact, ctx) {
       const { data } = fact;
       const { channel } = ctx;
-      const event = signInOf(ctx.view, data.interactionId);
+      const event = signInOf(sessionTables(ctx.view), data.interactionId);
       if (event === undefined) return;
       const { displayName } = event;
       if (data.outcome === "accepted") {

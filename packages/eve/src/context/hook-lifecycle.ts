@@ -5,6 +5,7 @@ import { getAdapterKind } from "#channel/adapter.js";
 import type { FactPosition } from "#protocol/session-events/envelope.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
+import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { ContextContainer } from "./container.js";
@@ -43,7 +44,7 @@ export async function dispatchStreamEventHooks(input: {
   const baseCtx = {
     ...buildHookContext(input.ctx),
     position: input.position,
-    view: input.view ?? currentView(input.ctx),
+    view: snapshotOf(input.view ?? currentView(input.ctx)),
   };
   let dispatching = true;
   for (const entry of [...typed, ...wildcard]) {

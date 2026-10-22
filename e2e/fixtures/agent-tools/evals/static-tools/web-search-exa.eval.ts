@@ -1,4 +1,4 @@
-import { emptySessionView, foldEvents } from "eve/events";
+import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
@@ -16,12 +16,11 @@ const QUERIES = [
 ] as const;
 
 function completedDistinctCalls(events: readonly SessionStreamEvent[]): number {
-  const view = emptySessionView();
-  foldEvents(view, events);
+  const view = foldEvents(emptySessionView(), events);
 
   return new Set(
-    Object.values(view.calls)
-      .filter((call) => call.capability.name === TOOL_NAME && call.outcome === "completed")
+    calls(view)
+      .filter((call) => call.name === TOOL_NAME && call.outcome === "completed")
       .map((call) => call.callId),
   ).size;
 }

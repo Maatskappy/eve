@@ -8,7 +8,6 @@ export {
   POST,
   PUT,
   SessionStrandedError,
-  SessionNotActiveError,
   WS,
   attachmentError,
   answerFromText,
@@ -18,3 +17,4 @@ export {
   isChannel,
   isDisabledRouteSentinel,
 } from "../../src/public/channels/index.ts";
+export { SessionNotActiveError } from "../../src/public/sessions/index.ts";

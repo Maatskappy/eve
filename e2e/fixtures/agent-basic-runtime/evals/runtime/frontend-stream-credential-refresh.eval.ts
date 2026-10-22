@@ -1,5 +1,6 @@
 import { waitForStore } from "@eve-e2e/config/frontend";
 import { SessionStore } from "eve/client";
+import { delivery } from "eve/events";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -51,7 +52,7 @@ export default defineEval({
       });
       await waitForStore(
         store,
-        (snapshot) => snapshot.view.deliveries[first.deliveryId]?.status === "settled",
+        (snapshot) => delivery(snapshot.view, first.deliveryId)?.status === "settled",
         t.abortSignal,
       );
       await t.require(store.snapshot.error, equals(undefined));
@@ -65,7 +66,7 @@ export default defineEval({
       });
       await waitForStore(
         store,
-        (snapshot) => snapshot.view.deliveries[second.deliveryId]?.status === "settled",
+        (snapshot) => delivery(snapshot.view, second.deliveryId)?.status === "settled",
         t.abortSignal,
       );
       await t.require(store.snapshot.error, equals(undefined));

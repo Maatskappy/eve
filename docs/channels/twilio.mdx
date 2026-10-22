@@ -62,7 +62,7 @@ The default `content.completed` handler sends each reply part as SMS through Twi
 
 ### Human-in-the-loop (HITL)
 
-SMS has no buttons or cards, so the default `interaction.opened` handler sends each question and tool approval as an SMS with its options numbered. A reply with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as that answer. Callers on a voice call get the question by SMS too. To render questions differently, declare your own `events["input.requested"]` handler.
+SMS has no buttons or cards, so the default `interaction.opened` handler sends each question and tool approval as an SMS with its options numbered. A reply with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as that answer. Callers on a voice call get the question by SMS too. To render questions differently, declare your own `events["interaction.opened"]` handler.
 
 ### Proactive sessions
 

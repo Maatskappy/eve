@@ -216,7 +216,7 @@ Open the saved `chart.png` in your image viewer. This creates a separate session
 
 This step does not require approvals. If you return after adding the approval gate in [Guard the spend](./guard-the-spend), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages#answer-human-input-requests) before collecting that session's chart result.
 
-The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `action.result` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
+The same client can save a chart from a hosted agent: pass the deployment URL and configure [client authentication](../guides/client/overview#authentication) for that deployment. The file is saved on the computer running the script. In a web UI, consume the same `call.settled` output to build an image preview or download control. Returning bytes from a tool does not add that UI automatically.
 
 This example caps charts at 1 MiB because tool outputs are persisted with session events. For larger files, copy the bytes to your application's file storage and return an authorized download URL instead. Sandbox files themselves are not permanent artifact storage.
 

@@ -1,5 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 import { interactionJsonSchema } from "#protocol/interaction-json.js";
+import { DELIVERY_OUTCOMES } from "#protocol/session-events/catalog.js";
 import { errorInfo } from "#protocol/session-events/common.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 
@@ -23,6 +24,7 @@ const invokeResultSchema = z
   .object({
     status: z.enum(["working", "awaiting-input", "completed", "failed", "cancelled"]),
     sessionEnded: z.boolean(),
+    outcome: z.enum(DELIVERY_OUTCOMES).optional(),
     resume: invokeResumeSchema,
     interactions: z.array(interactionJsonSchema).readonly(),
     reply: z.string().optional(),

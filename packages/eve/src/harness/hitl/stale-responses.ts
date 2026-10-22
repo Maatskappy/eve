@@ -2,7 +2,7 @@ import { appendMessage, normalizeMessage } from "#harness/messages.js";
 import type { MessageContent } from "#shared/message-content.js";
 import { isSessionLimitContinuationRequestId } from "#harness/hitl/budget-request.js";
 import type { HarnessStepInput } from "#harness/types.js";
-import { askedCall } from "#protocol/session-reader.js";
+import { askedCall } from "#protocol/session-projection/reader.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { Answer } from "#shared/input.js";
 

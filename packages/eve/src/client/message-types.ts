@@ -1,5 +1,5 @@
 import type { CallState } from "#protocol/session-projection/selectors.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { CapabilityKind } from "#protocol/session-events/families/call.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 
@@ -24,6 +24,9 @@ export interface EveMessage {
 }
 
 export interface EveMessageMetadata {
+  /** App-owned identifier on a message imported through session history. */
+  readonly historyId?: string;
+  readonly imported?: true;
   readonly optimistic?: true;
   readonly result?: unknown;
   readonly status?: "complete" | "failed" | "streaming" | "submitted";

@@ -1,4 +1,4 @@
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import type { JsonValue } from "#shared/json.js";
 import type { RequestStatus } from "#protocol/session-projection/request-status.js";
 
@@ -43,7 +43,7 @@ export type AgentInvocation =
     })
   | (AgentInvocationBase & { readonly status: "cancelled" });
 
-export type AgentInvocationStatus = RequestStatus;
+export type AgentInvocationStatus = RequestStatus | "working";
 
 export type AgentInvocationMutationResult =
   | { readonly type: "success"; readonly invocation: AgentInvocation }

@@ -1,5 +1,42 @@
 # eve
 
+## 0.82.0
+
+### Minor Changes
+
+- c543585: Breaking: replace `limits.maxInputTokensPerSession`, `limits.maxOutputTokensPerSession` and `limits.maxTokenCostUsdPerSession` with one `limits.sessionUsage` function. It receives the session's `total` usage and its `window` since the last approved continuation, and returns `true` when the limit is reached; Continue starts a new window. The default is 40M new input tokens (input minus cache reads) per window. Subagents now check their own window with their own `sessionUsage` or the root agent's instead of receiving a share of the parent's remaining quota. Sessions that can't ask now fail with `SESSION_USAGE_LIMIT_REACHED`, replacing `SESSION_TOKEN_LIMIT_REACHED` and `SESSION_TOKEN_COST_LIMIT_REACHED`.
+
+### Patch Changes
+
+- baf3030: Attach the agent trace session ID to auto-instrumented child spans on Vercel so Agent Runs can include network and other third-party spans in a session trace.
+- 91b3183: The session input-token limit now counts only new input (uncached input plus cache writes). Cache reads no longer count toward the limit, the grant after Continue, or the quota shared with subagents, so long cache-heavy sessions stop hitting continuation prompts for replaying their own history. Usage telemetry still reports raw input and cache totals. Providers that report no cache details count exactly as before.
+- 8aba0f6: Allow authored workflow tools to select an AI Gateway model when they open a local session with `ctx.agent()`. The child keeps the target agent's other configuration, and the selected model applies for the session's lifetime.
+- 0aea7fc: `eve eval` now runs while an `eve dev` session for the same agent is open, instead of failing with "A dev server is already running for this eve agent." The eval server keeps its runtime generations, local Workflow data, and server record in a per-run directory under `.eve/eval-servers/`, so it never swaps or prunes the dev session's state.
+- a9f5065: Channel and session sends and responses now accept `idempotencyKey` to ignore retries across replay and owner handoffs. Photon supplies message IDs automatically; deduplication requires a shared Workflow World and only covers keys in the session's recent-key window.
+- 6752c95: Fix a workflow tool task running twice when the session was interrupted while publishing `task.started`, for example during a slow `task.started` hook. The session now records each task's run before it publishes the event, so a retry only publishes `task.started` again and never starts a second run.
+- 964a41f: `limits.sessionTimeoutMs` is now an idle timeout: the window restarts each time a turn settles, so a session in active use no longer ends 30 days after it was created. Idle sessions still complete when the window elapses, and the next channel message at their address starts a fresh session as before.
+- dd8c231: Linq and Photon iMessage channels now tell the model when a message is a reply, and include the text of the message it quotes.
+- cf824a8: The Photon and Linq channels can now pass tapbacks to the agent with a new `onTapback` hook, which can also answer the approval or question posted in the message the tapback is on, for example approving with a like. `channel.tapbackTool()` gives the model a tool that reacts to the latest message with a standard tapback or any emoji. Tapbacks stay ignored unless you opt in.
+- 743b498: `eve start --no-schedules` and `EVE_SCHEDULES_DISABLED=1` start a server that does not fire authored cron schedules, so only one process runs them when you scale out.
+- b34844b: Channel `send()`, channel message hooks, and a new `create()` on channel addresses accept `history` to add prior user and assistant messages, such as a stored transcript, as real turns. `create()` starts a session that waits for its first message and reports with `created` whether it did. A new `history.imported` stream event publishes added messages; the default client reducer renders them, and `transcriptReducer()` includes them. Slack `threadContext` now adds earlier replies as history when a message starts the thread's session; later messages keep the existing transcript.
+- e40d7d7: `eve build` and `eve dev` now evaluate a module shared by several tools, channels, or other authored files once per compile instead of once per importing file. Compile memory now grows with the code an agent actually has, not with the number of files that import it, so agents with many tools over a shared SDK or workspace package no longer run out of memory on smaller build machines. Authored modules transpiled to CommonJS with an `__esModule` marker, such as a `tools/*.cjs` file with `exports.default = …`, now also compile and run correctly instead of resolving to the whole `exports` object. On Windows, CommonJS authored modules can now `require()` eve and other external packages.
+- 62d3227: Skip the final Slack reply when the message that started the turn was deleted, instead of letting Slack post it as a top-level channel message.
+- ee5e8e9: Self-hosted `eve build` output now carries a build identity derived from its contents. eve exposes it to Workflow Worlds as `WORKFLOW_DEPLOYMENT_ID` unless that variable is already set, and records it in `eve build --profile` reports.
+- 7b8a520: Fix unnecessary `eve dev` runtime-generation changes when Nitro installs newer Rolldown versions. No-op rebuilds and environment-only reloads now keep the active runtime snapshot unchanged instead of treating bundler debug comments as runtime changes.
+
+## 0.81.1
+
+### Patch Changes
+
+- e4e0cd1: Fix activation trace-content markers to respect the resolved session policy, provider capture settings, and live audience ceiling. Metadata-only sessions now report withheld content accurately without removing content allowed by an explicit trace policy.
+- 54d63fd: A session keeps accepting messages during a deployment or compaction handoff, so the first message after a handoff reaches the model sooner and messages sent mid-handoff no longer retry or return `409 session_not_ready`; messages already waiting when a compaction finishes now run before the session moves. Sessions started on an earlier eve release still move to this release: their first move uses the previous handoff, and every move after it uses the new one. On Workflow worlds without hook force-claim support, sessions no longer move between runs, so their run history keeps growing for as long as the session lives.
+- fc4dbd0: Cancelling a turn while the model is responding no longer marks its `agent.step` span as an error, so user-initiated stops stop showing up as failures in error tracking.
+- 299db19: Connections now accept the documented `auth.displayName` field instead of failing validation with `Unknown key "displayName"`.
+- 09b423a: `agent.step` spans for AI Gateway model calls now record the Gateway's session affinity report: the session ID, where that ID came from, the affinity outcome, and the pinned and displaced providers. Use these attributes to match a step to its session in the AI Gateway logs Sessions view.
+- f9ea546: The eve channel's `onMessage` can now read the request's `clientContext` as `ctx.eve.clientContext` and return its own `clientContext` to replace it for that turn, so the model sees server-checked context without it being kept in session history.
+- 4d9fc9f: iMessage voice notes now reach Photon agents. Photon's webhook leaves out a voice note's attachment id, so eve refetches the message by id to download it. Across Chat SDK channels, an attachment the platform gives no way to download now reaches the agent as a short note instead of being dropped, so an attachment-only message still gets a reply.
+- 02bb7c4: `ctx.thread.postEphemeral()` on a fresh top-level Slack message now posts to the channel instead of an empty thread, where Slack hid it. Replies inside an existing thread stay threaded.
+
 ## 0.81.0
 
 ### Minor Changes

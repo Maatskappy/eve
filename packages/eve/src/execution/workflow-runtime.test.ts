@@ -17,7 +17,7 @@ import {
   waitForCommandHookOwner,
   waitForSessionInbox,
   sessionTimeoutWorkflowReference,
-  startSessionOwnerStep,
+  startWorkflowOnDeployment,
   startWorkflowOnCurrentDeployment,
   workflowEntryReference,
   workflowToolRunWorkflowReference,
@@ -140,70 +140,13 @@ describe("startWorkflowOnCurrentDeployment", () => {
   });
 });
 
-describe("session owner starts", () => {
+describe("deployment starts", () => {
   it("rejects non-exact deployment selectors", async () => {
-    getRunMock.mockReturnValue({ getWritable: () => new WritableStream<Uint8Array>() });
-    await expect(
-      startSessionOwnerStep({
-        activationToken: "owner-1:handoff",
-        anchorRunId: "anchor-1",
-        checkpoint: { serializedContext: {} } as never,
-        delivery: { kind: "deliver", payloads: [] },
-        targetDeploymentId: "latest",
-      }),
-    ).rejects.toThrow("exact deployment id");
+    await expect(startWorkflowOnDeployment(workflowEntryReference, [], "latest")).rejects.toThrow(
+      "exact deployment id",
+    );
     expect(startMock).not.toHaveBeenCalled();
   });
-
-  it.each([undefined, 0, "default"] as const)(
-    "starts a successor with the original stream and retention=%s",
-    async (retention) => {
-      const sessionWritable = new WritableStream<Uint8Array>();
-      getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
-      startMock.mockResolvedValue({ runId: "owner-2" });
-      const checkpoint = {
-        version: 10,
-        serializedContext: {},
-        sessionState: { continuationToken: "continuation-1", sessionId: "session-1" },
-        sessionTimeoutMs: 60_000,
-        retention,
-      } as never;
-      const delivery = { kind: "deliver", payloads: [{ message: "hello" }] } as const;
-
-      await expect(
-        startSessionOwnerStep({
-          activationToken: "owner-1:handoff",
-          anchorRunId: "anchor-1",
-          checkpoint,
-          delivery,
-          targetDeploymentId: "deployment-b",
-        }),
-      ).resolves.toBeUndefined();
-
-      expect(getRunMock).toHaveBeenCalledWith("anchor-1");
-      expect(startMock).toHaveBeenCalledWith(
-        workflowEntryReference,
-        [
-          expect.objectContaining({
-            activationToken: "owner-1:handoff",
-            checkpoint,
-            delivery,
-            handoffVersion: 2,
-            kind: "handoff",
-            ownerDeploymentId: "deployment-b",
-            sessionWritable,
-            sessionId: "anchor-1",
-          }),
-        ],
-        expect.objectContaining({
-          deploymentId: "deployment-b",
-          allowReservedAttributes: true,
-          attributes: { "$eve.version": resolveInstalledPackageInfo().version },
-        }),
-      );
-      expect(startMock.mock.calls[0]?.[2].experimental_retention).toBe(retention);
-    },
-  );
 });
 
 describe("createWorkflowRuntime command dispatch", () => {
@@ -783,6 +726,33 @@ describe("createWorkflowRuntime#createSession", () => {
         },
       },
       sessionTimeoutMs: 120_000,
+    });
+  });
+
+  it("serializes a ctx.agent model override for the child workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "owner-run" });
+
+    await createWorkflowRuntime({
+      agentSessionRuntimeOverrides: {
+        model: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5.5" },
+      },
+      compiledArtifactsSource,
+      nodeId: "subagents/researcher",
+    }).createSession({
+      adapter,
+      auth: null,
+      input: { message: "research this" },
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      serializedContext: {
+        "eve.agentSessionRuntimeOverrides": {
+          model: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5.5" },
+        },
+      },
     });
   });
 

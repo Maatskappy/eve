@@ -5,6 +5,7 @@ import {
   type SandboxPreparedArtifact,
   type SandboxProviderHandle,
   type SandboxProviderImplementation,
+  type SandboxProviderResourceFile,
 } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
@@ -33,29 +34,49 @@ export function createSandboxProviderHarness<
     );
   }
 
+  function sessionContext(appRoot: string, sandboxName: string) {
+    return {
+      host: createSandboxProviderHost(appRoot),
+      session: {
+        auth: { current: null, initiator: null },
+        id: sandboxName,
+        turn: { id: "test-turn", sequence: 0 },
+      },
+      storagePath: appRoot,
+    } as const;
+  }
+
   const harness = {
+    async endSession(input: {
+      readonly appRoot: string;
+      readonly sandboxName: string;
+      readonly state: SessionState | null;
+    }): Promise<void> {
+      await implementation.onSessionEnd(
+        sessionContext(input.appRoot, input.sandboxName),
+        input.state,
+        { reason: "completed" },
+      );
+    },
     async prepare(input: {
       readonly appRoot: string;
       readonly log?: (message: string) => void;
       readonly resourcesKey?: string;
       readonly resourcesPath?: string;
-      readonly seedFiles?: readonly {
-        readonly content: string | Uint8Array;
-        readonly path: string;
-      }[];
+      readonly skills?: readonly SandboxProviderResourceFile[];
       readonly sourceRevision?: string;
+      readonly workspace?: readonly SandboxProviderResourceFile[];
     }) {
+      const hasFiles = (input.skills?.length ?? 0) + (input.workspace?.length ?? 0) > 0;
       const artifact = await implementation.prepare({
         files: createSandboxProviderFiles(`${input.appRoot}/sandbox`),
         host: createSandboxProviderHost(input.appRoot),
         log: input.log,
         resources: createSandboxProviderResources({
-          ...input,
-          resourcesKey:
-            input.resourcesKey ??
-            (input.seedFiles === undefined || input.seedFiles.length === 0
-              ? undefined
-              : "test-resources"),
+          key: input.resourcesKey ?? (hasFiles ? "test-resources" : undefined),
+          path: input.resourcesPath,
+          skills: input.skills,
+          workspace: input.workspace,
         }),
         sourceRevision: input.sourceRevision ?? "test-source-revision",
         storagePath: input.appRoot,
@@ -70,15 +91,7 @@ export function createSandboxProviderHarness<
       readonly sandboxName: string;
     }): Promise<SandboxProviderHandle<Session>> {
       const artifact = await resolveArtifact(input);
-      const context = {
-        host: createSandboxProviderHost(input.appRoot),
-        session: {
-          auth: { current: null, initiator: null },
-          id: input.sandboxName,
-          turn: { id: "test-turn", sequence: 0 },
-        },
-        storagePath: input.appRoot,
-      } as const;
+      const context = sessionContext(input.appRoot, input.sandboxName);
       if (input.existing === undefined) {
         return (await implementation.start(context, options, artifact)).handle;
       }
@@ -86,21 +99,14 @@ export function createSandboxProviderHarness<
     },
     async start(input: {
       readonly appRoot: string;
+      readonly options?: Options;
       readonly prepared?: PreparedArtifact;
       readonly sandboxName: string;
     }) {
       const artifact = await resolveArtifact(input);
       return await implementation.start(
-        {
-          host: createSandboxProviderHost(input.appRoot),
-          session: {
-            auth: { current: null, initiator: null },
-            id: input.sandboxName,
-            turn: { id: "test-turn", sequence: 0 },
-          },
-          storagePath: input.appRoot,
-        },
-        options,
+        sessionContext(input.appRoot, input.sandboxName),
+        input.options ?? options,
         artifact,
       );
     },

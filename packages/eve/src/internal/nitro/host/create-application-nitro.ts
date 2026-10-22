@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -120,7 +120,7 @@ function collectHostedTraceDependencies(
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
   const merged = new Set<string>([
-    // Optional engine packages (just-bash, microsandbox) join the
+    // Optional engine packages (just-bash) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
     // createOptionalEngineDependencyPlugin pins them as plain externals
@@ -862,7 +862,11 @@ export async function createProductionApplicationNitro(
     plugins: nitroPlugins,
     publicAssets: [],
     scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
-    rolldownConfig: bundler.nitroRolldownConfig,
+    rolldownConfig: {
+      ...bundler.nitroRolldownConfig,
+      // Region comments contain invocation-random scratch paths, not runtime inputs.
+      experimental: { attachDebugInfo: "none" },
+    },
     rollupConfig: bundler.nitroRollupConfig,
     rootDir: preparedHost.appRoot,
     serverAssets: skillServerAssets,

@@ -7,6 +7,12 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
+  createAuthoredModuleBuildOptions,
+  evaluatedBundleSourcemap,
+  resolveAuthoredTsConfigPath,
+} from "#internal/authored-module-build-options.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
+import {
   createExtensionMountPlugin,
   EXTENSION_CHUNK_DIRECTORY,
 } from "#internal/bundler/extension-mount-plugin.js";
@@ -27,7 +33,7 @@ import {
   isNodeModulesPath,
   normalizeExternalDependencies,
 } from "#internal/authored-package-boundary.js";
-import { expectObjectRecord } from "#internal/authored-module.js";
+import { expectObjectRecord, interopAuthoredModuleNamespace } from "#internal/authored-module.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import {
@@ -44,8 +50,8 @@ import {
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 
-const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
-const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
+export const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
+export const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
   "node_modules",
   ".cache",
   "eve",
@@ -77,6 +83,8 @@ export interface AuthoredModuleLoadOptions {
     readonly ancestors?: readonly (ExtensionMountEntry & { readonly mountId: string })[];
     readonly evaluationId?: string;
   };
+  /** Shares one evaluated module graph across the loads of one compilation. */
+  readonly graph?: AuthoredModuleGraph;
 }
 
 /**
@@ -141,7 +149,7 @@ async function doLoadAuthoredModuleNamespace(
     : await import(createFileImportSpecifier(modulePath));
 
   return expectObjectRecord(
-    loadedModule,
+    interopAuthoredModuleNamespace(loadedModule),
     `Expected "${modulePath}" to export a module namespace object.`,
   );
 }
@@ -204,7 +212,7 @@ export async function bundleAuthoredModuleCode(
       createAuthoredWorkflowDirectivePlugin({ appRoot: options.appRoot ?? packageRoot }),
       ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
-    sourcemap: "inline",
+    sourcemap: evaluatedBundleSourcemap(),
   });
 }
 
@@ -218,7 +226,7 @@ export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
-  const code = await buildAuthoredModuleBundle(modulePath, options, {
+  return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
@@ -226,8 +234,6 @@ export async function bundleAuthoredModuleForGeneration(
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
   });
-
-  return removeRolldownModuleRegionComments(code);
 }
 
 /** One path-preserving entry in an extension distribution graph. */
@@ -291,7 +297,7 @@ export async function bundleExtensionDistributionGraph(input: {
     const imports = new Set<string>();
     for (const item of result.output) {
       if (item.type === "chunk") {
-        files.set(item.fileName, removeRolldownModuleRegionComments(item.code));
+        files.set(item.fileName, item.code);
         for (const specifier of [...item.imports, ...item.dynamicImports]) imports.add(specifier);
       }
     }
@@ -404,7 +410,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     });
     return {
       authoredWorkflowModules: workflowSources.modules(),
-      code: removeRolldownModuleRegionComments(chunk.code),
+      code: chunk.code,
       sourceModules: workflowSources.sourceModules().filter((id) => id !== input.moduleMapPath),
       workflowSourceFingerprint: workflowSources.fingerprint(),
     };
@@ -541,31 +547,19 @@ async function buildAuthoredModuleBundle(
   },
 ): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
-  const tsconfigPath = resolveAuthoredTsConfigPath(packageRoot);
-  const plugins = [
-    ...configuration.plugins,
-    options.extension === undefined ? null : createFixedMountScopePlugin(options.extension.mountId),
-    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin({ packageRoot }),
-    createAuthoredPackageTsConfigPathsPlugin({
-      appPackageRoot: packageRoot,
-      extensions: RESOLVE_EXTENSIONS,
-    }),
-    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
-    configuration.packageBoundaryPlugin,
-  ].filter((plugin) => plugin !== null);
-
   try {
     const chunk = await buildSingleRolldownChunk(`authored module for "${modulePath}"`, {
-      cwd: packageRoot,
+      ...createAuthoredModuleBuildOptions({
+        packageBoundaryPlugin: configuration.packageBoundaryPlugin,
+        packageRoot,
+        plugins: [
+          ...configuration.plugins,
+          options.extension === undefined
+            ? null
+            : createFixedMountScopePlugin(options.extension.mountId),
+        ],
+      }),
       input: options.extension?.entry === undefined ? modulePath : "\0eve-compile-mount-entry",
-      platform: "node",
-      plugins,
-      resolve: {
-        conditionNames: authoredModuleConditions(),
-        extensions: [...RESOLVE_EXTENSIONS],
-      },
-      tsconfig: tsconfigPath,
       output: {
         comments: false,
         format: "esm",
@@ -600,7 +594,7 @@ function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
 
 // Client mode: steps keep their bodies, workflows become references. Step
 // registration happens once, in the host's step entrypoint.
-function createAuthoredWorkflowDirectivePlugin(input: {
+export function createAuthoredWorkflowDirectivePlugin(input: {
   readonly appRoot: string;
   readonly recorder?: AuthoredWorkflowSourceRecorder;
 }): Record<string, unknown> {
@@ -621,17 +615,29 @@ function createAuthoredWorkflowDirectivePlugin(input: {
   };
 }
 
-function removeRolldownModuleRegionComments(code: string): string {
-  return code
-    .split("\n")
-    .filter((line) => !line.startsWith("//#region ") && line !== "//#endregion")
-    .join("\n");
-}
-
 async function loadBundledAuthoredModule(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
 ): Promise<unknown> {
+  const graphEntryPath =
+    options.extension === undefined
+      ? await options.graph?.entryPath(modulePath, options.externalDependencies ?? [])
+      : undefined;
+  const specifier =
+    graphEntryPath === undefined
+      ? await writeAuthoredModuleBundle(modulePath, options)
+      : createFileImportSpecifier(graphEntryPath);
+  try {
+    return await import(specifier);
+  } catch (error) {
+    throw createAuthoredModuleEvaluationError(modulePath, error);
+  }
+}
+
+async function writeAuthoredModuleBundle(
+  modulePath: string,
+  options: AuthoredModuleLoadOptions,
+): Promise<string> {
   const code = await bundleAuthoredModuleCode(modulePath, options);
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
@@ -655,14 +661,8 @@ async function loadBundledAuthoredModule(
     writeFileSync(bundlePath, code);
   }
 
-  try {
-    const instance = options.extension?.evaluationId ?? "";
-    return await import(
-      `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`
-    );
-  } catch (error) {
-    throw createAuthoredModuleEvaluationError(modulePath, error);
-  }
+  const instance = options.extension?.evaluationId ?? "";
+  return `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`;
 }
 
 function createInFlightModuleLoadKey(
@@ -672,17 +672,6 @@ function createInFlightModuleLoadKey(
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
   return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.extension?.evaluationId ?? ""}\0${options.appRoot ?? ""}`;
-}
-
-export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
-  for (const fileName of ["tsconfig.json", "jsconfig.json"]) {
-    const path = join(packageRoot, fileName);
-    if (existsSync(path)) {
-      return path;
-    }
-  }
-
-  return false;
 }
 
 export function resolveAuthoredPackageRoot(modulePath: string): string {

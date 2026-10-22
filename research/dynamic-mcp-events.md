@@ -53,6 +53,8 @@ export default defineDynamic({
 `getBirdAccount` and `handleBirdEvent` are application functions. The account
 lookup must authorize the user. `connectionKey` is a stable, non-secret account
 identity that changes when the account or auth configuration changes.
+`mcpUrl` must be an app-controlled, validated destination, never an arbitrary
+URL supplied by the user.
 The callback receives the existing `event`, `origin`, `auth`, `deliveryId`, and
 `attachSession` fields. `onGap` and `onTerminated` work the same way.
 
@@ -108,8 +110,9 @@ verified webhook -> saved watch -> reconstruct exact connection -> callback
 
 3. **Save reconstruction metadata with the watch.** Extend
    [`EventBinding`](../packages/eve/src/runtime/connections/events/state.ts)
-   with a versioned reference to the authored resolver, its session scope, and
-   the returned entry. Reuse compiler source identity and extension namespacing.
+   with the resolver's source ID and namespaced slug, plus the trusted context
+   needed to rerun it. The binding already identifies the returned connection
+   and instance; do not add a second entry identity or persist callbacks.
    Retain the resolver's trusted identity context and channel kind from its
    original evaluation, plus the watch creator's existing auth binding. Those
    identities can differ in a shared session; neither comes from webhook data.
@@ -133,65 +136,59 @@ verified webhook -> saved watch -> reconstruct exact connection -> callback
    outcome. Trace the reason without logging credentials or event payloads.
    Do not invoke a replacement connection's `onTerminated` as a fallback.
 
-Recovery reruns a resolver without emitting a new session lifecycle event or
-rebuilding the session's conversational registry. Resolvers must be idempotent.
+Recovery uses `sessionStartedForResolvers` with the saved runtime identity,
+just like existing session rehydration. It does not replay original fields
+such as `predecessor`, emit another lifecycle event, or rebuild the conversation's
+registry. Resolvers must be idempotent and work with this reconstructed event.
+Invoke only the saved resolver so an unrelated account lookup cannot block a
+watch. Keep the existing instance, connector, and principal checks.
 Callbacks retain the existing retry contract: they can execute again after a
 crash and must deduplicate effects using `deliveryId`.
 
 ## Stopping a removed connection
 
-Callback reconstruction must not be required to disable delivery. Extend watch
-management to authorize the saved owner by watch ID even when its connection is
-absent from the current registry. Prefer retaining the existing qualified
-get/stop action names, with a management-only resolution path; do not resurrect
-the removed connection's catalog, tools, or subscribe action.
+Callback reconstruction must not be required to disable delivery. Keep the
+previously discovered `<connection>__events_get_subscription` and
+`<connection>__events_unsubscribe` names callable through `eve__tool`, taking the
+saved watch ID. Include those exact management names in the subscribe result so
+the model can retain them even after the connection leaves the catalog. This
+first version does not add cross-session watch listing or rediscovery.
 
-Stopping must durably mark the watch as stopping before cleanup begins. New
-deliveries must then be rejected and queued deliveries must check that state
-before invoking callbacks. A callback already executing may finish. Keep the
-cleanup owner available for retries and distinguish stopping from complete.
+A management-only catalog fallback validates the watch ID, original connection
+name, root-agent scope, and current execution principal against its saved owner.
+It cannot expose the removed connection's catalog or subscribe action. A changed
+account with the same name must not authorize access to another user's watch.
 
-Upstream cleanup is a separate design gate. The current backend exposes live
-`createAdapter` and `verify` functions, not a durable management descriptor.
-Before implementing, confirm how get/unsubscribe can use the original
-subscription's saved authorization scope without resolving the deleted account.
-Prefer a small serializable management binding containing non-secret Connect
-subject/scope information, with fresh project authorization at execution.
-Do not persist access tokens or reconstruct a provider with default options.
+The watch workflow records stopping durably before upstream cleanup. Subsequent
+receipt and queued callback execution must observe that marker. A callback
+already executing may finish. Keep the owner available for cleanup retries and
+report stopping separately from completion.
 
-If the existing SDK cannot expose that binding safely, propose the smallest
-Connect bridge addition separately. Until upstream cleanup succeeds, report it
-as pending and preserve retries; local stopping must still work. No AI SDK or
-MCP protocol change is expected.
+Connect's existing SDK get/unsubscribe calls accept a subscription ID without
+an `expectedSubject`. The backend checks project/environment and connector
+ownership and uses the subscription's saved upstream authorization. Use that
+project-authorized path only for IDs loaded from eve's trusted, caller-authorized
+watch. Do not forward a model-supplied Connect subscription ID. This preserves
+custom subject/scopes without rebuilding a provider or storing tokens.
 
-## Implementation sequence and validation
+Cleanup uses the existing durable backoff, capped at one hour between attempts.
+There is no new attempt cap: an outage must not silently abandon a subscription.
+A missing subscription completes cleanup; persistent failures remain visible as
+pending. No Connect SDK, AI SDK, or MCP protocol change is expected.
 
-1. Settle verifier loading and the cleanup binding. Prove a removed account's
-   watch can stop without executing its resolver or exposing credentials.
-2. Carry resolver provenance and saved resolution context into event bindings.
-   Enable event callbacks for session-scoped dynamic results with a concrete
-   Connect provider. Keep unsupported scopes and auth resolvers explicit errors.
-3. Add parameterized routing and recovery to subscribe, dispatch, and lifecycle
-   operations. Reuse the existing early-delivery and idempotency behavior.
-4. Add management independent of the active connection registry, with durable
-   stopping, cleanup retries, and trace coverage for reconstruction outcomes.
-5. Update the MCP and dynamic connection docs and add a patch changeset when
-   runtime support ships. Check extension contracts if exported types change.
+## Implementation and acceptance
 
-Cover these behaviors at the narrowest existing test boundary:
+First add shared dynamic result resolution and saved recovery context. Then wire
+parameterized receipt, durable callback reconstruction, and management of removed
+connections into the existing watch owner. Ship public docs and a patch changeset
+with the runtime implementation; check extension contracts if types change.
 
-| Boundary                | Required cases                                                                                                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definition and identity | Single/map results, stable account identity, unsupported scopes, auth resolver rejection, extension namespaces.                                                                                |
-| Receiver and watch      | Verified delivery; wrong path or subscription rejected; early delivery waits for the subscribe result; ended watch returns `410`.                                                              |
-| Recovery and isolation  | Cold process/redeploy; two users with the same connection name; creator differs from session initiator/latest caller; changed URL, connector, or account never runs a replacement callback.    |
-| Lifecycle               | Resolver throws then recovers; removed entry retires; stop works without the connection; queued delivery observes stopping; cleanup preserves custom subject/scopes and retries after failure. |
-| Existing behavior       | Static events, duplicate delivery/replayed callback, expiry, gap, termination, and existing subscribe idempotency remain covered.                                                              |
-| Built application       | Parameterized receiver survives bundling with prefixes and no static event connection; deterministic fixture eval subscribes, delivers, and stops.                                             |
-
-Use scoped unit/integration tests locally and a build-backed route scenario.
-Run the deterministic fixture eval in CI; use no real Bird credentials.
-Avoid unit tests that merely mirror the implementation's internal objects.
+The implementation must prove that unverified requests never invoke resolvers,
+users cannot cross account boundaries, cold-start recovery preserves creator
+identity, transient failures retry, and removal retires without switching accounts.
+A removed connection's watch must remain stoppable. Preserve static events,
+early delivery, idempotency, expiry, and lifecycle callbacks. Cover the built
+receiver in a deterministic fixture without real Bird credentials.
 
 ## Related proposals and review decisions
 
@@ -204,7 +201,6 @@ Avoid unit tests that merely mirror the implementation's internal objects.
   events. Reuse that owner if it lands first. This proposal only adds dynamic
   connection support; it does not introduce another subscription primitive.
 
-Review the initial session-only scope, whether qualified get/stop actions are
-sufficient when a connection disappears, and the cleanup binding's exact
-contract before implementation. Shared callbacks are the supported authoring
+Review the initial session-only scope, the management names retained in watch
+results, and the use of project-authorized cleanup for saved watch IDs. Shared callbacks are the supported authoring
 contract, not a promise that arbitrary closures can be serialized or recovered.

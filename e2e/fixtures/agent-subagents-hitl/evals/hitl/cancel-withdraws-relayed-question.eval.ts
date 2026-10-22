@@ -4,8 +4,8 @@ import { next, waitForRelayed } from "./helpers";
 
 /**
  * Alice cancels her turn while the question child waits on her answer. The
- * cancel stops the child, so nobody can answer its question: the parent
- * withdraws it as cancelled.
+ * cancelled agent task ends and withdraws its pending relayed question before
+ * the parent turn settles, so nobody can answer it.
  */
 export default defineEval({
   description: "Cancelling the parent's turn withdraws a child's relayed question.",
@@ -20,8 +20,24 @@ export default defineEval({
     const cancelled = await following;
     cancelled.event("interaction.settled", {
       count: 1,
-      data: { interactionId: request.interactionId, outcome: "interrupted" },
+      data: { interactionId: request.interactionId, outcome: "withdrawn", reason: "asker-ended" },
     });
+    cancelled.event("task.ended", { count: 1, data: { outcome: "cancelled" } });
     cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.eventOrder([
+      {
+        type: "interaction.settled",
+        data: { interactionId: request.interactionId, outcome: "withdrawn" },
+      },
+      { type: "task.ended", data: { outcome: "cancelled" } },
+      { type: "turn.settled", data: { outcome: "cancelled" } },
+    ]);
+    if (
+      cancelled.session.pendingInteractions.some(
+        (pending) => pending.interactionId === request.interactionId,
+      )
+    ) {
+      throw new Error("The ended child's question is still open on the parent.");
+    }
   },
 });

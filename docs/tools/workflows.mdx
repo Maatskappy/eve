@@ -383,7 +383,8 @@ described in [Tasks](/docs/tools/tasks). What differs:
 Every [agent tool](/docs/subagents), including the built-in `agent` tool and remote agents, is a
 `serve` tool that eve builds this way on public API: each task opens one session with
 [`ctx.agent`](#delegate-work-ctxagent), sends each call's `message` with that call's `abortSignal`,
-and replies with the final response of each agent turn.
+and replies with the final response of each agent turn. Unlike other `serve` tasks, cancelling an
+agent task ends it; start a new task to delegate again.
 
 ## Authorize inside a step
 

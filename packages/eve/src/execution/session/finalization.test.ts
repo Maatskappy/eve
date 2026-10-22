@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { writeTaskTable } from "#execution/tasks/table.js";
-import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
+import {
+  reportChildSessionTeardownFailureStep,
+  terminateChildSessionsStep,
+} from "#execution/terminate-child-sessions-step.js";
 import { takeSessionUsageDelta } from "#harness/session-usage.js";
 import { withSessionUsage } from "#internal/testing/session-usage.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
@@ -16,6 +19,7 @@ import {
 } from "#execution/session/end-sandbox-step.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
+  reportChildSessionTeardownFailureStep: vi.fn(async () => {}),
   terminateChildSessionsStep: vi.fn(async () => {}),
 }));
 vi.mock("#execution/session/end-sandbox-step.js", () => ({
@@ -186,6 +190,27 @@ describe("session finalization with an unsettled caller", () => {
       },
     );
     expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({ sessionState });
+  });
+
+  it("reports a failed child teardown and still ends the session", async () => {
+    vi.mocked(terminateChildSessionsStep).mockRejectedValueOnce(new Error("teardown failed"));
+    const sessionState = sessionWithTaskRun();
+
+    await expect(
+      finalizeSession(
+        { kind: "expired" },
+        {
+          caller: undefined,
+          cursor: { serializedContext: {}, sessionState },
+          sessionWritable: new WritableStream(),
+        },
+      ),
+    ).resolves.toMatchObject({ isError: false });
+    expect(reportChildSessionTeardownFailureStep).toHaveBeenCalledExactlyOnceWith({
+      error: expect.objectContaining({ message: "teardown failed" }),
+      parentSessionId: sessionState.sessionId,
+    });
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
   });
 
   it("terminates the workflow tool calls a turn waits on when no task run is live", async () => {

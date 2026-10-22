@@ -14,7 +14,11 @@ import {
   resolveAgentStartTarget,
   type SubagentStartTarget,
 } from "#execution/agent-sessions/target.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -278,6 +282,26 @@ export async function endAgentSessionsStep(input: {
   "use step";
 
   await Promise.all(input.sessions.map(endAgentSession));
+}
+
+/** Best-effort cleanup for a late address whose cancelled run cannot own it. */
+export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Promise<void> {
+  "use step";
+  if (opened.address.kind === "remote") {
+    await endAgentSession(opened);
+    return;
+  }
+  const { sessionId } = opened.address;
+  try {
+    // Waiting for a booting inbox would hold the parent's next turn.
+    await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), {
+      kind: "reset",
+      reason: RUN_FINISHED_REASON,
+      deliveryId: agentDeliveryId("reset", sessionId),
+    });
+  } catch (error) {
+    logError(log, "could not stop late child; cleanup is best effort", error, { sessionId });
+  }
 }
 
 async function endAgentSession(opened: OpenedAgentSession): Promise<void> {

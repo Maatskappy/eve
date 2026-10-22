@@ -1,5 +1,5 @@
 import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
-import { withSessionStateDelta } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { controlAdmitted } from "#harness/facts.js";
 import type { ControlDelivery } from "#harness/types.js";
 

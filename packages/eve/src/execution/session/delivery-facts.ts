@@ -12,6 +12,7 @@ import { readClientContext } from "#internal/client-context.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
+import type { DeliveryRow } from "#protocol/session-projection/tables.js";
 
 // A delivery's facts at the step that admits it: every payload is admitted, a payload the
 // channel's `deliver` hook ignored settles `ignored` at once, and the rest go on to the turn,
@@ -34,8 +35,8 @@ export function admitDeliveries(input: {
     readonly payload: DeliverPayload;
     readonly input: StepInput | undefined;
   }[];
-  /** Whether the session already admitted a delivery, as when it forwarded part of it. */
-  readonly admitted?: (deliveryId: string) => boolean;
+  /** The delivery's recorded status, including facts an interrupted attempt already wrote. */
+  readonly status?: (deliveryId: string) => DeliveryRow["status"] | undefined;
   readonly channelKind: string;
   readonly parent?: SessionParent;
   readonly sessionStarted: boolean;
@@ -66,7 +67,8 @@ export function admitDeliveries(input: {
           : { sessionId: input.parent.sessionId, callId },
     });
     const clientContext = readClientContext(payload);
-    if (input.admitted?.(deliveryId) !== true) {
+    const status = input.status?.(deliveryId);
+    if (status === undefined) {
       facts.push(
         fact("delivery.admitted", {
           clientContext:
@@ -80,7 +82,8 @@ export function admitDeliveries(input: {
       );
     }
     if (stepInput === undefined) {
-      facts.push(fact("delivery.settled", { deliveryId, outcome: "ignored" }));
+      if (status !== "settled")
+        facts.push(fact("delivery.settled", { deliveryId, outcome: "ignored" }));
       continue;
     }
     const consumed: ConsumedDelivery = defined({

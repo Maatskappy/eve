@@ -91,8 +91,9 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
 /**
  * Defines a hook. Each handler runs once for each matching fact a commit carries, before the next
  * model call. A handler can call `ctx.cancel` or an external service. Pass
- * `ctx.occurrence.idempotencyKey` to services that support idempotency, since retries can repeat
- * the handler. A handler that throws during a turn fails the turn; catch optional errors.
+ * `ctx.occurrence.idempotencyKey` to services that support idempotency. A retry does not run
+ * handlers again for facts already published. A handler that throws during a turn fails the turn;
+ * catch optional errors.
  *
  * ```ts
  * export default defineHook({

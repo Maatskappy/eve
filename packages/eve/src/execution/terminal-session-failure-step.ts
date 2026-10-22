@@ -1,9 +1,10 @@
 import { errorInfoOf } from "#harness/facts.js";
 import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { createLogger, formatError } from "#internal/logging.js";
+import { summarizeFailure } from "#execution/failure-summary.js";
+import { createLogger } from "#internal/logging.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -16,26 +17,11 @@ export async function emitTerminalSessionFailureStep(input: {
   readonly usage: TokenUsage | undefined;
   /** The session's last checkpointed projection. */
   readonly projection?: SessionProjection;
+  readonly sessionState?: DurableSessionState;
 }): Promise<void> {
   "use step";
 
-  // Cataloged failures replace the raw identity with the curated one; the
-  // `detail` dump stays attached to the private event so the session trace
-  // keeps the raw evidence while the transcript shows the actionable summary.
-  const formatted = formatError(input.error);
-  const summary = summarizeKnownError(input.error);
-  let details = formatted;
-  if (summary !== null) {
-    const curated = {
-      ...formatted,
-      message: summary.message,
-      name: summary.name,
-      semanticErrorId: summary.id,
-    };
-    details = summary.hint === undefined ? curated : { ...curated, hint: summary.hint };
-  }
-  const code = typeof details.name === "string" ? details.name : "WORKFLOW_EXECUTION_FAILED";
-  const message = typeof details.message === "string" ? details.message : String(input.error);
+  const { code, details, message } = summarizeFailure(input.error, "WORKFLOW_EXECUTION_FAILED");
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   log.error("workflow loop threw — ending the session failed", {
     sessionId,
@@ -51,6 +37,7 @@ export async function emitTerminalSessionFailureStep(input: {
     },
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     projection: input.projection,
+    sessionState: input.sessionState,
     serializedContext: input.serializedContext,
     sessionWritable: input.sessionWritable,
     turnId: input.turnId,

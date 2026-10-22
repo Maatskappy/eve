@@ -16,10 +16,10 @@ import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#chann
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import {
-  withSessionStateDelta,
   type SessionStateValues,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import type { CoordinationDispatchResult } from "#execution/coordination-dispatch-shared.js";
 import type { RoutedDeliverResult } from "#execution/proxied-deliver-step.js";

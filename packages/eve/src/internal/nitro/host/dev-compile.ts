@@ -1,4 +1,4 @@
-import { Worker } from "node:worker_threads";
+import { SHARE_ENV, Worker } from "node:worker_threads";
 
 import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
 import {
@@ -17,12 +17,24 @@ export interface DevelopmentCompilation {
 // Authored code also runs in the worker and may post its own messages to `parentPort`.
 export const DEVELOPMENT_COMPILE_MESSAGE_KIND = "eve:development-compile";
 
-export type DevelopmentCompileMessage = {
+export interface DevelopmentCompileRequest {
+  readonly dockerAvailability: boolean | undefined;
+  readonly id: number;
+  readonly input: DevelopmentCompileInput;
   readonly kind: typeof DEVELOPMENT_COMPILE_MESSAGE_KIND;
-} & (
+}
+
+export type DevelopmentCompileOutcome =
   | { readonly ok: true; readonly compilation: DevelopmentCompilation }
-  | { readonly ok: false; readonly error: SerializedError }
-);
+  | { readonly ok: false; readonly error: SerializedError };
+
+export type DevelopmentCompileResponse = {
+  readonly dockerAvailability: boolean | undefined;
+  readonly heapLimit: number;
+  readonly heapUsed: number;
+  readonly id: number;
+  readonly kind: typeof DEVELOPMENT_COMPILE_MESSAGE_KIND;
+} & DevelopmentCompileOutcome;
 
 interface SerializedError {
   cause?: SerializedError;
@@ -32,47 +44,59 @@ interface SerializedError {
 }
 
 const MAX_SERIALIZED_CAUSE_DEPTH = 8;
+const WORKER_HEAP_RECYCLE_FRACTION = 0.25;
+
+let compileWorker: Worker | undefined;
+let compileQueue: Promise<unknown> = Promise.resolve();
+let dockerAvailability: boolean | undefined;
+let nextRequestId = 0;
 
 /**
- * Compiles the agent and stages its runtime generation in a short-lived worker
- * thread. Both steps bundle and import authored source, and the dev server
- * would otherwise keep each rebuild's copy in memory until it restarts: Node
- * never unloads an imported module, and Rolldown can keep a finished build's
- * plugins reachable. Terminating the worker releases all of it, and a rebuild
- * that exhausts the heap fails instead of crashing the server.
+ * Compiles the agent and stages its runtime generation in a compile worker.
+ * Both steps bundle and import authored source, which the dev server would
+ * otherwise keep in memory until it restarts: Node never unloads an imported
+ * module, and Rolldown can keep a finished build's plugins reachable.
+ *
+ * The worker stays warm between rebuilds, because a fresh one repeats the
+ * compiler's cold start on every save. Once its heap passes a fraction of the
+ * limit it is replaced, which bounds memory, and a rebuild that exhausts the
+ * heap fails instead of crashing the server.
  */
-export async function compileDevelopmentGeneration(
+export function compileDevelopmentGeneration(
   input: DevelopmentCompileInput,
 ): Promise<DevelopmentCompilation> {
   // eve's own tests load this module from TypeScript source, which a worker
   // thread cannot import without the test runner's transform.
   if (import.meta.url.endsWith(".ts")) {
-    return await compileAndStageDevelopmentGeneration(input);
+    return compileAndStageDevelopmentGeneration(input);
   }
 
-  const worker = new Worker(new URL("./dev-compile-worker.js", import.meta.url), {
-    workerData: input,
-  });
+  const compilation = compileQueue.then(() => compileInWorker(input));
+  compileQueue = compilation.catch(() => undefined);
+  return compilation;
+}
+
+export async function compileAndStageDevelopmentGeneration(
+  input: DevelopmentCompileInput,
+): Promise<DevelopmentCompilation> {
+  const compileResult = await compileAgentInWorkspace(input);
+  return { compileResult, generation: await stageDevelopmentGeneration(compileResult) };
+}
+
+async function compileInWorker(input: DevelopmentCompileInput): Promise<DevelopmentCompilation> {
+  const worker = (compileWorker ??= startCompileWorker());
+  let response: DevelopmentCompileResponse;
 
   try {
-    const message = await new Promise<DevelopmentCompileMessage>((resolve, reject) => {
-      worker.on("message", (message: Partial<DevelopmentCompileMessage> | null) => {
-        if (message?.kind === DEVELOPMENT_COMPILE_MESSAGE_KIND) {
-          resolve(message as DevelopmentCompileMessage);
-        }
-      });
-      worker.once("error", reject);
-      worker.once("exit", (code) => {
-        reject(new Error(`The agent compiler worker exited with code ${code} before finishing.`));
-      });
+    response = await requestCompilation(worker, {
+      dockerAvailability,
+      id: ++nextRequestId,
+      input,
+      kind: DEVELOPMENT_COMPILE_MESSAGE_KIND,
     });
-
-    if (!message.ok) {
-      throw deserializeError(message.error);
-    }
-
-    return message.compilation;
   } catch (error) {
+    await retireCompileWorker(worker);
+
     if ((error as { code?: unknown } | null)?.code === "ERR_WORKER_OUT_OF_MEMORY") {
       throw new Error(
         "Compiling the agent ran out of memory. Reduce what authored modules import when they load, or raise the heap limit with NODE_OPTIONS=--max-old-space-size=<megabytes>.",
@@ -81,17 +105,72 @@ export async function compileDevelopmentGeneration(
     }
 
     throw error;
-  } finally {
-    // Authored modules can leave timers or handles open, so the worker never exits on its own.
-    await worker.terminate();
   }
+
+  // Provider selection must stay stable for the dev server's lifetime, including across workers.
+  dockerAvailability ??= response.dockerAvailability;
+
+  if (response.heapUsed > response.heapLimit * WORKER_HEAP_RECYCLE_FRACTION) {
+    await retireCompileWorker(worker);
+  }
+
+  if (!response.ok) {
+    throw deserializeError(response.error);
+  }
+
+  return response.compilation;
 }
 
-export async function compileAndStageDevelopmentGeneration(
-  input: DevelopmentCompileInput,
-): Promise<DevelopmentCompilation> {
-  const compileResult = await compileAgentInWorkspace(input);
-  return { compileResult, generation: await stageDevelopmentGeneration(compileResult) };
+function startCompileWorker(): Worker {
+  const worker = new Worker(new URL("./dev-compile-worker.js", import.meta.url), {
+    // Environment files staged for a rebuild must reach the warm worker.
+    env: SHARE_ENV,
+  });
+  const forget = () => {
+    if (compileWorker === worker) compileWorker = undefined;
+  };
+
+  // Authored code can still throw from a timer after its build finished; the next build starts fresh.
+  worker.on("error", forget);
+  worker.once("exit", forget);
+  worker.unref();
+  return worker;
+}
+
+function requestCompilation(
+  worker: Worker,
+  request: DevelopmentCompileRequest,
+): Promise<DevelopmentCompileResponse> {
+  return new Promise((resolve, reject) => {
+    const settle = (finish: () => void) => {
+      worker.off("message", onMessage);
+      worker.off("error", onError);
+      worker.off("exit", onExit);
+      worker.unref();
+      finish();
+    };
+    const onMessage = (message: Partial<DevelopmentCompileResponse> | null) => {
+      if (message?.kind === DEVELOPMENT_COMPILE_MESSAGE_KIND && message.id === request.id) {
+        settle(() => resolve(message as DevelopmentCompileResponse));
+      }
+    };
+    const onError = (error: Error) => settle(() => reject(error));
+    const onExit = (code: number) =>
+      settle(() =>
+        reject(new Error(`The agent compiler worker exited with code ${code} before finishing.`)),
+      );
+
+    worker.on("message", onMessage);
+    worker.on("error", onError);
+    worker.on("exit", onExit);
+    worker.ref();
+    worker.postMessage(request);
+  });
+}
+
+async function retireCompileWorker(worker: Worker): Promise<void> {
+  if (compileWorker === worker) compileWorker = undefined;
+  await worker.terminate();
 }
 
 export function serializeError(error: unknown, depth = 0): SerializedError {

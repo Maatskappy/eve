@@ -1,23 +1,43 @@
-import { parentPort, workerData } from "node:worker_threads";
+import { getHeapStatistics } from "node:v8";
+import { parentPort } from "node:worker_threads";
 
+import {
+  adoptLinuxDockerDaemonAvailability,
+  peekLinuxDockerDaemonAvailability,
+} from "#execution/sandbox/bindings/docker-cli.js";
 import {
   compileAndStageDevelopmentGeneration,
   DEVELOPMENT_COMPILE_MESSAGE_KIND,
-  type DevelopmentCompileInput,
-  type DevelopmentCompileMessage,
+  type DevelopmentCompileOutcome,
+  type DevelopmentCompileRequest,
+  type DevelopmentCompileResponse,
   serializeError,
 } from "#internal/nitro/host/dev-compile.js";
 
-let message: DevelopmentCompileMessage;
+parentPort?.on("message", async (request: Partial<DevelopmentCompileRequest> | null) => {
+  if (request?.kind !== DEVELOPMENT_COMPILE_MESSAGE_KIND || request.input === undefined) {
+    return;
+  }
 
-try {
-  message = {
+  if (request.dockerAvailability !== undefined) {
+    adoptLinuxDockerDaemonAvailability(request.dockerAvailability);
+  }
+
+  let outcome: DevelopmentCompileOutcome;
+
+  try {
+    outcome = { ok: true, compilation: await compileAndStageDevelopmentGeneration(request.input) };
+  } catch (error) {
+    outcome = { ok: false, error: serializeError(error) };
+  }
+
+  const response: DevelopmentCompileResponse = {
+    ...outcome,
+    dockerAvailability: peekLinuxDockerDaemonAvailability(),
+    heapLimit: getHeapStatistics().heap_size_limit,
+    heapUsed: process.memoryUsage().heapUsed,
+    id: request.id ?? 0,
     kind: DEVELOPMENT_COMPILE_MESSAGE_KIND,
-    ok: true,
-    compilation: await compileAndStageDevelopmentGeneration(workerData as DevelopmentCompileInput),
   };
-} catch (error) {
-  message = { kind: DEVELOPMENT_COMPILE_MESSAGE_KIND, ok: false, error: serializeError(error) };
-}
-
-parentPort?.postMessage(message);
+  parentPort?.postMessage(response);
+});

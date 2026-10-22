@@ -37,6 +37,8 @@ interface ApiKeySpec {
   env: string;
   /** Header used to send the API key. */
   header: string;
+  /** Literal value written before the API key in the header. */
+  prefix?: string;
 }
 
 interface ConnectorSpec {
@@ -1987,6 +1989,19 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     },
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
+  },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "private link", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+      prefix: "Bearer ",
+    },
+    configureNote:
+      "Create an API key in the [Stacktree dashboard](https://app.stacktr.ee/api-keys). eve sends it as an Authorization Bearer token.",
   },
   agentcard: {
     logo: "agentcard",

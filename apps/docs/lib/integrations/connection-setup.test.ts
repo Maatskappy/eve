@@ -31,6 +31,16 @@ describe("Browser Use connection setup", () => {
   });
 });
 
+describe("Stacktree connection setup", () => {
+  it("generates the required Bearer authorization header", () => {
+    const integration = getIntegration("stacktree")!;
+    const quickStart = buildConnectionSetup(integration).variants["mcp:apiKey"];
+
+    expect(quickStart).toContain('"authorization": `Bearer ${process.env.STACKTREE_API_KEY!}`');
+    expect(quickStart).not.toContain("@vercel/connect");
+  });
+});
+
 describe("Agentcard connection setup", () => {
   it("uses the standard connector name for the native Vercel Connect service", () => {
     const integration = getIntegration("agentcard")!;

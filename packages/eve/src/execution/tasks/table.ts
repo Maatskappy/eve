@@ -88,6 +88,8 @@ export interface TaskRecord {
   readonly calls: readonly TaskCall[];
   /** Results not yet delivered to the model. */
   readonly results: readonly TaskResult[];
+  /** A one-shot task cancelled while its run may still report messages. */
+  readonly cancelled?: boolean;
   /** The task's run, from its start until it finishes. */
   readonly run?: TaskRun;
   /** Commands issued before the run could take them, sent in order once it reports started. */
@@ -128,6 +130,18 @@ export function findTask(table: TaskTable, taskId: string): TaskRecord | undefin
   return table.tasks.find((record) => record.id === taskId);
 }
 
+/** A task message belongs to a live, uncancelled run of this session. */
+export function isActiveTaskRun(table: TaskTable, taskId: string, runId: string): boolean {
+  const record = findTask(table, taskId);
+  return record?.cancelled !== true && record?.run?.runId === runId;
+}
+
+/** Only the recorded cancelled run can confirm its outcome and relinquish ownership. */
+export function isCancelledTaskRun(table: TaskTable, taskId: string, runId: string): boolean {
+  const record = findTask(table, taskId);
+  return record?.cancelled === true && record.run?.runId === runId;
+}
+
 export function isTaskWorking(record: TaskRecord): boolean {
   return record.calls.length > 0;
 }
@@ -153,7 +167,11 @@ export function isTaskAvailable(
   toolName: string,
 ): record is TaskRecord & { readonly run: TaskRun } {
   return (
-    record !== undefined && record.resumable && record.run !== undefined && record.name === toolName
+    record !== undefined &&
+    record.resumable &&
+    !record.cancelled &&
+    record.run !== undefined &&
+    record.name === toolName
   );
 }
 
@@ -190,7 +208,7 @@ export function taskCancelResult(table: TaskTable, taskId: string): TaskCancelRe
   const record = findTask(table, taskId);
   if (record === undefined) return undefined;
   return {
-    resumable: record.resumable,
+    resumable: record.resumable && record.kind !== "agent",
     status: isTaskWorking(record) ? "cancelled" : "already_finished",
     tool: record.name,
   };
@@ -365,21 +383,24 @@ export interface TaskCancellation {
 /**
  * Cancels a task's current work: its calls settle as cancelled and never
  * report back, and a live run is told to stop. A run that hasn't started
- * holds the cancel. A resumable task stays available and becomes idle.
+ * holds the cancel only for a non-agent resumable task. Cancelling an agent or
+ * one-shot task ends it; another resumable task stays available and becomes idle.
  */
 export function cancelTask(table: TaskTable, taskId: string): TaskCancellation {
   const record = findTask(table, taskId);
   if (record === undefined) return { settled: [], table };
-  if (record.resumable) return cancelResumableTask(table, record);
+  if (record.resumable && record.kind !== "agent") return cancelResumableTask(table, record);
   const settled = cancelledCalls(record);
   const run = record.run;
-  const next = updateTask(table, taskId, (current) => {
-    const cancelled: TaskRecord = { ...current, calls: [] };
-    if (run === undefined || run.started) return cancelled;
-    return { ...cancelled, held: [{ kind: "cancel" }] };
-  });
-  if (run === undefined || !run.started) return { settled, table: next };
-  return { send: cancelCommand(run), settled, table: next };
+  const next = updateTask(table, taskId, (current) => ({
+    ...current,
+    calls: [],
+    cancelled: true,
+    held: undefined,
+  }));
+  return run === undefined || record.cancelled
+    ? { settled, table: next }
+    : { send: cancelCommand(run), settled, table: next };
 }
 
 /**
@@ -453,7 +474,9 @@ function createTaskId(table: TaskTable, name: string): string {
 }
 
 function isResumableTaskIdle(record: TaskRecord): boolean {
-  return record.resumable && record.run !== undefined && !isTaskWorking(record);
+  return (
+    record.resumable && !record.cancelled && record.run !== undefined && !isTaskWorking(record)
+  );
 }
 
 function isFinishedRecord(record: TaskRecord): boolean {

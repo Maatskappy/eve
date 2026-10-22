@@ -15,6 +15,8 @@ import {
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { isTaskRunMessage } from "#execution/tasks/session.js";
+import { isActiveTaskRun, readTaskTable } from "#execution/tasks/table.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import {
   workflowToolRunOutcomeToToolResult,
   workflowAskPayload,
@@ -103,7 +105,14 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  const { runId } = message.from;
+  const { runId, taskId } = message.from;
+  const state = cursor.sessionState.snapshot.session.state;
+  if (
+    taskId !== undefined &&
+    (!isActiveTaskRun(readTaskTable(state), taskId, runId) ||
+      storedProjection(state).view?.tasks[taskId]?.status === "ended")
+  )
+    return;
   const { request } = message;
   if (request.kind === "relay") {
     await deliverWorkflowRelay({ ...message, request }, async () => {

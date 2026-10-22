@@ -12,6 +12,7 @@ import {
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
+  stopLateAgentSessionStep,
   type AgentSessionMessage,
   type OpenedAgentSession,
 } from "#execution/agent-sessions/steps.js";
@@ -236,6 +237,7 @@ class RunAgentSession implements AgentSession {
    */
   async #open(message: AgentSessionMessage): Promise<OpenedAgentSession> {
     const { agentContext: context, from } = this.#run;
+    let opened: OpenedAgentSession | undefined;
     try {
       const address = await openAgentSessionStep({
         ...message,
@@ -244,12 +246,13 @@ class RunAgentSession implements AgentSession {
         model: this.#options.model,
         name: this.#name,
       });
-      const opened = { address, context, key: this.#key };
+      opened = { address, context, key: this.#key };
       this.#sessions.push(opened);
-      await this.#run.owner.send({ from, kind: "agent-started", session: address });
+      await this.#run.owner.send({ context, from, kind: "agent-started", session: address });
       return opened;
     } catch (error) {
       this.#opened = undefined;
+      if (opened !== undefined) await stopLateAgentSessionStep(opened).catch(() => undefined);
       throw error;
     }
   }

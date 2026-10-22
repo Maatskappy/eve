@@ -1,3 +1,4 @@
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1320,6 +1321,7 @@ describe("SessionExecution checkpoints", () => {
       turnId: "turn_0",
     });
     const opened = (sessionId: string): SessionInboxPayload => ({
+      context: { parent: { sessionId: sessionState.sessionId } } as AgentSessionContext,
       from: from(),
       kind: "agent-started",
       session: {
@@ -1781,6 +1783,7 @@ function boundaryRunMessages() {
     turnId: "turn_0",
   });
   const opened = (callId: string, name: string): WorkflowToolRunMessage => ({
+    context: { parent: { sessionId: "parent" } } as AgentSessionContext,
     from: from(callId),
     kind: "agent-started",
     session: {

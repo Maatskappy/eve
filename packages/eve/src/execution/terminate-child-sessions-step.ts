@@ -28,3 +28,14 @@ export async function terminateChildSessionsStep(input: {
     { kind: "end", reason: "The session ended." },
   );
 }
+
+export async function reportChildSessionTeardownFailureStep(input: {
+  readonly error: unknown;
+  readonly parentSessionId: string;
+}): Promise<void> {
+  "use step";
+
+  logError(log, "failed to terminate child sessions", input.error, {
+    parentSessionId: input.parentSessionId,
+  });
+}

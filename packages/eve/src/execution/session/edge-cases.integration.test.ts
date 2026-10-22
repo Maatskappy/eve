@@ -11,6 +11,7 @@ import type { SessionParent } from "#channel/types.js";
 import type { EveToolPart } from "#client/message-types.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -29,7 +30,7 @@ import {
 } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { readSessionEventHistory } from "#execution/session-event-stream.js";
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
@@ -40,6 +41,11 @@ import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { z } from "zod";
+import {
+  defineWorkflowTool,
+  type WorkflowExecuteToolDefinition,
+} from "#tools/workflow-definition.js";
+import { waitingForCleanupWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 
 // Sessions driven through their odd paths: tools that fail, approvals that are cancelled,
 // steered, answered twice or for nothing, models that fail mid-response, and controls that
@@ -180,6 +186,34 @@ function gate<T = void>() {
   return { open, wait };
 }
 
+async function waitForOwnerGate<T>(
+  promise: Promise<T>,
+  label: string,
+  events: () => readonly SessionStreamEvent[],
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Timed out waiting for ${label}; parent events: ${events()
+                  .map((event) => event.type)
+                  .join(", ")}`,
+              ),
+            ),
+          10_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * A reply that holds until `release` resolves. With `before`, that text streams first, so the
  * reply has started when it holds; without it, nothing has.
@@ -212,6 +246,7 @@ interface ToolSpec {
   readonly allowOtherResponders?: boolean;
   readonly inputSchema?: z.ZodType;
   readonly execute?: (input: unknown) => unknown;
+  readonly workflow?: boolean;
 }
 
 type Stage = SessionStreamEvent[];
@@ -264,23 +299,31 @@ async function withSession(
       })),
       ...options.tools.map((tool) => ({
         loadNamespace: async () => ({
-          default: defineTool({
-            approval:
-              tool.approval === true
-                ? {
-                    request: always(),
-                    ...(tool.allowOtherResponders && {
-                      response: () => ({ status: "allowed" as const }),
-                    }),
-                  }
-                : undefined,
-            description: `Run ${tool.name}.`,
-            execute: async (input) => {
-              ran.push(tool.name);
-              return tool.execute === undefined ? { ran: tool.name } : await tool.execute(input);
-            },
-            inputSchema: tool.inputSchema ?? z.object({}).passthrough(),
-          }),
+          default: tool.workflow
+            ? defineWorkflowTool({
+                description: `Run ${tool.name}.`,
+                execute: waitingForCleanupWorkflow as WorkflowExecuteToolDefinition["execute"],
+                inputSchema: {},
+              })
+            : defineTool({
+                approval:
+                  tool.approval === true
+                    ? {
+                        request: always(),
+                        ...(tool.allowOtherResponders && {
+                          response: () => ({ status: "allowed" as const }),
+                        }),
+                      }
+                    : undefined,
+                description: `Run ${tool.name}.`,
+                execute: async (input) => {
+                  ran.push(tool.name);
+                  return tool.execute === undefined
+                    ? { ran: tool.name }
+                    : await tool.execute(input);
+                },
+                inputSchema: tool.inputSchema ?? z.object({}).passthrough(),
+              }),
         }),
         logicalPath: `tools/${tool.name}.ts`,
       })),
@@ -289,7 +332,7 @@ async function withSession(
   const continuationToken = `http:${name}`;
   const events: SessionStreamEvent[] = [];
 
-  await runtime.run(async () => {
+  const sessionId = await runtime.run(async () => {
     const run = await startSessionOwner(workflowEntry, [
       {
         kind: "initial",
@@ -408,14 +451,18 @@ async function withSession(
         },
         until: (label, matches) => read(label, stream.nextUntil(matches)),
       });
-      await vi.waitFor(() => expectInstrumentationPairs(events, heard));
+      await vi.waitFor(() => expectInstrumentationPairs(events, heard, run.runId));
     } finally {
       stream.dispose();
-      await run.cancel().catch(() => {});
+      const cleanup = run.cancel().catch(() => {});
+      if (name === "edge-cancel-hung-task")
+        await waitForOwnerGate(cleanup, "parent run cancel cleanup", () => events);
+      else await cleanup;
     }
+    return run.runId;
   });
   expectReadersAgree(events);
-  expectInstrumentationPairs(events, heard);
+  expectInstrumentationPairs(events, heard, sessionId);
   return { events, heard, ran };
 }
 
@@ -471,13 +518,13 @@ function expectReadersAgree(events: readonly SessionStreamEvent[]) {
 function expectInstrumentationPairs(
   events: readonly SessionStreamEvent[],
   all: readonly InstrumentationEvent[],
+  sessionId: string,
 ) {
-  let heard = all;
-  // A child session of the same agent reports to the same provider; this stream is the parent's.
+  // Providers are process-wide, so a child session and a cancelled session that an earlier test
+  // left running report to the same one; this stream is its owner run's session.
   const sessionOf = (event: InstrumentationEvent) =>
     "sessionId" in event ? event.sessionId : "scope" in event ? event.scope.sessionId : undefined;
-  const parent = all.map(sessionOf).find((id) => id !== undefined);
-  heard = heard.filter((event) => sessionOf(event) === parent);
+  const heard = all.filter((event) => sessionOf(event) === sessionId);
   const count = (type: string) => {
     const counts = new Map<string, number>();
     for (const event of heard)
@@ -1307,6 +1354,89 @@ describe("models that fail", () => {
 });
 
 describe("work delegated to a child session", () => {
+  it("finishes a cancelled task even when its run never reports, then starts the next turn", async () => {
+    const running = gate();
+    const never = gate();
+    const { events } = await withSession(
+      "edge-cancel-hung-task",
+      {
+        message: "Start the slow work, then cancel it.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = JSON.stringify(raw.find((message) => message.role === "user")?.content);
+          if (first.includes("CHILD:")) {
+            running.open();
+            return heldReply("Child result.", never.wait);
+          }
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              { toolName: "agent", toolCallId: "call_agent", input: { message: "CHILD: work" } },
+            ];
+          if (!prompt.includes('"toolName":"eve__task_cancel"')) {
+            const taskId = /Started task ([\w-]+)/u.exec(prompt)?.[1];
+            if (!taskId) throw new Error("No task id in the model prompt");
+            return [{ toolName: "eve__task_cancel", toolCallId: "call_cancel", input: { taskId } }];
+          }
+          return "Cancelled.";
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("task started", (event) => event.type === "task.started");
+        await waitForOwnerGate(running.wait, "child model start", session.events);
+        await session.next("cancelled task's turn");
+        await waitForOwnerGate(session.send("Next turn."), "next turn delivery", session.events);
+        await session.next("next turn");
+        // The cancelled run may still address the owner after the task has ended.
+        const taskId = ofType(session.events(), "task.ended")[0]!.data.taskId;
+        const runs = await (
+          await getWorld()
+        ).runs.list({
+          workflowName: workflowToolRunWorkflowReference.workflowId,
+          pagination: { limit: 100 },
+          resolveData: "none",
+        });
+        expect(runs.data).toHaveLength(1);
+        await waitForOwnerGate(
+          resumeHook(sessionInboxHookToken(`http:edge-cancel-hung-task`), {
+            kind: "request",
+            from: {
+              callId: "call_agent",
+              input: { message: "CHILD: work" },
+              runId: runs.data[0]!.runId,
+              sequence: 0,
+              stepIndex: 0,
+              taskId,
+              toolName: "agent",
+              turnId: "turn_0",
+            },
+            replyTo: "late-question",
+            request: {
+              kind: "ask",
+              control: "late-control",
+              request: { prompt: "A late question", title: "Late question", options: [] },
+            },
+          }),
+          "late question delivery",
+          session.events,
+        );
+        await session.send("One more update.");
+        await session.next("later turn");
+      },
+    );
+    expect(turnOutcomes(events)).toEqual([
+      "turn_0:completed",
+      "turn_1:completed",
+      "turn_2:completed",
+    ]);
+    expect(ofType(events, "interaction.opened")).toEqual([]);
+    const [ended] = ofType(events, "task.ended");
+    expect(ended?.data.outcome).toBe("cancelled");
+    expect(
+      ofType(events, "call.settled").find((event) => event.data.callId === "call_cancel")?.data,
+    ).toMatchObject({ output: `Stopped ${ended!.data.taskId}; it won't report back.` });
+  });
+
   it("relays a child's approval to its parent, and answering it there runs the child's call", async () => {
     const { events, ran } = await withSession(
       "edge-child-approval",

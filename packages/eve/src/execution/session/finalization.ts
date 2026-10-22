@@ -9,7 +9,10 @@ import {
   reportSessionSandboxCleanupFailureStep,
 } from "#execution/session/end-sandbox-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
+import {
+  reportChildSessionTeardownFailureStep,
+  terminateChildSessionsStep,
+} from "#execution/terminate-child-sessions-step.js";
 import { liveRuns } from "#execution/tasks/table.js";
 import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
@@ -55,7 +58,14 @@ export async function finalizeSession(
   // Most sessions end with no run to stop, so the step that would find nothing is skipped.
   if (sessionState !== undefined && mayHaveLiveRuns(sessionState)) {
     // Best effort: a failed teardown must not keep the session from ending and closing its stream.
-    await terminateChildSessionsStep({ sessionState }).catch(() => undefined);
+    try {
+      await terminateChildSessionsStep({ sessionState });
+    } catch (error) {
+      await reportChildSessionTeardownFailureStep({
+        error: normalizeSerializableError(error),
+        parentSessionId: sessionState.sessionId,
+      }).catch(() => undefined);
+    }
   }
   if (sessionState !== undefined) {
     try {

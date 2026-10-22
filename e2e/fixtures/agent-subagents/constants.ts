@@ -10,14 +10,16 @@ export const MODEL_AGENT_SELECTED_MODEL = "openai/gpt-6.1-sol";
 /** The directive words of the notebook scripts, one per parent turn. */
 export const NOTEBOOK_DIRECTIVES = [
   "NOTEBOOK-REMEMBER",
+  "NOTEBOOK-CHECK",
   "NOTEBOOK-REVIEW",
+  "NOTEBOOK-RESTART",
   "NOTEBOOK-RECALL",
   "NOTEBOOK-CORRECT",
 ] as const;
 export type NotebookDirective = (typeof NOTEBOOK_DIRECTIVES)[number];
 /** Starts every message the parent sends a notebook keeper. */
 export const NOTEBOOK_ENTRY = "NOTEBOOK-ENTRY";
-/** The fact a keeper must still know after its task is cancelled and continued. */
+/** The name Alice gives the keeper, explicitly supplied again when starting a replacement task. */
 export const NOTEBOOK_NAME = "Harbor Lumen 4482";
 /** The parent's correction, sent by `taskId` while the keeper measures the pier. */
 export const NOTEBOOK_CORRECTION = `${NOTEBOOK_ENTRY} Correction: Alice meant the south pier, not the north pier.`;

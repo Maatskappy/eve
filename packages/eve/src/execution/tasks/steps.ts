@@ -9,6 +9,8 @@ import {
   cancelTask,
   findTask,
   finishTaskRun,
+  isActiveTaskRun,
+  isCancelledTaskRun,
   markTaskRunStarted,
   readTaskTable,
   recordTaskRunUsage,
@@ -44,7 +46,7 @@ import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
 import { delegatedUsageFact } from "#harness/facts.js";
-import type { SessionView } from "#harness/session-machine/view.js";
+import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { TaskCancelReason } from "#execution/tasks/table.js";
@@ -72,6 +74,39 @@ export async function applyTaskRunMessage(
     return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   }
   let table = readTaskTable(session.state);
+  const cancelled = isCancelledTaskRun(table, taskId, message.from.runId);
+  const ended = storedProjection(session.state).view?.tasks[taskId]?.status === "ended";
+  if (cancelled && (message.kind === "usage" || message.kind === "outcome")) {
+    // The task already ended, so later spend counts without naming it again.
+    const counted = countTaskRunUsage(table, taskId, message);
+    table =
+      message.kind === "outcome"
+        ? finishTaskRun(counted.table, taskId, message.from.runId)
+        : counted.table;
+    return await commitSessionStep(
+      { ...input, sessionState: saveTable(input.sessionState, session, table) },
+      (view) => [
+        {
+          turn: view.turn,
+          events: counted.spend === undefined ? [] : [delegatedUsageFact(undefined, counted.spend)],
+        },
+      ],
+      { origin: "own" },
+    );
+  }
+  if (cancelled && message.kind === "started") {
+    // The run may not have existed when cancellation tried to stop it. Started follows
+    // registration of its control hook; keep its address until the outcome arrives.
+    await ignoreGoneTarget(
+      resumeHook(findTask(table, taskId)!.run!.hookToken, {
+        kind: "end",
+        reason: TASK_CANCEL_REASON,
+      }),
+    );
+    return { serializedContext: input.serializedContext, sessionState: input.sessionState };
+  }
+  if (ended || !isActiveTaskRun(table, taskId, message.from.runId))
+    return { serializedContext: input.serializedContext, sessionState: input.sessionState };
   const settles: Decision[] = [];
   const withdraws: Decision[] = [];
   let spend: TokenUsage | undefined;
@@ -145,10 +180,9 @@ function spendFact(
 
 /**
  * Cancels tasks, and the calls the turn waits on when `turnCalls` is set. The tasks' calls
- * settle as cancelled and the session publishes that first; then every run the cancel ends gets
- * until the stop deadline to finish, and one still running is cancelled outright (`stopRuns`).
- * A resumable task's run only stops its current stretch. A run that hasn't started holds the
- * cancel until it does.
+ * settle as cancelled and the session publishes that first. A cancelled agent or `task()` task
+ * ends now, without waiting for its run to finish cleanup. A resumable tool's run only stops its
+ * current stretch.
  *
  * A `task()` run's cancel settles every request it relayed, so the session withdraws them in
  * the same step and accepts no answer after it. A `serve()` run withdraws its stretch's
@@ -177,21 +211,24 @@ async function cancelTasks(
   const withdraws: Decision[] = [];
   const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   const targets: RunStopTarget[] = [];
-  const taskOfRun = new Map<string, string>();
   const calls = input.turnCalls === true ? waitedCallRuns(session) : [];
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
     table = cancelled.table;
     settles.push(...taskSettled(record, cancelled.settled, outcome));
+    if (record?.resumable === false || record?.kind === "agent")
+      settles.push((view) => endTask(view, { outcome, taskId }));
     if (cancelled.send === undefined) continue;
     // A `task()` run's cancel settles what it relayed; a `serve()` run withdraws its own.
-    if (record?.resumable === false) {
+    if (record?.resumable === false || record?.kind === "agent") {
       const requestIds = runRequestIds(session, cancelled.send.run.runId);
       withdraws.push((view) => finishRun(view, { requestIds, taskId }));
     }
-    targets.push({ ends: record?.resumable === false, run: cancelled.send.run });
-    taskOfRun.set(cancelled.send.run.runId, taskId);
+    targets.push({
+      ends: record?.resumable === false || record?.kind === "agent",
+      run: cancelled.send.run,
+    });
   }
   const committed = await commitTaskDecisions(
     input,
@@ -199,31 +236,27 @@ async function cancelTasks(
     { settles, withdraws },
   );
   const [cancelledOutright] = await Promise.all([
-    stopRuns(targets, { kind: "cancel", reason: TASK_CANCEL_REASON }),
+    stopRuns(
+      targets.filter((target) => target.ends),
+      { kind: "end", reason: TASK_CANCEL_REASON },
+      { waitForEnd: false },
+    ),
+    stopRuns(
+      targets.filter((target) => !target.ends),
+      { kind: "cancel", reason: TASK_CANCEL_REASON },
+      { waitForEnd: false },
+    ),
     stopRuns(calls, { kind: "cancel", reason: TURN_CANCEL_REASON }),
   ]);
-  // A run cancelled outright never reports its outcome, so its task forgets it now.
-  const forgotten = cancelledOutright.flatMap((runId) => {
-    const taskId = taskOfRun.get(runId);
-    return taskId === undefined ? [] : [{ runId, taskId }];
-  });
-  if (forgotten.length === 0) return committed;
+  if (cancelledOutright.length === 0) return committed;
   const current = readDurableSession(committed.sessionState);
-  const finished = forgotten.reduce(
-    (next, { runId, taskId }) => finishTaskRun(next, taskId, runId),
-    readTaskTable(current.state),
-  );
-  // A task whose run is forgotten ends now: nothing will report its outcome.
-  const ended = forgotten.map(
-    ({ taskId }): Decision =>
-      (view) =>
-        endTask(view, { outcome: { reason: input.reason, status: "cancelled" }, taskId }),
-  );
-  return await commitSessionStep(
-    { ...input, ...committed, sessionState: saveTable(committed.sessionState, current, finished) },
-    (view) => ended.map((decide) => decide(view)),
-    { origin: "own" },
-  );
+  let finished = readTaskTable(current.state);
+  const cancelledRuns = new Set(cancelledOutright);
+  for (const record of finished.tasks) {
+    if (record.run !== undefined && cancelledRuns.has(record.run.runId))
+      finished = finishTaskRun(finished, record.id, record.run.runId);
+  }
+  return { ...committed, sessionState: saveTable(committed.sessionState, current, finished) };
 }
 
 /** A transition a task step decides against the session it commits to. */

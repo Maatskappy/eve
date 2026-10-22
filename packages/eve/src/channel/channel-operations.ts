@@ -10,7 +10,6 @@ import type { Session } from "#channel/session.js";
 import type {
   Runtime,
   SessionAuthContext,
-  SessionCallback,
   TurnPolicy,
   SessionControlOptions,
 } from "#channel/types.js";
@@ -23,13 +22,8 @@ interface BaseChannelSendOptions {
   /** Stable delivery identity, deduplicated within this session's recent-key window. */
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
-  readonly callback?: SessionCallback;
   readonly context?: readonly string[];
-  /**
-   * Prior conversation added as user and assistant turns before this
-   * message and its `context`. Seeds a session this send creates, or
-   * extends the history of the session that owns the address.
-   */
+  /** Prior conversation imported before this message and its context. */
   readonly history?: readonly SessionHistoryMessage[];
   readonly initiatorAuth?: SessionAuthContext | null;
   /** JSON Schema for a structured final answer, as on `Session.send()`. */

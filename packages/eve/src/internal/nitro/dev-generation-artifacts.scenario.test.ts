@@ -5,6 +5,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { EXTENSION_CAPABILITY_VERSIONS } from "#compiler/extension-compatibility.js";
 import { readDevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
@@ -223,7 +224,11 @@ describe("development generation artifacts", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "0.0.0-test",
-          requires: { extension: 1, tool: 1, config: 1 },
+          requires: {
+            extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+            tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+            config: EXTENSION_CAPABILITY_VERSIONS.config,
+          },
         }),
         "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
       },
@@ -335,7 +340,10 @@ describe("development generation artifacts", () => {
         kind: "eve-extension",
         formatVersion: 1,
         builtWithEve: "0.0.0-test",
-        requires: { extension: 1, tool: 1 },
+        requires: {
+          extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+          tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+        },
       })}\n`,
     );
     await writeFile(

@@ -4,11 +4,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, StaticModelReferenceKey } from "#context/keys.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import {
+  dispatchMemoryCompactionCompleted,
+  dispatchMemoryCompactionRequested,
+  dispatchMemoryTurnStarted,
+} from "#context/memory-lifecycle.js";
+import {
+  compactionCompletedPoint,
+  compactionRequestedPoint,
+  turnStartedForResolvers,
+} from "#harness/session-machine/change-points.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { attachClientContext } from "#internal/client-context.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import { defineMemory } from "#public/memory/index.js";
@@ -88,7 +97,7 @@ describe("compaction summary call", () => {
       role: "assistant",
     });
     // Session limits see the summary call; a manual compaction has no turn to report it.
-    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({
+    expect(sessionUsage(result.session)).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
     });
@@ -141,7 +150,84 @@ describe("compaction summary call", () => {
 
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
-    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({ inputTokens: 120 });
+    expect(sessionUsage(result.session)).toMatchObject({ inputTokens: 120 });
+  });
+
+  it("starts no summary run when capping tool output is enough", async () => {
+    const model = new MockLanguageModelV3({
+      doStream: async () =>
+        streamOf([
+          { type: "stream-start", warnings: [] },
+          { id: "reply", type: "text-start" },
+          { delta: "Here is the report.", id: "reply", type: "text-delta" },
+          { id: "reply", type: "text-end" },
+          {
+            finishReason: { raw: undefined, unified: "stop" },
+            type: "finish",
+            usage: {
+              inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 10, total: 10 },
+              outputTokens: { reasoning: 0, text: 4, total: 4 },
+            },
+          },
+        ]),
+    });
+    const events: SessionEvent[] = [];
+    const checker = createStreamChecker();
+    const at = "2026-10-21T00:00:00.000Z";
+    const issues: unknown[] = [];
+    let position = 0;
+    // Over the threshold, but capping the old search output fits it without a summary.
+    const session: HarnessSession = {
+      agent: { modelReference: { id: "turn-model" }, system: "You help Alice.", tools: [] },
+      compaction: { recentWindowSize: 1, threshold: 20_000 },
+      continuationToken: "http:compaction-capped",
+      history: [
+        { content: "Please search the backlog.", kind: "user", role: "user" },
+        {
+          content: [{ input: {}, toolCallId: "call-0", toolName: "search", type: "tool-call" }],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "text", value: "x".repeat(100_000) },
+              toolCallId: "call-0",
+              toolName: "search",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+      sessionId: "compaction-capped",
+    };
+    await createToolLoopHarness({
+      handleEvent: async (publication) => {
+        const facts = eventsOf(publication);
+        events.push(...facts);
+        issues.push(...checker.check({ at, facts }, position++));
+      },
+      resolveModel: async () => model,
+      tools: new Map(),
+    })(session, { message: "Alice asks for the quarterly report." });
+
+    expect(
+      events
+        .filter((event) => event.type.startsWith("context."))
+        .map(({ data, type }) => ({ type, ...data })),
+    ).toMatchObject([
+      { kind: "compaction", type: "context.started" },
+      { kind: "compaction", outcome: "completed", type: "context.settled" },
+    ]);
+    // Only the turn's own run: the summary model was never requested.
+    expect(
+      events.filter((event) => event.type === "model.requested").map(({ data }) => data),
+    ).toEqual([expect.not.objectContaining({ changeId: expect.anything() })]);
+    expect(events.filter((event) => event.type === "model.settled")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "usage.recorded")).toMatchObject([
+      { data: { owner: { runId: "run_0" } } },
+    ]);
+    expect(issues).toEqual([]);
   });
 });
 
@@ -209,7 +295,7 @@ describe("memory recalled after a compaction", () => {
   async function runWithNotes(options: {
     readonly compactOnly?: boolean;
     readonly history: HarnessSession["history"];
-    readonly input: StepInput;
+    readonly input: HarnessStepInput;
     readonly steps?: readonly (() => StreamResult)[];
   }) {
     const stepPrompts: string[][] = [];
@@ -251,15 +337,48 @@ describe("memory recalled after a compaction", () => {
     const result = await contextStorage.run(ctx, async () => {
       let stepped = await createToolLoopHarness({
         compactOnly: options.compactOnly,
+        // The memory points the session's participants dispatch from these facts.
         handleEvent: foldingHandler(async (event, messages) => {
-          await dispatchMemoryLifecycleEvent({
-            appRoot: "",
-            ctx,
-            event,
-            memories: [notes],
-            messages,
-            nodeId: "__root__",
-          });
+          const memory = { ctx, memories: [notes] };
+          if (event.type === "turn.started") {
+            await dispatchMemoryTurnStarted({
+              ...memory,
+              appRoot: "",
+              event: turnStartedForResolvers({ sequence: 0, turnId: event.data.turnId }, event),
+              nodeId: "__root__",
+            });
+          } else if (event.type === "context.started" && event.data.kind === "compaction") {
+            await dispatchMemoryCompactionRequested({
+              ...memory,
+              appRoot: "",
+              event: compactionRequestedPoint({
+                modelId: "step-model",
+                sequence: 0,
+                sessionId: "memory-compaction-session",
+                stepIndex: 0,
+                turnId: event.data.turnId ?? "",
+                usageInputTokens: event.data.trigger?.inputTokens ?? null,
+              }),
+              messages: messages ?? [],
+              nodeId: "__root__",
+            });
+          } else if (
+            event.type === "context.settled" &&
+            event.data.kind === "compaction" &&
+            event.data.outcome === "completed"
+          ) {
+            await dispatchMemoryCompactionCompleted({
+              ...memory,
+              event: compactionCompletedPoint({
+                modelId: "step-model",
+                sequence: 0,
+                sessionId: "memory-compaction-session",
+                stepIndex: 0,
+                turnId: "turn_0",
+              }),
+              messages: messages ?? [],
+            });
+          }
         }),
         historyProjector: projectMemoryHistoryFromSessionState,
         resolveModel: async () => model,

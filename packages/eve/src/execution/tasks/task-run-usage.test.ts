@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { DurableSession } from "#execution/durable-session-store.js";
+import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
+import type { SessionView } from "#harness/session-machine/view.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -12,33 +14,50 @@ import {
   writeTaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
-import {
-  getSessionUsage,
-  getSessionUsageWindow,
-  resetSessionUsageWindow,
-  setTurnUsageState,
-} from "#harness/turn-tag-state.js";
+import { sessionUsage } from "#harness/session-usage.js";
+import { checkSessionUsageLimit } from "#harness/hitl/budget.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-// The settled calls' stream events are not under test; the committed session is.
-vi.mock("#execution/publish-session-events.js", () => ({
-  commitSessionStep: async ({
-    serializedContext,
-    sessionState,
-  }: {
-    readonly serializedContext: Record<string, unknown>;
-    readonly sessionState: unknown;
-  }) => ({ serializedContext, sessionState }),
-}));
+// A task step's commit folds what it decides into the session's saved view, as the writer does.
+vi.mock("#execution/publish-session-events.js", async () => {
+  const { readDurableSession, replaceDurableSessionSnapshot } =
+    await import("#execution/durable-session-store.js");
+  const { sessionView } = await import("#harness/session-machine/commit.js");
+  const { SESSION_PROJECTION_STATE_KEY, storedProjection } =
+    await import("#harness/session-machine/view.js");
+  const { copyView, foldReceivedEvent } = await import("#protocol/session-projection/fold.js");
+  return {
+    commitSessionStep: async (
+      target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
+      decide: (view: SessionView) => readonly { readonly events: readonly SessionEvent[] }[],
+    ) => {
+      const session = readDurableSession(target.sessionState);
+      const projection = storedProjection(session.state);
+      const view = copyView(projection.view);
+      for (const transition of decide(sessionView(projection, session.state)))
+        for (const event of transition.events)
+          foldReceivedEvent(view, { ...event, meta: { endOfLine: false } });
+      const state = { ...session.state, [SESSION_PROJECTION_STATE_KEY]: { ...projection, view } };
+      return {
+        serializedContext: target.serializedContext,
+        sessionState: replaceDurableSessionSnapshot({
+          session: { ...session, state },
+          state: target.sessionState,
+        }),
+      };
+    },
+  };
+});
 
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
 }
 
 /**
- * A session that has spent `ownInputTokens` itself (all of it before a usage-window
- * reset), with one agent task, `name`, whose run is working on a call.
+ * A session that has spent `ownInputTokens` itself, with one
+ * agent task, `name`, whose run is working on a call.
  */
 function sessionWithTask(input: { readonly name: string; readonly ownInputTokens: number }): {
   readonly cursor: SessionStateCursor;
@@ -46,7 +65,6 @@ function sessionWithTask(input: { readonly name: string; readonly ownInputTokens
   readonly from: WorkflowToolRunRef;
 } {
   const base = createTestSessionState({ sessionId: `${input.name}-parent` });
-  const own = { ...usage(input.ownInputTokens), costUsd: 0, sawCost: false };
   const created = createTask(readTaskTable(undefined), {
     callId: `${input.name}-call`,
     kind: "agent",
@@ -60,9 +78,7 @@ function sessionWithTask(input: { readonly name: string; readonly ownInputTokens
     runId,
   });
   const snapshot = writeTaskTable(
-    resetSessionUsageWindow(
-      setTurnUsageState(base.snapshot.session, { ...own, session: own, turnId: "turn_1" }),
-    ),
+    withSessionUsage(base.snapshot.session, usage(input.ownInputTokens)),
     table,
   );
   const inbox = {
@@ -102,11 +118,11 @@ function committed(cursor: SessionStateCursor): DurableSession {
 }
 
 function spent(cursor: SessionStateCursor): TokenUsage {
-  return getSessionUsage(committed(cursor));
+  return sessionUsage(committed(cursor));
 }
 
 describe("delegated agent usage", () => {
-  it("counts a task's usage once from its replies, usage reports, and outcome, however often they arrive, in the session's usage window", async () => {
+  it("counts a task's usage once from its replies, usage reports, and outcome, however often they arrive, against the session's limits", async () => {
     const alice = sessionWithTask({
       name: "reviewer",
       ownInputTokens: 100,
@@ -129,8 +145,15 @@ describe("delegated agent usage", () => {
     await alice.execution.handleWorkflowMessage({ from, kind: "usage", usage: usage(600, 0.5) });
 
     expect(spent(alice.cursor)).toEqual(usage(700, 0.5));
-    // The window started after Alice's own 100 tokens, so it holds only the reviewer's spend.
-    expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(600, 0.5));
+    const budget = () =>
+      checkSessionUsageLimit({
+        canAsk: false,
+        session: committed(alice.cursor),
+        turnSequence: 0,
+        usage: spent(alice.cursor),
+        limit: ({ window }) => window.inputTokens >= 1_000,
+      });
+    expect(budget().kind).toBe("within");
 
     const outcome = {
       from,
@@ -143,6 +166,10 @@ describe("delegated agent usage", () => {
     await alice.execution.handleWorkflowMessage(outcome);
 
     expect(spent(alice.cursor)).toEqual(usage(1_000, 0.75));
-    expect(getSessionUsageWindow(committed(alice.cursor))).toEqual(usage(900, 0.75));
+    expect(budget()).toMatchObject({
+      kind: "fail",
+      code: "SESSION_USAGE_LIMIT_REACHED",
+      details: { total: { inputTokens: 1_000 } },
+    });
   });
 });

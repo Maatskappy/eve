@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
@@ -19,7 +21,7 @@ import type {
   CancelTurnResult,
   SessionAuthContext,
   SessionCapabilities,
-  SessionTraceContext,
+  SessionTraceSeed,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
@@ -34,7 +36,7 @@ import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
@@ -58,6 +60,8 @@ const UNKNOWN_REMOTE_OUTCOME =
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
+  /** The child's protocol, when it speaks an earlier one: its result arrives, nothing else. */
+  readonly earlierProtocol?: number;
 };
 
 export async function startRemoteAgentSession(input: {
@@ -99,7 +103,7 @@ export async function startRemoteAgentSession(input: {
       url: string;
     };
     forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
+    message: MessageContent<string | URL>;
     operationId?: string;
     outputSchema?: object;
     protocolVersion: number;
@@ -194,7 +198,9 @@ export async function startRemoteAgentSession(input: {
     );
   }
 
-  return { sessionId: parsed.data.sessionId };
+  return receiverVersion === REMOTE_AGENT_PROTOCOL_VERSION
+    ? { sessionId: parsed.data.sessionId }
+    : { earlierProtocol: receiverVersion, sessionId: parsed.data.sessionId };
 }
 
 /** A receiver that speaks another protocol version rejects the create with its own version. */
@@ -214,7 +220,7 @@ async function throwIfRemoteAgentProtocolMismatch(response: Response, name: stri
 function buildForwardedTraceAssertion(input: {
   readonly forwardedPrincipal: ForwardedPrincipal | undefined;
   readonly originAudience: ChannelAudience | undefined;
-  readonly parentTraceContext: SessionTraceContext | undefined;
+  readonly parentTraceContext: SessionTraceSeed | undefined;
   readonly traceparent: string | undefined;
 }) {
   const ceiling = decisionToTraceContentCeiling(input.parentTraceContext?.decision);
@@ -237,13 +243,13 @@ export async function respondToRemoteAgentSession(input: {
   readonly remote: RemoteAgentBinding & { readonly sessionId: string };
   readonly headers: Record<string, string>;
   readonly auth: SessionAuthContext | null | undefined;
-  readonly responses: readonly InputResponse[];
+  readonly responses: readonly Answer[];
 }): Promise<void> {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
       body: JSON.stringify({
-        inputResponses: input.responses,
+        answers: input.responses,
         ...(input.remote.forwardPrincipal === true &&
           input.auth != null && {
             forwardedPrincipal: { current: input.auth },
@@ -270,7 +276,7 @@ export async function continueRemoteAgentSession(input: {
     readonly token: string;
     readonly url: string;
   };
-  readonly message: string;
+  readonly message: MessageContent<string | URL>;
   readonly outputSchema?: JsonObject;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
@@ -279,7 +285,7 @@ export async function continueRemoteAgentSession(input: {
   const requestBody: {
     callback: typeof input.callback;
     forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
+    message: MessageContent<string | URL>;
     outputSchema?: JsonObject;
   } = {
     callback: input.callback,
@@ -467,8 +473,8 @@ export function resolveRemoteAgentForAction(input: {
 /**
  * Resolves authored outbound headers for a server-authored remote child event.
  *
- * `resolverId` is the key persisted on the `agent.started` event (see
- * `AgentStartedStreamEvent`): it identifies the authored credential
+ * `resolverId` is the key the parent's private child binding records: it identifies the
+ * authored credential
  * functions, never their resolved values. Lookup order mirrors how dispatch
  * chose the key — first as a subagent node id (static remote definition),
  * then as a `credentialsStepId` in the step registry (dynamic remote
@@ -597,8 +603,8 @@ async function resolveRemoteAgentRequestHeaders(
 function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
-}): string {
-  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
+}): MessageContent<string | URL> {
+  const message = normalizeAgentMessage(input.action.input.message as MessageContent<string | URL>);
   return formatSubagentInput({
     description: input.remote.description,
     message,

@@ -1,20 +1,19 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { onMount } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import {
   attachEveAgentStore,
   detachEveAgentStore,
   EveAgentStore,
+  type AcceptedDelivery,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
   type EveAgentStoreStatus,
   type PrepareSend,
 } from "#client/eve-agent-store.js";
 import { resolveEveAgentHost } from "#client/agent-host.js";
-import { conversationReducer } from "#client/conversation-reducer.js";
-import type { ConversationState } from "#client/conversation-state.js";
-import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import type {
   CancelSessionResult,
@@ -24,23 +23,23 @@ import type {
   SendTurnOptions,
   ClientSessionState,
 } from "#client/types.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 
 export type { PrepareSend };
 
 /**
- * Session lifecycle phase: `"ready"` (idle), `"resuming"` (checking an
- * attached session), `"submitted"` (request sent, awaiting the first stream
- * event), `"streaming"` (events arriving), or `"error"`.
+ * Local activity of the session: `"idle"` (nothing pending), `"resuming"` (catching up on an
+ * attached session), or `"busy"` (a send is in flight, or a turn, task, or sign-in is pending).
+ * Failures are reported separately in `error`.
  */
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Immutable point-in-time view of an eve agent session: projected `data`, the
- * last `error`, the raw `events` stream, the `session` cursor, and `status`.
+ * Immutable point-in-time view of an eve agent session: the conversation (`messages`,
+ * `interactions`, `agents`, `view`, `previews`), the last `error`, the raw `events` stream, the
+ * `session` cursor, and `status`.
  * `useEveAgent` passes this snapshot to the `onFinish` callback.
  */
-export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
+export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
 
 /**
  * Reactive return value from `useEveAgent`.
@@ -49,39 +48,39 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * template, `$derived`, or `$effect` and Svelte will update when eve streams
  * new events.
  */
-export interface UseEveAgentReturn<TData> {
+export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<CancelSessionResult>;
-  /** Projected state built by reducing every stream event through the reducer. */
-  readonly data: TData;
-  /** Canonical session state, regardless of the chosen data reducer. */
-  readonly conversation: ConversationState;
+  /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
+  readonly previews: EveAgentStoreSnapshot["previews"];
+  readonly messages: EveAgentStoreSnapshot["messages"];
+  readonly agents: EveAgentStoreSnapshot["agents"];
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: Error | undefined;
+  readonly view: EveAgentStoreSnapshot["view"];
   /** Raw server events received during this session (authoritative stream). */
-  readonly events: readonly MessageStreamEvent[];
-  /** Replay the attached durable session and follow its in-flight turn, if any. */
+  readonly events: readonly SessionStreamEvent[];
+  /** Resolves at the durable tail; the session stream keeps following afterward. */
   readonly resume: () => Promise<void>;
   /** Create the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
-  /** Send a message with optional turn settings. */
+  /** Submits a message and resolves on acceptance, not execution. */
   readonly send: <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ) => Promise<void>;
-  /** Answer pending HITL input requests. */
+  ) => Promise<AcceptedDelivery>;
+  /** Submits answers and resolves on acceptance, not execution. */
   readonly respond: <TOutput = unknown>(
-    inputResponses: Parameters<ClientSession["respond"]>[0],
+    answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ) => Promise<void>;
+  ) => Promise<AcceptedDelivery>;
   /** Current session identity and stream cursor. */
   readonly session: ClientSessionState | undefined;
   /**
-   * Lifecycle phase: `"ready"` (idle), `"resuming"` (checking an attached
-   * session), `"submitted"` (request sent, awaiting first event), `"streaming"`
-   * (events arriving), or `"error"`.
+   * Local activity: `"idle"`, `"resuming"` (catching up on an attached session), or `"busy"`.
+   * Failures are reported separately in `error`.
    */
   readonly status: UseEveAgentStatus;
 }
@@ -90,11 +89,11 @@ export interface UseEveAgentReturn<TData> {
  * Configuration for a Svelte eve agent session.
  *
  * Read once when `useEveAgent` creates its store; create a new binding to
- * change host, reducer, or session. To rotate credentials or headers without
+ * change host or session. To rotate credentials or headers without
  * recreating the binding, pass function values to `auth` or `headers`, which
  * the client resolves before each HTTP request.
  */
-export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
@@ -121,19 +120,18 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
-  readonly initialEvents?: readonly MessageStreamEvent[];
+  readonly initialEvents?: readonly SessionStreamEvent[];
   /** Seed session identity and stream cursor for resuming a prior conversation. */
   readonly initialSession?: ClientSessionState;
   /**
    * Project submitted user messages before eve confirms them with a
-   * `message.received` stream event. Optimistic events are reducer-facing
-   * projection only and never appear in `events`, which stays the
-   * authoritative eve stream.
+   * `delivery.consumed` fact. Such a message shows in `messages` only;
+   * `events` stays the authoritative eve stream.
    *
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow each subagent call's session into `conversation.agents` while mounted. @default false */
+  /** Follow each subagent call's session into `agents` while mounted. @default false */
   readonly followSubagents?: boolean;
   /**
    * Keep the session stream open between turns to show events that arrive from schedules,
@@ -143,10 +141,6 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly followIdle?: boolean;
   /** Prewarm an owned session on mount and after reset. @default false */
   readonly prewarm?: boolean;
-  /**
-   * Projects stream events into `TData`. Defaults to the conversation reducer.
-   */
-  readonly reducer?: EveAgentReducer<TData>;
   /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
   readonly resume?: boolean;
   /**
@@ -156,12 +150,12 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly session?: ClientSession;
 }
 
-class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
-  #snapshot: EveAgentStoreSnapshot<TData>;
-  readonly #store: EveAgentStore<TData>;
+class SvelteEveAgent implements UseEveAgentReturn {
+  #snapshot: EveAgentStoreSnapshot;
+  readonly #store: EveAgentStore;
   readonly #subscribe: () => void;
 
-  constructor(store: EveAgentStore<TData>) {
+  constructor(store: EveAgentStore) {
     this.#store = store;
     this.#snapshot = store.snapshot;
     this.#subscribe = createSubscriber((update) => {
@@ -178,14 +172,22 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     });
   }
 
-  get data(): TData {
+  get previews(): EveAgentStoreSnapshot["previews"] {
     this.#subscribe();
-    return this.#snapshot.data;
+    return this.#snapshot.previews;
+  }
+  get messages(): EveAgentStoreSnapshot["messages"] {
+    this.#subscribe();
+    return this.#snapshot.messages;
+  }
+  get agents(): EveAgentStoreSnapshot["agents"] {
+    this.#subscribe();
+    return this.#snapshot.agents;
   }
 
-  get conversation(): ConversationState {
+  get view(): EveAgentStoreSnapshot["view"] {
     this.#subscribe();
-    return this.#snapshot.conversation;
+    return this.#snapshot.view;
   }
 
   get error(): Error | undefined {
@@ -193,7 +195,7 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
     return this.#snapshot.error;
   }
 
-  get events(): readonly MessageStreamEvent[] {
+  get events(): readonly SessionStreamEvent[] {
     this.#subscribe();
     return this.#snapshot.events;
   }
@@ -225,45 +227,33 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
   };
 
   respond = <TOutput = unknown>(
-    inputResponses: Parameters<ClientSession["respond"]>[0],
+    answers: Parameters<ClientSession["respond"]>[0],
     options?: RespondTurnOptions<TOutput>,
-  ): Promise<void> => {
-    return this.#store.send({ ...options, inputResponses });
+  ): Promise<AcceptedDelivery> => {
+    return this.#store.send({ ...options, answers });
   };
 
   send = <TOutput = unknown>(
-    message: string | UserContent,
+    message: MessageContent,
     options?: SendTurnOptions<TOutput>,
-  ): Promise<void> => {
+  ): Promise<AcceptedDelivery> => {
     return this.#store.send({ ...options, message });
   };
 }
-
-export function useEveAgent(
-  options?: UseEveAgentOptions<ConversationState>,
-): UseEveAgentReturn<ConversationState>;
-
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
-): UseEveAgentReturn<TData>;
 
 /**
  * Svelte 5 binding that drives an eve session and projects its events into
  * rune-friendly reactive data.
  *
- * Without a `reducer`, projects conversation state including message parts;
- * pass a `reducer` for a different `TData`.
- * Configuration is read once; create a new binding to change host, reducer,
- * or session.
+ * The conversation's `messages`, `interactions`, `agents`, `view`, and `previews` are exposed
+ * directly; derive anything else from `events`.
+ * Configuration is read once; create a new binding to change host or session.
  */
-export function useEveAgent<TData>(
-  options: UseEveAgentOptions<TData> = {},
-): UseEveAgentReturn<TData> {
+export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
   }
-  const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
-  const store = new EveAgentStore<TData>({
+  const store = new EveAgentStore({
     auth: options.auth,
     headers: options.headers,
     host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
@@ -273,7 +263,6 @@ export function useEveAgent<TData>(
     followSubagents: options.followSubagents,
     followIdle: options.followIdle,
     prewarm: options.prewarm,
-    reducer,
     session: options.session,
   });
 
@@ -287,7 +276,7 @@ export function useEveAgent<TData>(
   if ("window" in globalThis)
     onMount(() => {
       attachEveAgentStore(store);
-      if (options.resume) void store.resume();
+      if (options.resume) void store.resume().catch(() => {});
       return () => detachEveAgentStore(store);
     });
 

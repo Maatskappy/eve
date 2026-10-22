@@ -1,3 +1,4 @@
+import { turnStartedForResolvers } from "#harness/session-machine/change-points.js";
 import type { ModelMessage } from "ai";
 import { z } from "#compiled/zod/index.js";
 import { isToolSchema } from "#tools/schema.js";
@@ -6,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
-  dispatchDynamicToolEvent,
+  resolveDynamicTools,
   rebindMissingCompiledDynamicToolCallbacks,
 } from "#context/dynamic-tool-lifecycle.js";
 import {
@@ -32,7 +33,14 @@ import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createMemoryLock } from "#shared/memory-state.js";
 
 const turn = Object.freeze({ id: "turn_0", input: [], sequence: 0 });
-const event = { data: { sequence: 0, turnId: "turn_0" }, type: "turn.started" as const };
+const event = turnStartedForResolvers(
+  { sequence: 0, turnId: "turn_0" },
+  {
+    data: { cause: { deliveryId: "delivery_0" }, follows: null, turnId: "turn_0" },
+    scope: { turnId: "turn_0" },
+    type: "turn.started",
+  },
+);
 
 function createContext(scope: string, lockedTurn: MemoryTurnContext = turn) {
   const auth = {
@@ -107,7 +115,7 @@ describe("memory provider tools", () => {
     await contextStorage.run(
       ctx,
       async () =>
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           event,
           messages: [{ content: "hello", role: "user" }],
@@ -170,7 +178,7 @@ describe("memory provider tools", () => {
     await contextStorage.run(
       ctx,
       async () =>
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           event,
           messages: [{ content: "hello", role: "user" }],
@@ -238,7 +246,7 @@ describe("memory provider tools", () => {
     await contextStorage.run(
       ctx,
       async () =>
-        await dispatchDynamicToolEvent({
+        await resolveDynamicTools({
           ctx,
           event,
           messages: [{ content: "remember this screenshot", role: "user" }],
@@ -279,7 +287,7 @@ describe("memory provider tools", () => {
     const result = await contextStorage.run(
       ctx,
       async () =>
-        await dynamic.events["turn.started"]?.(event, {
+        await dynamic.events["turn.started"]?.(event.fact, {
           channel: {},
           model: null,
           messages: [],

@@ -1,183 +1,98 @@
 import { describe, expect, it } from "vitest";
-import {
-  conversationReducer,
-  reduceConversation,
-  type ConversationEvent,
-} from "#client/conversation-reducer.js";
-import {
-  agentCallTurns,
-  isAgentSessionCaughtUp,
-  type ConversationState,
-} from "#client/conversation-state.js";
-import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
-import {
-  createAgentStartedEvent,
-  createAuthorizationCompletedEvent,
-  createAuthorizationRequiredEvent,
-  createInputRequestedEvent,
-  createMessageReceivedEvent,
-  createSessionWaitingEvent,
-  createTaskSettledEvent,
-  createTaskStartedEvent,
-  createTurnCompletedEvent,
-  createTurnStartedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
 
-let stamped = 0;
-const stamp = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, stamped++);
+import { Conversation } from "#client/conversation.js";
+import { agentCallTurns, isAgentCallContentPending } from "#client/conversation-state.js";
+import { stampTestEvent } from "#internal/testing/events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import type { CallRow } from "#protocol/session-projection/tables.js";
 
-function reduce(
-  state: ConversationState,
-  events: readonly (UnstampedMessageStreamEvent | ConversationEvent)[],
-): ConversationState {
-  let current = state;
-  for (const event of events) {
-    current = reduceConversation(
-      current,
-      event.type.startsWith("client.")
-        ? (event as ConversationEvent)
-        : stamp(event as UnstampedMessageStreamEvent),
-    );
-  }
-  return current;
-}
+const calls: readonly CallRow[] = ["call_one", "call_two"].map((callId) => ({
+  callId,
+  capability: { kind: "agent", name: "researcher" },
+  introducedAt: 0,
+  startedAt: "2026-10-10T00:00:00.000Z",
+  owner: { runId: "run_parent" },
+  outcome: "completed",
+  status: "settled",
+  taskId: "task_1",
+}));
 
-/** Child events as the root's follower observes them. */
-function observe(state: ConversationState, events: readonly UnstampedMessageStreamEvent[]) {
-  return reduce(
-    state,
-    events.map((event) => ({
-      type: "client.agent.observed" as const,
-      data: { sessionId: "child", event: stamp(event) },
-    })),
-  );
-}
-
-const received = (turnId: string, message: string) =>
-  createMessageReceivedEvent({ message, sequence: 0, turnId });
-const turnStarted = (turnId: string) => createTurnStartedEvent({ sequence: 0, turnId });
-const turnCompleted = (turnId: string) => createTurnCompletedEvent({ sequence: 0, turnId });
-const call = (callId: string) =>
-  createTaskStartedEvent({
-    callId,
-    kind: "agent",
-    name: "researcher",
-    taskId: "task_1",
-    turnId: "root-turn",
-  });
-const settle = (callId: string) =>
-  createTaskSettledEvent({
-    callId,
-    output: "done",
-    status: "completed",
-    taskId: "task_1",
-    turnId: "root-turn",
-  });
-
-function followedResearcher(callIds: readonly string[]): ConversationState {
-  return reduce(conversationReducer.initial(), [
-    ...callIds.map(call),
-    createAgentStartedEvent({
-      callId: callIds[0]!,
-      name: "researcher",
-      parentSessionId: "root",
-      sessionId: "child",
-      taskId: "task_1",
-      turnId: "root-turn",
-    }),
-    { type: "client.agent.following", data: { sessionId: "child" } },
-  ]);
-}
-
-function child(state: ConversationState): ConversationState {
-  const observation = state.agents.child?.observation;
-  if (observation === undefined || observation.status === "not-followed") throw new Error();
-  return observation.conversation!;
-}
-
-describe("agent tool sessions", () => {
-  it("attributes each received message's turn to the task's calls in order", () => {
-    const state = observe(followedResearcher(["a", "b", "c"]), [
-      turnStarted("t1"),
-      received("t1", "Find the March incidents."),
-      received("t1", "Include the April ones too."),
-      turnCompleted("t1"),
-      // Resumed after an approval: no message of its own.
-      turnStarted("t2"),
-      turnCompleted("t2"),
-      turnStarted("t3"),
-      received("t3", "Now summarize them for Bob."),
-    ]);
-    expect(agentCallTurns(state.tasks.task_1!, child(state))).toEqual(
-      new Map([
-        ["a", ["t1", "t2"]],
-        ["b", []],
-        ["c", ["t3"]],
-      ]),
-    );
-  });
-
-  it("is caught up only once every call settled and its reply arrived", () => {
-    let state = followedResearcher(["a"]);
-    const caughtUp = () => isAgentSessionCaughtUp(state, state.agents.child!);
-    expect(caughtUp()).toBe(false);
-    // The root can report the call settled before the child's stream delivers the reply.
-    state = reduce(state, [settle("a")]);
-    expect(caughtUp()).toBe(false);
-    state = observe(state, [turnStarted("t1"), received("t1", "Find the March incidents.")]);
-    expect(caughtUp()).toBe(false);
-    state = observe(state, [
-      createInputRequestedEvent({
-        requests: [
-          {
-            action: { callId: "lookup", input: {}, kind: "tool-call", toolName: "lookup" },
-            kind: "tool-approval",
-            prompt: "Approve Alice's lookup?",
-            requestId: "q1",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      turnCompleted("t1"),
-    ]);
-    expect(caughtUp()).toBe(false);
-    state = observe(state, [
-      {
-        type: "input.resolved",
-        data: {
-          resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "q1" }],
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "t1",
-        },
+/** A child session's turn for one delivery, which names the call it serves when `callId` is set. */
+function childTurn(
+  sequence: number,
+  deliveryId: string,
+  callId: string | undefined,
+  settled = true,
+): SessionEvent[] {
+  const turnId = `turn_${sequence}`;
+  const source = {
+    channel: "eve",
+    ...(callId !== undefined && { caller: { callId, sessionId: "parent" } }),
+  };
+  return [
+    { data: { deliveryId, source }, type: "delivery.admitted" },
+    {
+      data: {
+        cause: { deliveryId },
+        follows: sequence === 0 ? null : `turn_${sequence - 1}`,
+        turnId,
       },
+      scope: { turnId },
+      type: "turn.started",
+    },
+    {
+      data: { deliveryId, parts: [{ kind: "text", text: deliveryId }], turnId },
+      scope: { turnId },
+      type: "delivery.consumed",
+    },
+    ...(settled
+      ? ([
+          { data: { outcome: "completed", turnId }, scope: { turnId }, type: "turn.settled" },
+          { data: { deliveryId, outcome: "handled", turnId }, type: "delivery.settled" },
+        ] satisfies SessionEvent[])
+      : []),
+  ];
+}
+
+function child(events: readonly SessionEvent[]) {
+  const conversation = new Conversation();
+  conversation.observe(stampTestEvent({ data: {}, type: "session.started" }, 0));
+  events.forEach((event, index) => conversation.observe(stampTestEvent(event, index + 1)));
+  return conversation.state;
+}
+
+describe("agent call attribution", () => {
+  it("gives each call the turn that consumed its delivery, in whatever order they arrived", () => {
+    const state = child([
+      ...childTurn(0, "d_two", "call_two"),
+      ...childTurn(1, "d_one", "call_one"),
     ]);
-    expect(caughtUp()).toBe(true);
-    // A sign-in parked after the reply resumes the agent's work once its callback arrives.
-    const signIn = {
-      attemptId: "attempt_1",
-      name: "notes",
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "t1",
-    };
-    state = observe(state, [
-      createAuthorizationRequiredEvent({
-        ...signIn,
-        description: "Connect Alice's notes",
-        webhookUrl: "https://example.com/callback",
-      }),
-      createSessionWaitingEvent(TEST_USAGE),
+
+    expect(Object.fromEntries(agentCallTurns(calls, state))).toEqual({
+      call_one: ["turn_1"],
+      call_two: ["turn_0"],
+    });
+  });
+
+  it("keeps a call's content pending until the session settles its delivery", () => {
+    const working = child([
+      ...childTurn(0, "d_one", "call_one"),
+      ...childTurn(1, "d_two", "call_two", false),
     ]);
-    expect(caughtUp()).toBe(false);
-    state = observe(state, [
-      createAuthorizationCompletedEvent({ ...signIn, outcome: "authorized" }),
-    ]);
-    expect(caughtUp()).toBe(true);
-    state = reduce(state, [call("b")]);
-    expect(caughtUp()).toBe(false);
+    expect(isAgentCallContentPending(calls, calls[0]!, working)).toBe(false);
+    expect(isAgentCallContentPending(calls, calls[1]!, working)).toBe(true);
+
+    // A completed call whose delivery hasn't reached the session yet is still to come.
+    const lagging = child(childTurn(0, "d_one", "call_one"));
+    expect(isAgentCallContentPending(calls, calls[1]!, lagging)).toBe(true);
+  });
+
+  it("reads a session whose deliveries name no call in call order", () => {
+    const state = child([...childTurn(0, "d_a", undefined), ...childTurn(1, "d_b", undefined)]);
+
+    expect(Object.fromEntries(agentCallTurns(calls, state))).toEqual({
+      call_one: ["turn_0"],
+      call_two: ["turn_1"],
+    });
   });
 });

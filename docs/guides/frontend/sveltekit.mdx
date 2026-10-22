@@ -50,7 +50,7 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
 
   const agent = useEveAgent();
   let message = $state("");
-  let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isBusy = $derived(agent.status === "busy");
   let isInputDisabled = $derived(isBusy || agent.status === "resuming");
 
   async function handleSubmit() {

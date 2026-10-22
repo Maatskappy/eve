@@ -41,7 +41,10 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
   formatVersion: 1,
   builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1 },
+  requires: {
+    extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+    tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+  },
 });
 
 /**
@@ -1301,7 +1304,10 @@ describe("discoverAgent (memory)", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "9.0.0",
-          requires: { extension: 1, tool: unsupportedToolVersion },
+          requires: {
+            extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+            tool: unsupportedToolVersion,
+          },
         }),
         "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",

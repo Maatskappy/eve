@@ -1,4 +1,4 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
@@ -15,12 +15,9 @@ import type {
   SessionAuthContext,
   SessionCallback,
   TurnPolicy,
+  SessionControlOptions,
 } from "#channel/types.js";
-import {
-  type InputResponse,
-  parseInputResponses,
-  type StrictInputResponses,
-} from "#shared/input.js";
+import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
@@ -76,7 +73,7 @@ export type ChannelCreateOptions<TState = undefined> = [TState] extends [undefin
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
   /** Starts or resumes a turn with a user message. May create a session. */
-  send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
+  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Session>;
   /**
    * Creates a session that waits for its first message, without running a
    * turn. When another session owns the address, or claims it concurrently,
@@ -86,18 +83,20 @@ export interface ChannelSource<TState = undefined> {
    */
   create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
   /** Answers pending input requests. Never creates a session. */
-  respond<const TResponses extends readonly InputResponse[]>(
-    inputResponses: StrictInputResponses<TResponses>,
+  respond<const TResponses extends readonly Answer[]>(
+    answers: StrictAnswers<TResponses>,
     options: ChannelRespondOptions<TState>,
   ): Promise<Session>;
   /** Cooperatively cancels the active turn without creating a session. */
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
+  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
   /** Queues context compaction without creating a session. */
-  compact(): Promise<CompactSessionResult>;
+  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
   /** Clears model-message history without creating a session. */
-  clear(): Promise<ClearSessionResult>;
+  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
   /** Retires the current owner without creating a replacement. */
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  reset(
+    options?: { readonly reason?: string } & SessionControlOptions,
+  ): Promise<ResetSessionResult>;
 }
 
 /** Binds a raw channel-local continuation address to its current-owner operations. */
@@ -146,15 +145,15 @@ export function createChannelOperations<TState = undefined>(input: {
         async create(options) {
           return await bound.create(options);
         },
-        async respond(inputResponses, options) {
-          if (inputResponses.length === 0) {
-            throw new Error("respond() requires at least one input response.");
+        async respond(answers, options) {
+          if (answers.length === 0) {
+            throw new Error("respond() requires at least one answer.");
           }
-          const validatedInputResponses = parseInputResponses(inputResponses);
+          const validatedAnswers = parseAnswers(answers);
           return await bound.deliver(
             {
               context: options.context,
-              inputResponses: validatedInputResponses,
+              answers: validatedAnswers,
               state: options.state,
             },
             options,
@@ -163,11 +162,11 @@ export function createChannelOperations<TState = undefined>(input: {
         async cancel(options) {
           return await bound.cancel(options);
         },
-        async compact() {
-          return await bound.compact();
+        async compact(options) {
+          return await bound.compact(options);
         },
-        async clear() {
-          return await bound.clear();
+        async clear(options) {
+          return await bound.clear(options);
         },
         async reset(options) {
           return await bound.reset(options);

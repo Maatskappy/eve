@@ -60,6 +60,9 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
+  type ChannelCommitHandler,
+  type ChannelEventContext,
+  type CommittedLine,
   isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
@@ -68,6 +71,12 @@ export type {
   FetchFileFunction,
   FetchFileResult,
 } from "#shared/channel-definition.js";
+export type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
 export {
   createWebSocketUpgradeServer,
@@ -130,3 +139,5 @@ export function isChannel<TChannel extends Channel<any, any, any>>(
 ): channel is InstrumentationChannelForChannel<TChannel> {
   return channel.kind === getChannelInstrumentationKind(target);
 }
+
+export { answerFromText } from "#channel/resolve-text.js";

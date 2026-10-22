@@ -27,9 +27,9 @@ export {
   type SlackInboundResult,
   type SlackInboundResultOrPromise,
   type SlackInitialMessage,
-  type SlackInputResponseContext,
-  type SlackInputResponseResult,
-  type SlackInputResponseSubmission,
+  type SlackAnswerContext,
+  type SlackAnswerResult,
+  type SlackAnswerSubmission,
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
   type SlackInteractionContext,
@@ -92,13 +92,7 @@ export {
   type SlackTaskCard,
 } from "#public/channels/slack/renderers.js";
 
-export type {
-  TaskCardAction,
-  TaskCardBlocker,
-  TaskCardStatus,
-  TaskCardTask,
-  TaskCardView,
-} from "#channel/task-card.js";
+export type { TaskCard } from "#channel/task-card.js";
 
 export {
   loadThreadContextMessages,
@@ -113,9 +107,9 @@ export {
 } from "#public/channels/slack/blocks.js";
 
 export {
-  deriveHitlResponse,
-  HITL_ACTION_PREFIX,
-  renderInputRequestBlocks,
+  answerFromSlackAction,
+  ANSWER_ACTION_PREFIX,
+  renderInteractionBlocks,
   type DerivedHitlResponse,
   type SlackHitlAction,
   type SlackHitlRoute,

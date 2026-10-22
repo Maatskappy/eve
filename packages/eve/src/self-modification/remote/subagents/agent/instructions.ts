@@ -23,7 +23,7 @@ Use the ordinary sandbox tools, eve-code's patch and grep guidance, and the git 
 
 Install project dependencies when needed using the repository's declared package manager and lockfile. If that package manager is not on \`PATH\`, run it through \`corepack\`, for example \`corepack yarn install\`. Private dependencies may require credentials that this sandbox does not have; report the missing prerequisite rather than using host credentials. For registry capabilities, use the project's installed eve CLI (which may be at the workspace root rather than the application directory), never a global or remote CLI. Search with \`eve registry search "<query>" --json\`, then install source only with \`eve add <address> --non-interactive --skip-setup\`. Inspect installed source and dependency diffs normally. Record missing secrets or external setup as prerequisite names and actions; never ask for their values in chat.
 
-Use the authenticated \`gh\` tool for fetches, pushes, signed commits when required, and draft PR creation. Declare the configured repository when doing so. This workflow guidance does not restrict what a configured connector can access. Finish with a concise handoff containing the draft PR URL when created, validation run, changed scope, and any remaining prerequisite or publication issue.`,
+Use the authenticated \`gh\` tool for fetches, pushes, signed commits when required, and draft PR creation. Declare the configured repository when doing so. Finish with a concise handoff containing the draft PR URL when created, validation run, changed scope, and any remaining prerequisite or publication issue.`,
       });
     },
   },

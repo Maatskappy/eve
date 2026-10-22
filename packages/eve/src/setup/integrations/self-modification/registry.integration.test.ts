@@ -42,6 +42,8 @@ it("configures the hidden deployed registry scaffold without treating it as auth
   const operations = {
     readConfig: async () => source,
     readLocalConfig: vi.fn(),
+    checkBranchProtection: async () => "pull-request-required" as const,
+    detectChannelNames: async () => [],
     detectGitRepository: async () => ({ remoteKind: "missing" as const }),
     findOrCreateConnector: async () => "github/selfmod-acme-agents",
     attachConnector: vi.fn(),

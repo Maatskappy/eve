@@ -70,17 +70,23 @@ The extension accepts:
 
 The deployed subagent is never offered during `eve dev`, where the local extension handles source edits.
 
-The deployed subagent requires deploying on Vercel, where Vercel Sandbox keeps the GitHub token out of the sandbox. Builds succeed on any host, but outside Vercel the subagent fails with an error naming this requirement when it opens its sandbox. Don't mount `eve/self-modification/remote` in self-hosted deployments.
+The deployed subagent requires deploying on Vercel, where Vercel Sandbox keeps the GitHub token out of the sandbox. Build on Vercel too, for example through Git deployments or `vercel build`, so the build prepares the subagent's Vercel Sandbox template. Builds succeed on any host, but outside Vercel the subagent fails with an error naming this requirement when it opens its sandbox. Don't mount `eve/self-modification/remote` in self-hosted deployments.
 
 ### Authorize callers
 
 `authorize` receives the current authenticated `principal`, or `null` for anonymous callers, and the request's `channel` kind and metadata. Return `true` to offer the coding subagent. Returning `false` or throwing hides it, and eve logs the thrown error. The callback runs on session start and on each turn, including follow-ups.
 
-Check the identities your channel produces before you write a policy.
+Guided setup generates a policy that admits only your deployment's own Vercel OIDC identity over HTTP, which `eve dev <deployment-url>` uses from the linked project. Each channel under `agent/channels/` gets a branch that denies every caller until you add a rule for it. Check the identities your channel produces before you write a policy.
 
 ### Connect GitHub
 
-Create a GitHub Vercel Connect connector, attach it to the deployed project, and install it on the configured repository. Grant the repository permissions needed to read source, push branches, and create pull requests. Use repository rules to require review on protected branches.
+Create a GitHub Vercel Connect connector, attach it to the deployed project, and install it on the configured repository. Grant the repository permissions needed to read source, push branches, and create pull requests.
+
+### Protect the base branch
+
+The coding subagent's GitHub App token can write to every branch in the repository, including `baseBranch`. Add a repository ruleset that targets `baseBranch`, requires a pull request with at least one approval before merging, and doesn't list the Vercel Connect GitHub App as a bypass actor. Without that ruleset, a mistaken command can commit or merge to `baseBranch` directly.
+
+Guided setup reads the base branch's rules with your local GitHub CLI (`gh`). It strongly recommends this ruleset when the branch has no rule that requires pull requests, when only classic branch protection is visible, or when `gh` is missing or signed out.
 
 ## What to read next
 

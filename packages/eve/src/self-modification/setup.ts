@@ -4,6 +4,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 
+import { discoverAgent } from "#discover/discover-agent.js";
+import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import {
   captureVercel,
   runVercelCaptureStdout,
@@ -35,6 +37,8 @@ const LEGACY_DEFAULT_EXTENSION = DEFAULT_EXTENSION.replace(
 
 export interface SelfModificationSetupValues {
   readonly baseBranch: string;
+  /** Channel names under `agent/channels/`; each gets a deny-by-default `authorize` branch. */
+  readonly channelNames: readonly string[];
   readonly connector: string;
   readonly directory: string;
   readonly repository: string;
@@ -46,8 +50,22 @@ export interface DetectedGitRepository {
   readonly repo?: string;
   readonly remoteKind: "github" | "missing" | "other";
 }
+/**
+ * Whether the base branch blocks direct writes. `pull-request-required` comes from a
+ * repository ruleset; classic branch protection reads as `protected` because its rules
+ * are visible only to repository administrators.
+ */
+export type BranchProtectionStatus =
+  | "pull-request-required"
+  | "protected"
+  | "unprotected"
+  | "unknown";
+
 export interface SelfModificationSetupOperations {
   attachConnector(connector: string, project: VercelProjectReference): Promise<void>;
+  /** Reads the base branch's protection with the local GitHub CLI's credentials. */
+  checkBranchProtection(repository: string, branch: string): Promise<BranchProtectionStatus>;
+  detectChannelNames(): Promise<readonly string[]>;
   detectGitRepository(): Promise<DetectedGitRepository>;
   findOrCreateConnector(name: string, project: VercelProjectReference): Promise<string>;
   /** Reads the deployed mount at {@link DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}. */
@@ -59,11 +77,14 @@ export interface SelfModificationSetupOperations {
 }
 
 export interface SelfModificationSetupDependencies {
+  /** Runs `gh` with the given arguments and returns stdout, or `undefined` when it fails. */
+  captureGitHub: (args: readonly string[]) => Promise<string | undefined>;
   captureVercel: typeof captureVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }
 
 const defaultDependencies: SelfModificationSetupDependencies = {
+  captureGitHub,
   captureVercel,
   runVercelCaptureStdout,
 };
@@ -75,12 +96,38 @@ export function connectorName(owner: string, repo: string): string {
 export function renderSelfModificationConfig(values?: SelfModificationSetupValues): string {
   if (values === undefined) return DEFAULT_EXTENSION;
 
+  const channelNames = [...new Set(values.channelNames)].filter((name) => name !== "eve").sort();
+  const channelCases = channelNames
+    .map(
+      (name) => `      case ${JSON.stringify(`channel:${name}`)}:
+        // Authorize trusted principals for this channel before returning true.
+        return false;
+`,
+    )
+    .join("");
+  // Admits only this Vercel project's own OIDC identity, which `eve dev <deployment-url>` uses.
+  const httpCase = `      case "http": {
+        const projectId = process.env.VERCEL_PROJECT_ID;
+        return (
+          projectId !== undefined &&
+          projectId.length > 0 &&
+          principal?.authenticator === "oidc" &&
+          (principal.issuer === "https://oidc.vercel.com" ||
+            principal.issuer?.startsWith("https://oidc.vercel.com/") === true) &&
+          principal.attributes.project_id === projectId
+        );
+      }
+`;
   const body = `import selfModification from "eve/self-modification/remote";
 
 export default selfModification({
-  // Allows every caller to delegate source changes. Replace with a custom policy
-  // that checks the caller's principal and channel (recommended).
-  authorize: () => true,
+  authorize: ({ channel, principal }) => {
+    switch (channel.kind) {
+${httpCase}${channelCases}      default:
+        // Add another branch when you add a trusted channel.
+        return false;
+    }
+  },
   github: {
     repository: ${JSON.stringify(values.repository)},
     connector: ${JSON.stringify(values.connector)},
@@ -133,6 +180,20 @@ export function defaultSelfModificationSetupOperations(
 ): SelfModificationSetupOperations {
   const configPath = join(appRoot, DEPLOYED_SELF_MODIFICATION_CONFIG_PATH);
   return {
+    async checkBranchProtection(repository, branch) {
+      const ref = encodeURIComponent(branch);
+      const [rules, details] = await Promise.all([
+        deps.captureGitHub(["api", `repos/${repository}/rules/branches/${ref}`]),
+        deps.captureGitHub(["api", `repos/${repository}/branches/${ref}`]),
+      ]);
+      return branchProtectionStatus(rules, details);
+    },
+    async detectChannelNames() {
+      const discovered = await discoverAgent({ appRoot, agentRoot: join(appRoot, "agent") });
+      return discovered.manifest.channels.map((source) =>
+        stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, ""),
+      );
+    },
     async detectGitRepository() {
       const remote = await gitOutput(appRoot, ["config", "--get", "remote.origin.url"]);
       const repository = remote === undefined ? undefined : parseGitHubRemote(remote);
@@ -300,6 +361,49 @@ export function directoryError(value: string): string | undefined {
 export function gitRefError(value: string): string | undefined {
   return isBranchName(value) ? undefined : "Enter a valid branch name.";
 }
+/** Classifies `gh api` responses for a branch's active rules and its branch details. */
+export function branchProtectionStatus(
+  rules: string | undefined,
+  details: string | undefined,
+): BranchProtectionStatus {
+  const activeRules = parseJson(rules);
+  if (
+    Array.isArray(activeRules) &&
+    activeRules.some((rule) => isRecord(rule) && rule.type === "pull_request")
+  ) {
+    return "pull-request-required";
+  }
+  const branch = parseJson(details);
+  if (!Array.isArray(activeRules) || !isRecord(branch)) return "unknown";
+  return branch.protected === true ? "protected" : "unprotected";
+}
+
+function parseJson(value: string | undefined): unknown {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function captureGitHub(args: readonly string[]): Promise<string | undefined> {
+  try {
+    const result = await runFile("gh", [...args], {
+      env: { ...process.env, GH_PROMPT_DISABLED: "1" },
+      timeout: 15_000,
+    });
+    return result.stdout;
+  } catch {
+    // A missing, signed-out, or unauthorized GitHub CLI leaves protection unverified.
+    return undefined;
+  }
+}
+
 async function gitOutput(appRoot: string, args: string[]): Promise<string | undefined> {
   try {
     const result = await runFile("git", args, { cwd: appRoot });

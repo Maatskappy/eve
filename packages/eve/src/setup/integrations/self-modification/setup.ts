@@ -12,6 +12,7 @@ import {
   repositoryNameError,
   repositoryOwnerError,
   SELF_MODIFICATION_CONFIG_PATH,
+  type BranchProtectionStatus,
   type SelfModificationSetupOperations,
   type SelfModificationSetupValues,
 } from "#self-modification/setup.js";
@@ -34,13 +35,51 @@ type SelfModificationSetupPlan = (
   | { readonly kind: "local" }
   | {
       readonly kind: "deployed";
+      readonly branchProtection: BranchProtectionStatus;
       readonly connectorName: string;
       readonly project: VercelProjectReference;
       readonly values: SelfModificationSetupValues;
     }
 ) & { readonly legacyScaffold?: LegacySelfModificationScaffold };
 
-const AUTHORIZATION_WARNING = `The generated configuration uses \`authorize: () => true\`, so any caller that can reach the deployed agent can ask it to open draft pull requests. Setting a custom \`authorize\` policy that checks the caller's principal and channel is recommended before deploying.`;
+function branchProtectionRecommendation(branch: string): string {
+  return `Add a repository ruleset (Settings > Rules > Rulesets) that targets \`${branch}\`, requires a pull request with at least one approval before merging, and does not list the Vercel Connect GitHub App as a bypass actor. The subagent's GitHub App token can write to every branch of the repository, so without this rule a mistaken command can commit or merge to \`${branch}\` directly.`;
+}
+
+/** Explains a base branch that may accept direct writes; `undefined` when a ruleset requires pull requests. */
+function branchProtectionWarning(
+  status: BranchProtectionStatus,
+  repository: string,
+  branch: string,
+): { readonly message: string; readonly title: string } | undefined {
+  const recommendation = branchProtectionRecommendation(branch);
+  switch (status) {
+    case "pull-request-required":
+      return undefined;
+    case "protected":
+      return {
+        title: `Confirm that ${branch} requires pull requests`,
+        message: `\`${branch}\` in ${repository} has branch protection, but only repository administrators can see whether it requires pull requests. ${recommendation}`,
+      };
+    case "unprotected":
+      return {
+        title: `Protect ${branch} before deploying (strongly recommended)`,
+        message: `\`${branch}\` in ${repository} has no branch protection or ruleset that requires pull requests. ${recommendation}`,
+      };
+    case "unknown":
+      return {
+        title: `Protect ${branch} before deploying (strongly recommended)`,
+        message: `Setup could not read branch protection for \`${branch}\` in ${repository}. Install the GitHub CLI and run \`gh auth login\` so setup can check it. ${recommendation}`,
+      };
+  }
+}
+
+const BRANCH_PROTECTION_FACTS: Record<BranchProtectionStatus, string> = {
+  "pull-request-required": "pull requests required",
+  protected: "protected; pull request requirement not verified",
+  unprotected: "not protected (strongly recommended)",
+  unknown: "not verified (strongly recommended)",
+};
 
 function validationResult(error: string | undefined): string | null {
   return error ?? null;
@@ -113,9 +152,10 @@ export async function prepareSelfModificationSetup(
   );
   if (mode === "local") return withLegacyScaffold({ kind: "local" }, legacyScaffold);
 
-  const [project, detected] = await Promise.all([
+  const [project, detected, channelNames] = await Promise.all([
     context.resolveVercelProject("self-modification"),
     operations.detectGitRepository(),
+    operations.detectChannelNames(),
   ]);
   const owner = await context.asker.ask(
     text({
@@ -156,6 +196,7 @@ export async function prepareSelfModificationSetup(
   const name = connectorName(owner, repo);
   const values = {
     baseBranch: branch,
+    channelNames,
     connector: `github/${name}`,
     directory,
     repository: `${owner}/${repo}`,
@@ -165,12 +206,14 @@ export async function prepareSelfModificationSetup(
     `Generated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}`,
   );
   context.presenter.note(
-    "Install the managed GitHub App for only this repository. Repository rules must require review and prevent the connector from bypassing protected branches. Review, merge, and production deployment remain separate operator boundaries.",
+    "Vercel Connect will issue short-lived GitHub App credentials restricted to this repository. Install the managed GitHub App and select only this repository. Review, merge, and deployment remain separate operator boundaries.",
     "Security summary",
   );
-  context.presenter.note(AUTHORIZATION_WARNING, "Custom authorization recommended", {
-    tone: "warning",
-  });
+  const branchProtection = await operations.checkBranchProtection(values.repository, branch);
+  const warning = branchProtectionWarning(branchProtection, values.repository, branch);
+  if (warning !== undefined) {
+    context.presenter.note(warning.message, warning.title, { tone: "warning" });
+  }
   const confirmed = await context.asker.ask(
     confirm({
       key: "self-modification-confirm",
@@ -180,7 +223,9 @@ export async function prepareSelfModificationSetup(
     }),
   );
   return withLegacyScaffold(
-    confirmed ? { kind: "deployed", connectorName: name, project, values } : { kind: "local" },
+    confirmed
+      ? { kind: "deployed", branchProtection, connectorName: name, project, values }
+      : { kind: "local" },
     legacyScaffold,
   );
 }
@@ -212,9 +257,11 @@ export async function applySelfModificationSetup(
   await operations.writeConfig(renderSelfModificationConfig({ ...plan.values, connector }));
   context.presenter.log.success(`Updated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}.`);
   context.presenter.nextSteps([
-    `Replace the allow-all \`authorize\` policy in ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH} with a custom policy for trusted callers (recommended).`,
     "Install the managed GitHub App for only the configured repository, then deploy or redeploy.",
-    "After deployment, request an implementation through the agent's configured channel. It creates source proposals; production setup and deployment remain operator work.",
+    ...(plan.branchProtection === "pull-request-required"
+      ? []
+      : [`Strongly recommended: ${branchProtectionRecommendation(plan.values.baseBranch)}`]),
+    `After deployment, try self-modification by running \`eve dev <deployment-url>\` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update \`${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}\`.`,
   ]);
   return {
     deploymentRequired: true as const,
@@ -222,6 +269,7 @@ export async function applySelfModificationSetup(
       { label: "Repository", value: plan.values.repository },
       { label: "Application directory", value: plan.values.directory },
       { label: "Target branch", value: plan.values.baseBranch },
+      { label: "Branch protection", value: BRANCH_PROTECTION_FACTS[plan.branchProtection] },
       { label: "Credential", value: connector },
     ],
   };

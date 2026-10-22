@@ -165,6 +165,7 @@ describe("packed package consumption", () => {
       DEPLOYED_SELF_MODIFICATION_CONFIG_PATH,
       renderSelfModificationConfig({
         baseBranch: "main",
+        channelNames: [],
         connector: "github/selfmod-acme-agent",
         directory: ".",
         repository: "acme/agent",

@@ -30,7 +30,9 @@ const isDeployedOnVercel = () => Boolean(process.env.VERCEL);
  * Selects Vercel Sandbox, which can revoke brokered credentials after checkout.
  * Returns undefined rather than throwing: sandbox modules are evaluated by `eve build`
  * and `eve dev` on hosts that will never open this sandbox, and those builds must
- * not need Vercel credentials to prepare its snapshot.
+ * not need Vercel credentials to prepare its snapshot. The build and the runtime both
+ * evaluate this, so output built off Vercel and deployed to Vercel records no Vercel
+ * template and fails loudly with `SandboxTemplateNotProvisionedError` on first open.
  */
 export function createDeployedSelfModificationEnvironment(
   onVercel: () => boolean = isDeployedOnVercel,
@@ -76,8 +78,9 @@ export async function prepareDeployedSelfModificationSandbox(
 }
 
 /**
- * Clones the configured repository into a fresh child sandbox and creates its working branch.
- * A replacement sandbox starts again from the base branch rather than restoring unpublished work.
+ * Clones the configured repository into the child sandbox and switches to its working branch.
+ * Safe to repeat against the same sandbox. A replacement sandbox starts again from the base
+ * branch rather than restoring unpublished work.
  */
 export async function initializeDeployedCheckout(
   sandbox: SandboxSession,
@@ -86,6 +89,53 @@ export async function initializeDeployedCheckout(
 ): Promise<void> {
   const repository = config.github.repository;
   const checkout = sandbox.resolvePath("repository");
+  // eve may rerun initialization against the same session sandbox, for example after
+  // a later step failed, so an existing clone is reused instead of cloned again.
+  const existing = await sandbox.run({
+    command: `test -d ${shellQuote(`${checkout}/.git`)}`,
+  });
+  if (existing.exitCode !== 0) {
+    await cloneConfiguredRepository(sandbox, config, sessionId);
+  }
+  const branch = `eve/selfmod-${createHash("sha256").update(sessionId).digest("hex").slice(0, 16)}`;
+  const application = config.directory === "." ? checkout : `${checkout}/${config.directory}`;
+  const initialized = await sandbox.run({
+    command: [
+      "set -eu",
+      // The git extension's authenticated git commands resolve their target repository from origin.
+      `git -C ${shellQuote(checkout)} remote set-url origin ${shellQuote(`https://github.com/${repository}.git`)}`,
+      `if git -C ${shellQuote(checkout)} rev-parse --verify --quiet ${shellQuote(`refs/heads/${branch}`)} >/dev/null; then`,
+      `  git -C ${shellQuote(checkout)} switch ${shellQuote(branch)}`,
+      "else",
+      `  git -C ${shellQuote(checkout)} switch -c ${shellQuote(branch)}`,
+      "fi",
+      `root=$(realpath -e -- ${shellQuote(checkout)})`,
+      `app=$(realpath -e -- ${shellQuote(application)})`,
+      `agent=$(realpath -e -- ${shellQuote(`${application}/agent`)})`,
+      'case "$app" in "$root"|"$root"/*) ;; *) exit 2 ;; esac',
+      'case "$agent" in "$root"/*) ;; *) exit 2 ;; esac',
+      'test -d "$app" && test -d "$agent"',
+    ].join("\n"),
+  });
+  if (initialized.exitCode !== 0) {
+    throw new Error(
+      `Could not initialize ${repository} at ${checkout}: verify the configured application directory and agent/ exist inside the checkout (exit ${initialized.exitCode}).`,
+    );
+  }
+}
+
+async function cloneConfiguredRepository(
+  sandbox: SandboxSession,
+  config: ResolvedDeployedSelfModificationConfig,
+  sessionId: string,
+): Promise<void> {
+  const repository = config.github.repository;
+  // A clone interrupted before git initialized the directory would block a new clone.
+  await sandbox.removePath({
+    path: sandbox.resolvePath("repository"),
+    recursive: true,
+    force: true,
+  });
   const result = await executeGitHubShell(
     {
       command: `gh repo clone ${shellQuote(repository)} repository -- --branch ${shellQuote(config.baseBranch)} --single-branch`,
@@ -98,27 +148,6 @@ export async function initializeDeployedCheckout(
   if (result.exitCode !== 0) {
     throw new Error(
       `Could not check out configured repository ${repository} (exit ${result.exitCode}). Check the GitHub connector installation, repository permissions, and base branch ${config.baseBranch}.`,
-    );
-  }
-  const branch = `eve/selfmod-${createHash("sha256").update(sessionId).digest("hex").slice(0, 16)}`;
-  const application = config.directory === "." ? checkout : `${checkout}/${config.directory}`;
-  const initialized = await sandbox.run({
-    command: [
-      "set -eu",
-      // eve-code's authenticated git commands resolve their target repository from origin.
-      `git -C ${shellQuote(checkout)} remote set-url origin ${shellQuote(`https://github.com/${repository}.git`)}`,
-      `git -C ${shellQuote(checkout)} switch -c ${shellQuote(branch)}`,
-      `root=$(realpath -e -- ${shellQuote(checkout)})`,
-      `app=$(realpath -e -- ${shellQuote(application)})`,
-      `agent=$(realpath -e -- ${shellQuote(`${application}/agent`)})`,
-      'case "$app" in "$root"|"$root"/*) ;; *) exit 2 ;; esac',
-      'case "$agent" in "$root"/*) ;; *) exit 2 ;; esac',
-      'test -d "$app" && test -d "$agent"',
-    ].join("\n"),
-  });
-  if (initialized.exitCode !== 0) {
-    throw new Error(
-      `Could not initialize ${repository} at ${checkout}: verify the configured application directory and agent/ exist inside the checkout (exit ${initialized.exitCode}).`,
     );
   }
 }

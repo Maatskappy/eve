@@ -48,15 +48,23 @@ describe("deployed checkout initialization", () => {
     writeTextFile: vi.fn(),
   } as SandboxSession;
 
+  const ok = { exitCode: 0, stderr: "", stdout: "" };
+  const missing = { exitCode: 1, stderr: "", stdout: "" };
+  const commands = () => run.mock.calls.map(([input]) => input.command as string);
+
   beforeEach(() => {
     vi.clearAllMocks();
-    executeGitHubShell.mockResolvedValue({ exitCode: 0, stderr: "", stdout: "" });
-    run.mockResolvedValue({ exitCode: 0, stderr: "", stdout: "" });
+    executeGitHubShell.mockResolvedValue(ok);
+    run.mockResolvedValueOnce(missing).mockResolvedValue(ok);
   });
 
   it("clones through the scoped credential lease before creating and validating the checkout", async () => {
     await initializeDeployedCheckout(sandbox, deployed, "child-1");
 
+    expect(commands()[0]).toBe("test -d '/workspace/repository/.git'");
+    expect(sandbox.removePath).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/workspace/repository", recursive: true }),
+    );
     expect(executeGitHubShell).toHaveBeenCalledWith(
       expect.objectContaining({
         command: "gh repo clone 'acme/agents' repository -- --branch 'main' --single-branch",
@@ -67,12 +75,22 @@ describe("deployed checkout initialization", () => {
     );
     const getSandbox = executeGitHubShell.mock.calls[0]![2].getSandbox;
     expect(await getSandbox()).toBe(sandbox);
-    expect(run).toHaveBeenCalledOnce();
-    const command = run.mock.calls[0]![0].command as string;
+    const command = commands()[1]!;
     expect(command).toContain("remote set-url origin 'https://github.com/acme/agents.git'");
     expect(command).toContain("git -C '/workspace/repository' switch -c 'eve/selfmod-");
     expect(command).toContain("realpath -e -- '/workspace/repository/apps/weather/agent'");
     expect(command).toContain('case "$agent" in "$root"/*)');
+  });
+
+  it("reuses an existing checkout and working branch when initialization repeats", async () => {
+    run.mockReset().mockResolvedValue(ok);
+    await initializeDeployedCheckout(sandbox, deployed, "child-1");
+
+    expect(executeGitHubShell).not.toHaveBeenCalled();
+    expect(sandbox.removePath).not.toHaveBeenCalled();
+    const command = commands()[1]!;
+    expect(command).toMatch(/rev-parse --verify --quiet 'refs\/heads\/eve\/selfmod-[0-9a-f]{16}'/u);
+    expect(command).toMatch(/then\n {2}git -C '\/workspace\/repository' switch 'eve\/selfmod-/u);
   });
 
   it("stops before touching a checkout when authentication or clone fails", async () => {
@@ -84,11 +102,14 @@ describe("deployed checkout initialization", () => {
     await expect(initializeDeployedCheckout(sandbox, deployed, "child-1")).rejects.toThrow(
       "Could not check out configured repository acme/agents (exit 128).",
     );
-    expect(run).not.toHaveBeenCalled();
+    expect(commands()).toHaveLength(1);
   });
 
   it("rejects an invalid application or agent directory", async () => {
-    run.mockResolvedValue({ exitCode: 2, stderr: "", stdout: "" });
+    run
+      .mockReset()
+      .mockResolvedValueOnce(missing)
+      .mockResolvedValue({ ...ok, exitCode: 2 });
     await expect(initializeDeployedCheckout(sandbox, deployed, "child-1")).rejects.toThrow(
       "verify the configured application directory and agent/ exist inside the checkout",
     );

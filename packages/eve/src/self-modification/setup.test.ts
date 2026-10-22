@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { win32 } from "node:path";
+import { runInNewContext } from "node:vm";
+
 import { captureVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 
+import type { DeployedSelfModificationConfig } from "./remote/config-schema.js";
 import {
+  branchProtectionStatus,
   classifySelfModificationConfig,
   connectorName,
   defaultSelfModificationSetupOperations,
@@ -12,6 +16,26 @@ import {
   repositoryRelativeDirectory,
   type SelfModificationSetupDependencies,
 } from "./setup.js";
+
+const values = {
+  baseBranch: "main",
+  channelNames: [],
+  connector: "github/selfmod-acme-agents",
+  directory: ".",
+  repository: "acme/agents",
+};
+
+function evaluateGeneratedConfig(source: string) {
+  return runInNewContext(
+    source
+      .replace('import selfModification from "eve/self-modification/remote";', "")
+      .replace("export default ", ""),
+    {
+      process: { env: { VERCEL_PROJECT_ID: "prj_123" } },
+      selfModification: (config: DeployedSelfModificationConfig) => config,
+    },
+  ) as DeployedSelfModificationConfig;
+}
 
 describe("self-modification setup", () => {
   it("recognizes default local configurations", () => {
@@ -37,10 +61,10 @@ describe("self-modification setup", () => {
 
   it("renders the deployed extension configuration", () => {
     const source = renderSelfModificationConfig({
+      ...values,
       baseBranch: "release/production",
-      connector: "github/selfmod-acme-agents",
+      channelNames: ["slack", "eve"],
       directory: "apps/support",
-      repository: "acme/agents",
     });
     expect(source).toContain('import selfModification from "eve/self-modification/remote";');
     expect(source).toContain('// model: "provider/model"');
@@ -49,16 +73,94 @@ describe("self-modification setup", () => {
     expect(source).toContain('directory: "apps/support"');
     expect(source).toContain('baseBranch: "release/production"');
     expect(source).toContain('    connector: "github/selfmod-acme-agents",');
-    expect(source).toContain("authorize: () => true");
+    expect(source).not.toContain("authorize: () => true");
+    expect(source).toContain('case "http"');
+    expect(source).toContain(
+      'case "channel:slack":\n        // Authorize trusted principals for this channel before returning true.\n        return false;\n      default:',
+    );
+    expect(source).not.toContain('case "channel:eve"');
     expect(source).not.toContain("getToken");
     expect(classifySelfModificationConfig(source)).toBe("generated");
   });
 
+  it.each([
+    ["https://oidc.vercel.com", true],
+    ["https://oidc.vercel.com/acme", true],
+    ["https://identity.example.com", false],
+    ["https://oidc.vercel.com.attacker.example", false],
+    ["https://oidc.vercel.com@attacker.example", false],
+    [undefined, false],
+  ])("checks the generated policy's issuer %s", (issuer, allowed) => {
+    const config = evaluateGeneratedConfig(
+      renderSelfModificationConfig({ ...values, channelNames: ["slack"] }),
+    );
+    const principal = {
+      attributes: { project_id: "prj_123" },
+      authenticator: "oidc",
+      issuer,
+      principalId: "caller",
+      principalType: "service" as const,
+    };
+
+    expect(config.authorize({ channel: { kind: "http" }, principal })).toBe(allowed);
+    expect(
+      config.authorize({
+        channel: { kind: "http" },
+        principal: { ...principal, attributes: { project_id: "prj_other" } },
+      }),
+    ).toBe(false);
+    expect(
+      config.authorize({
+        channel: { kind: "http" },
+        principal: { ...principal, authenticator: "jwt-hmac" },
+      }),
+    ).toBe(false);
+    expect(config.authorize({ channel: { kind: "channel:slack" }, principal })).toBe(false);
+    expect(config.authorize({ channel: { kind: "http" }, principal: null })).toBe(false);
+  });
+
+  it.each([
+    [[{ type: "pull_request" }], { protected: true }, "pull-request-required"],
+    [[{ type: "pull_request" }], undefined, "pull-request-required"],
+    [[{ type: "deletion" }], { protected: true }, "protected"],
+    [[], { protected: false }, "unprotected"],
+    [undefined, { protected: false }, "unknown"],
+    [[], undefined, "unknown"],
+  ])("classifies rules %j and branch %j as %s", (rules, branch, status) => {
+    expect(
+      branchProtectionStatus(
+        rules === undefined ? undefined : JSON.stringify(rules),
+        branch === undefined ? undefined : JSON.stringify(branch),
+      ),
+    ).toBe(status);
+  });
+
+  it("reads branch protection through the GitHub CLI", async () => {
+    const captureGitHub = vi.fn(async (args: readonly string[]) =>
+      args[1]!.includes("/rules/") ? "[]" : '{"protected":false}',
+    );
+    const operations = defaultSelfModificationSetupOperations("/project", {
+      captureGitHub,
+      captureVercel: vi.fn<typeof captureVercel>(),
+      runVercelCaptureStdout: vi.fn<typeof runVercelCaptureStdout>(),
+    });
+
+    await expect(
+      operations.checkBranchProtection("acme/agents", "release/production"),
+    ).resolves.toBe("unprotected");
+    expect(captureGitHub).toHaveBeenCalledWith([
+      "api",
+      "repos/acme/agents/rules/branches/release%2Fproduction",
+    ]);
+    expect(captureGitHub).toHaveBeenCalledWith([
+      "api",
+      "repos/acme/agents/branches/release%2Fproduction",
+    ]);
+  });
+
   it("refuses altered generated configuration as authored", () => {
     expect(
-      classifySelfModificationConfig(
-        `${renderSelfModificationConfig({ baseBranch: "main", connector: "github/selfmod-acme-agents", directory: ".", repository: "acme/agents" })}\n// edited`,
-      ),
+      classifySelfModificationConfig(`${renderSelfModificationConfig(values)}\n// edited`),
     ).toBe("authored");
   });
 
@@ -78,6 +180,7 @@ describe("self-modification setup", () => {
       }),
     });
     const deps: SelfModificationSetupDependencies = {
+      captureGitHub: vi.fn(),
       captureVercel: capture,
       runVercelCaptureStdout: vi.fn<typeof runVercelCaptureStdout>(),
     };

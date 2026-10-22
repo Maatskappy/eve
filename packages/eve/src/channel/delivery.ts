@@ -20,8 +20,12 @@ export function commandDelivery(
   return new StreamDelivery({
     sessionId,
     deliveryId,
-    createStream: async function* () {
-      yield* deliveryEvents(await runtime.getEventStream(sessionId, options), deliveryId);
+    createStream: async function* (read) {
+      yield* deliveryEvents(
+        await runtime.getEventStream(sessionId, { ...options, signal: read?.signal }),
+        deliveryId,
+        read?.signal,
+      );
     },
   });
 }

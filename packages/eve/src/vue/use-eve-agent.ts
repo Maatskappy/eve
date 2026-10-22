@@ -47,7 +47,6 @@ export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<Delivery>;
   /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
-  readonly previews: ComputedRef<SessionStoreSnapshot["previews"]>;
   readonly messages: ComputedRef<SessionStoreSnapshot["messages"]>;
   readonly agents: ComputedRef<SessionStoreSnapshot["agents"]>;
   /** Last transport-level error, or `undefined` when healthy. */
@@ -203,7 +202,6 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
 
   return {
     cancel: () => store.cancel(),
-    previews: computed(() => snapshot.value.previews),
     messages: computed(() => snapshot.value.messages),
     agents: computed(() => snapshot.value.agents),
     view: computed(() => snapshot.value.view),

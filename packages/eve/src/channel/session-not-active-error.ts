@@ -28,7 +28,7 @@ export class SessionNotActiveError extends Error {
   }
 }
 
-/** Whether the session that held an unanswered request can no longer run it. */
+/** Whether an answer targets a session that cannot run or no longer exists. */
 export function isUnanswerableResponseError(error: unknown): boolean {
   return SessionNotActiveError.is(error) || SessionStrandedError.is(error);
 }

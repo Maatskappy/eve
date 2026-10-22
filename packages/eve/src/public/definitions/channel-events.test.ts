@@ -9,7 +9,8 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { emptySessionView } from "#protocol/session-projection/fold.js";
+import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
+import { turn } from "#protocol/session-projection/public-view.js";
 import { defineChannel, type ChannelEventContext } from "#public/definitions/channel.js";
 
 function adapterOf(channel: unknown): ChannelAdapter<any> {
@@ -119,6 +120,20 @@ describe("defineChannel events", () => {
     const adapter = adapterOf(channel);
     const ctx = sessionContext();
     const view = emptySessionView();
+    foldLine(
+      view,
+      {
+        at: "2026-10-19T00:00:00.000Z",
+        facts: [
+          {
+            type: "turn.started",
+            data: { turnId: "turn_0", cause: { deliveryId: "d" }, follows: null },
+          },
+          SETTLED,
+        ],
+      },
+      3,
+    );
     await contextStorage.run(ctx, () =>
       callAdapterEventHandler(adapter, SETTLED, {
         ...buildAdapterContext(adapter, ctx),
@@ -130,7 +145,8 @@ describe("defineChannel events", () => {
     expect(seen.event).toBe(SETTLED);
     expect(seen.ctx?.channel.label).toBe("thread");
     expect(seen.ctx?.position).toEqual({ index: 0, line: 3 });
-    expect(seen.ctx?.view).toBe(view);
+    expect(seen.ctx?.view).not.toHaveProperty("turns");
+    expect(turn(seen.ctx!.view, "turn_0")?.outcome).toBe("completed");
     expect(seen.ctx?.session.id).toBe("session_1");
     expect(seen.ctx).not.toHaveProperty("scope");
   });

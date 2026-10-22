@@ -6,11 +6,11 @@ import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
@@ -346,7 +346,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
 
 function rebuildTelegramContext(
   state: TelegramChannelState,
-  session: SessionHandle,
+  session: ChannelContext,
   config: TelegramChannelConfig,
 ): TelegramChannelContext {
   return {
@@ -357,7 +357,7 @@ function rebuildTelegramContext(
 
 function buildTelegramHandle(input: {
   readonly config: TelegramChannelConfig;
-  readonly session?: SessionHandle;
+  readonly session?: ChannelContext;
   readonly state: TelegramChannelState;
 }): TelegramHandle {
   const api = input.config.api;

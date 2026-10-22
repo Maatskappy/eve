@@ -28,7 +28,7 @@ import {
   signInOpened,
 } from "#harness/interaction-facts.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
-import { openRequests, SUPERSEDED_BY_MESSAGE } from "#protocol/session-reader.js";
+import { openRequests, SUPERSEDED_BY_MESSAGE } from "#protocol/session-projection/reader.js";
 import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import type { ResponseOutcome } from "#protocol/session-events/families/response.js";
 import type {

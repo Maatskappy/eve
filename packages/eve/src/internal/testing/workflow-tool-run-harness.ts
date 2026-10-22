@@ -27,7 +27,6 @@ export function buildWorkflowToolSerializedContext(input: {
     "eve.stateLayout": 1,
     "eve.capabilities": { requestInput: input.requestInput ?? false },
     "eve.channel": { kind: "http", state: {} },
-    // Raw workflow fixtures bypass channel dispatch and supply its initial identity here.
     "eve.channelDelivery": {
       acceptedDeploymentId: input.acceptedDeploymentId,
       channelKind: "http",

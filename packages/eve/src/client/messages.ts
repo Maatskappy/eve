@@ -1,5 +1,5 @@
 import { callState } from "#protocol/session-projection/selectors.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { EveMessage, EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { UserPart } from "#protocol/session-events/envelope.js";
@@ -12,7 +12,7 @@ import type {
   SessionPreviews,
   SessionView,
 } from "#protocol/session-projection/tables.js";
-import { callPlace, runPlace } from "#protocol/session-reader.js";
+import { callPlace, runPlace } from "#protocol/session-projection/reader.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };

@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Frontend snapshots expose `view`, `previews`, `messages`, and `agents` directly, with `idle | busy | resuming` status and separate errors; all lifecycle callbacks remain. Tool parts use the shared call `state`, optimistic answers last only through POST acknowledgement, and Stop still targets the observed or pending submission’s turn without withdrawing queued messages.
+Frontend snapshots expose opaque `view`, `messages`, and `agents` directly with `idle | busy | resuming` status, separate errors, and shared tool-part `state`; all five callbacks remain. Committed state no longer waits for unrelated POST receipts, restored history does not replay error/finish callbacks, and Stop still targets the observed or pending submission’s turn without withdrawing queued messages.

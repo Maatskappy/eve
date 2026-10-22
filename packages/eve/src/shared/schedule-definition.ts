@@ -14,9 +14,9 @@ export interface GenericScheduleDefinitionFields<TArgs> {
 
 /**
  * Public definition for a schedule authored in TypeScript. Provide a required
- * `cron` expression plus exactly one of `markdown` or `run`:
+ * `cron` expression plus exactly one of `content` or `run`:
  *
- * - `markdown`: fire-and-forget agent invocation. The framework runs the agent
+ * - `content`: fire-and-forget agent invocation. The framework runs the agent
  *   on the prompt and discards the output (equivalent to the `<name>.md`
  *   markdown form).
  * - `run`: full handler ({@link GenericScheduleRunHandler}). Receives

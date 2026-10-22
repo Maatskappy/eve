@@ -13,7 +13,7 @@ import {
   type SessionProjection,
 } from "#protocol/session-projection.js";
 import { interactionOwner } from "#protocol/session-projection/selectors.js";
-import { openRequests } from "#protocol/session-reader.js";
+import { openRequests } from "#protocol/session-projection/reader.js";
 import {
   readTurnState,
   type StepCoordinates,

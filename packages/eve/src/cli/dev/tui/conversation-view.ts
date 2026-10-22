@@ -1,3 +1,4 @@
+import { snapshotState } from "#protocol/session-projection/session-view.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { SessionStoreSnapshot } from "#client/session-store.js";
@@ -41,7 +42,7 @@ export interface ToolLabels {
 }
 
 export function tuiSessionData(conversation: ConversationState): TuiSessionData {
-  const { previews, view } = conversation;
+  const { previews, tables: view } = snapshotState(conversation.view);
   const turnRuns = Object.values(view.runs).filter((run) => "turnId" in run.owner);
   const latestTurnId = view.session.latestTurnId;
   const modelId = turnRuns

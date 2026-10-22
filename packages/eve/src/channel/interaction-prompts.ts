@@ -17,13 +17,17 @@ import {
   decidingAnswer,
   promptQueueHead,
   type Interaction,
-} from "#protocol/session-reader.js";
+} from "#protocol/session-projection/reader.js";
 import type { Answer } from "#shared/input.js";
 import { interactionBatches } from "#protocol/session-projection/selectors.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
-export { interaction, signInEnding, type Interaction } from "#protocol/session-reader.js";
+export {
+  interaction,
+  signInEnding,
+  type Interaction,
+} from "#protocol/session-projection/reader.js";
 
 /** One commit's requests: what a person is asked at once. */
 export interface RequestBatch {

@@ -2,8 +2,6 @@
   "ClientContextValue",
   "EveChannel",
   "EveChannelConfig",
-  "EveChannelCors",
-  "EveChannelCorsOptions",
   "EveChannelEvents",
   "EveEventContext",
   "EveHandle",

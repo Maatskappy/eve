@@ -10,6 +10,7 @@ const agentsByChatId = new Map<string, UseEveAgentReturn>();
 export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions) {
   let agent = agentsByChatId.get(chatId);
   if (!agent) {
+    for (const event of options?.initialEvents ?? []) recordAuthorizationEvent(event);
     agent = useEveAgent({
       initialSession: options?.initialSession,
       initialEvents: options?.initialEvents,
@@ -28,9 +29,28 @@ export function getOrCreateEveAgent(chatId: string, options?: ChatSessionOptions
     // Acceptance is not completion. Save committed idle/person-waiting/catch-up states, including
     // admitted answers, in order rather than relying on the live turn's onFinish callback.
     watch(
-      () => [created.events.value, created.session.value] as const,
+      () => [created.events.value, created.session.value, created.status.value] as const,
       () => {
-        const snapshot = { events: created.events.value, session: created.session.value };
+        if (created.status.value === "resuming") return;
+        const events = created.events.value;
+        const tail = events.at(-1);
+        if (created.status.value !== "idle") {
+          let boundary = false;
+          for (let index = events.length - 1; index >= 0; index -= 1) {
+            const event = events[index]!;
+            if (event.meta.position.line !== tail?.meta.position.line) break;
+            if (
+              ["turn.paused", "response.admitted", "delivery.settled", "session.ended"].includes(
+                event.type,
+              )
+            ) {
+              boundary = true;
+              break;
+            }
+          }
+          if (!boundary) return;
+        }
+        const snapshot = { events, session: created.session.value };
         persistence = persistence.catch(() => {}).then(() => persistThreadState(chatId, snapshot));
         void persistence.catch(() => {});
       },

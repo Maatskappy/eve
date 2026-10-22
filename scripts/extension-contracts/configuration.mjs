@@ -18,7 +18,10 @@ export const COMPATIBILITY_FIXTURE_PLACEHOLDER = "REPLACE_WITH_RETAINED_AUTHORIN
 
 export const PUBLIC_SURFACES = [
   { path: "src/public/extension/index.ts", capabilities: ["extension", "config"] },
-  { path: "src/public/channels/index.ts", capabilities: ["channel"] },
+  {
+    paths: ["src/public/channels/index.ts", "src/public/sessions/index.ts"],
+    capabilities: ["channel"],
+  },
   { path: "src/public/schedules/index.ts", capabilities: ["schedule"] },
   { path: "src/public/index.ts", capabilities: ["subagent"] },
   {

@@ -47,7 +47,7 @@ The state fields are reactive getters; the commands are ordinary methods:
 
 | Property                                                                                    | Svelte shape                                       |
 | ------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `messages`, `previews`, `agents`                                                            | Reactive getters for each projected snapshot field |
+| `messages`, `agents`                                                                        | Reactive getters for each projected snapshot field |
 | `view`                                                                                      | `SessionView`                                      |
 | `status`                                                                                    | `UseEveAgentStatus`                                |
 | `error`                                                                                     | `Error \| undefined`                               |
@@ -68,12 +68,11 @@ an interaction; its response rows and eventual settlement are authoritative.
 
 ```svelte
 <script lang="ts">
-  import { interaction, openInteractions } from "eve/events";
+  import { openInteractions } from "eve/events";
   import { useEveAgent } from "eve/svelte";
 
   const agent = useEveAgent();
   const pendingRequests = $derived(openInteractions(agent.view)
-    .flatMap((row) => interaction(agent.view, row.interactionId) ?? [])
     .filter((item) => item.request.kind !== "sign-in" && item.answer === undefined));
 </script>
 

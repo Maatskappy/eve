@@ -64,6 +64,7 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
       id: result.id,
       verdict: result.verdict,
       status: result.result.status,
+      outcome: result.result.outcome,
       assertions: result.assertions.map((a) => ({
         name: a.name,
         key: a.key,
@@ -87,6 +88,7 @@ function buildResultLine(result: EveEvalResult): Record<string, unknown> {
     id: result.id,
     verdict: result.verdict,
     status: result.result.status,
+    outcome: result.result.outcome,
     data: result.result.data,
     reply: result.result.reply,
     sessionEnded: result.result.sessionEnded,
@@ -101,6 +103,8 @@ function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
   return {
     id: result.id,
     result: {
+      outcome: result.result.outcome,
+      error: result.result.error,
       data: result.result.data,
       reply: result.result.reply,
       sessionEnded: result.result.sessionEnded,

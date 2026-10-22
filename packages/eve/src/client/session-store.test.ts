@@ -1,3 +1,9 @@
+import {
+  activeTurn,
+  delivery,
+  openInteractions,
+  turn,
+} from "#protocol/session-projection/public-view.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,6 +11,7 @@ import {
   SessionStore,
   type SessionStoreInit,
 } from "#client/session-store.js";
+import { Client } from "#client/client.js";
 import { testTurnFacts } from "#internal/testing/events.js";
 import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 import {
@@ -109,28 +116,62 @@ function texts(current: SessionStore) {
 const initialSession = { sessionId: "session_1", streamIndex: 0 };
 
 describe("SessionStore acceptance and observation", () => {
-  it("resolves a send at acceptance, then observes its turn on the one session stream", async () => {
+  it.each([false, true])(
+    "observes its accepted turn once, including a reply already at the tail (early: %s)",
+    async (early) => {
+      const server = agent(() => {
+        if (early) server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
+      });
+      const current = store();
+      const finished = vi.fn();
+      current.setCallbacks({ onFinish: finished });
+      const sent = current.send({ message: "sunny." });
+      const echoId = current.snapshot.messages[0]!.id;
+      expect(texts(current)).toEqual(["user: sunny."]);
+      await expect(sent).resolves.toEqual({ deliveryId: "d_0", sessionId: "session_1" });
+      if (!early) {
+        expect(finished).not.toHaveBeenCalled();
+        expect(current.snapshot.status).toBe("busy");
+        server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
+      }
+      await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
+      expect(texts(current)).toEqual(["user: sunny.", "assistant: Sunny."]);
+      expect(current.snapshot.messages[0]!.id).toBe(echoId);
+      expect(finished).toHaveBeenCalledOnce();
+      expect(server.reads).toHaveLength(1);
+      current.newSession();
+      await expect((await sent).result()).resolves.toMatchObject({
+        status: "completed",
+        reply: "Sunny.",
+        sessionEnded: false,
+      });
+      expect(server.reads).toHaveLength(2);
+    },
+  );
+
+  it("does not publish another reader's cursor ahead of its own committed events", async () => {
     const server = agent();
-    const current = store();
-    const finished = vi.fn();
-    current.setCallbacks({ onFinish: finished });
-    const sent = current.send({ message: "sunny." });
-    const echoId = current.snapshot.messages[0]!.id;
-    expect(texts(current)).toEqual(["user: sunny."]);
-    await expect(sent).resolves.toEqual({ deliveryId: "d_0", sessionId: "session_1" });
-    expect(finished).not.toHaveBeenCalled();
-    expect(current.snapshot.status).toBe("busy");
-    server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
-    await vi.waitFor(() => expect(current.snapshot.status).toBe("idle"));
-    expect(texts(current)).toEqual(["user: sunny.", "assistant: Sunny."]);
-    expect(current.snapshot.messages[0]!.id).toBe(echoId);
-    expect(finished).toHaveBeenCalledOnce();
-    await expect((await sent).result()).resolves.toMatchObject({
-      status: "completed",
-      reply: "Sunny.",
-      sessionEnded: false,
+    const session = new Client({ host: "https://eve.test" }).sessions.attach("session_1");
+    const current = store({ session });
+    const receipt = await session.send("sunny.");
+    server.append(testTurnFacts(0, "Sunny.", [receipt.deliveryId]));
+    await receipt.result();
+    expect(session.state.streamIndex).toBeGreaterThan(0);
+    const prepared = Promise.withResolvers<void>();
+    current.setCallbacks({
+      prepareSend: async (input) => {
+        await prepared.promise;
+        return input;
+      },
     });
-    expect(server.reads).toHaveLength(1);
+    const sending = current.send({ message: "later." });
+    try {
+      expect(current.snapshot.events).toEqual([]);
+      expect(current.snapshot.session?.streamIndex).toBe(0);
+    } finally {
+      prepared.resolve();
+      await sending;
+    }
   });
 
   it("keeps identical messages distinct when the stream beats reversed POST acknowledgements", async () => {
@@ -175,6 +216,82 @@ describe("SessionStore acceptance and observation", () => {
     expect(await two).toEqual({ deliveryId: "d_1", sessionId: "session_1" });
     expect(server.posts).toEqual(["/eve/v1/session", "/eve/v1/session/session_1"]);
     expect(server.reads).toHaveLength(1);
+  });
+
+  it("does not replay historical errors into a new pending send", async () => {
+    const receipt = Promise.withResolvers<void>();
+    const server = agent(() => receipt.promise);
+    server.append(
+      testTurnFacts(0, "Earlier.", ["old"]).map((event): SessionEvent =>
+        event.type === "turn.settled"
+          ? {
+              ...event,
+              data: {
+                ...event.data,
+                outcome: "failed",
+                error: { code: "EARLIER", message: "Earlier failure" },
+              },
+            }
+          : event,
+      ),
+    );
+    const current = store({ initialSession });
+    const onError = vi.fn();
+    const onEvent = vi.fn();
+    const onFinish = vi.fn();
+    current.setCallbacks({ onError, onEvent, onFinish });
+    const sending = current.send({ message: "New task." });
+    try {
+      await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(8));
+      expect(onError).not.toHaveBeenCalled();
+      expect(onFinish).not.toHaveBeenCalled();
+    } finally {
+      receipt.resolve();
+      await sending;
+    }
+    expect(current.snapshot.error).toBeUndefined();
+    expect(
+      current.snapshot.messages.find((message) => message.id.startsWith("optimistic:"))?.metadata
+        ?.status,
+    ).toBe("submitted");
+  });
+
+  it("publishes committed work while an unrelated message waits for its receipt", async () => {
+    const receipt = Promise.withResolvers<void>();
+    const server = agent((id) => (id === "d_1" ? receipt.promise : undefined));
+    const current = store({ initialSession });
+    await current.send({ message: "First task." });
+    const echo = current.snapshot.messages[0]!.id;
+    const sending = current.send({ message: "Queued task.", turnPolicy: "queue" });
+    try {
+      server.append(testTurnFacts(0, "First done.", ["d_0"]));
+      await vi.waitFor(() => expect(turn(current.snapshot.view, "turn_0")?.status).toBe("settled"));
+      const users = current.snapshot.messages.filter((message) => message.role === "user");
+      expect(users).toHaveLength(2);
+      expect(users[0]?.id).toBe(echo);
+      expect(texts(current)).toContain("assistant: First done.");
+    } finally {
+      receipt.resolve();
+      await sending;
+    }
+  });
+
+  it("keeps a live finish when its event observer starts catch-up", async () => {
+    const server = agent();
+    const current = store({ initialSession });
+    await current.send({ message: "First task." });
+    let resumed: Promise<void> | undefined;
+    const onFinish = vi.fn();
+    current.setCallbacks({
+      onFinish,
+      onEvent: (event) => {
+        if (event.type === "turn.settled") resumed = current.resume();
+      },
+    });
+    server.append(testTurnFacts(0, "Done.", ["d_0"]));
+    await vi.waitFor(() => expect(resumed).toBeDefined());
+    await resumed;
+    expect(onFinish).toHaveBeenCalledOnce();
   });
 
   it("resumes through catch-up without waiting for an in-flight turn to end", async () => {
@@ -282,7 +399,7 @@ describe("SessionStore Stop during submission", () => {
     await current.send({ message: "sunny." });
     const facts = testTurnFacts(0, "Later.", ["d_0"]);
     server.append(facts.slice(0, 1));
-    await vi.waitFor(() => expect(current.snapshot.view.deliveries.d_0?.status).toBe("admitted"));
+    await vi.waitFor(() => expect(delivery(current.snapshot.view, "d_0")?.status).toBe("admitted"));
     const stopped = current.cancel();
     server.append(facts.slice(1, 4));
     await expect(stopped).resolves.toMatchObject({
@@ -332,7 +449,7 @@ describe("SessionStore Stop during submission", () => {
     prepared.resolve();
     await sent;
     server.append(testTurnFacts(0, "Other.", ["other"]).slice(0, 4));
-    await vi.waitFor(() => expect(current.snapshot.view.turns.turn_0?.status).toBe("running"));
+    await vi.waitFor(() => expect(turn(current.snapshot.view, "turn_0")?.status).toBe("running"));
     expect(server.cancellations).toEqual([]);
     server.append(testTurnFacts(0, "Other.", ["other"]).slice(4));
     server.append(testTurnFacts(1, "Later.", ["d_0"]).slice(0, 4));
@@ -416,6 +533,72 @@ describe("SessionStore Stop during submission", () => {
 });
 
 describe("SessionStore committed snapshots", () => {
+  it("does not apply an old ending after its observer starts a fresh session", async () => {
+    const server = agent();
+    const current = store();
+    await current.send({ message: "Review the report." });
+    await vi.waitFor(() => expect(server.reads).toHaveLength(1));
+    const reset = vi.fn();
+    current.setCallbacks({
+      onEvent: (event) => {
+        if (event.type === "session.ended") {
+          current.newSession();
+          reset();
+        }
+      },
+    });
+    server.append(
+      [
+        ...testTurnFacts(0, "Later.", ["d_0"]).slice(0, 4),
+        {
+          type: "session.ended",
+          data: {
+            outcome: "failed",
+            error: { code: "session_stranded", message: "Earlier session unavailable." },
+          },
+        },
+      ],
+      true,
+    );
+    await vi.waitFor(() => expect(reset).toHaveBeenCalledOnce());
+    expect(current.snapshot.session).toBeUndefined();
+    expect(current.snapshot.error).toBeUndefined();
+    expect(current.snapshot.events).toEqual([]);
+  });
+
+  it("stops showing a retired session as busy when its last rows could not be settled", async () => {
+    const server = agent();
+    const current = store();
+    await current.send({ message: "Review the report." });
+    server.append(testTurnFacts(0, "Later.", ["d_0"]).slice(0, 4));
+    await vi.waitFor(() => expect(activeTurn(current.snapshot.view)?.turnId).toBe("turn_0"));
+    server.append(
+      [
+        { type: "model.settled", data: { runId: "run_0", outcome: "completed" } },
+        {
+          type: "interaction.opened",
+          data: {
+            interactionId: "question",
+            subject: { turnId: "turn_0" },
+            request: { kind: "question", prompt: "Which report?" },
+          },
+        },
+        {
+          type: "session.ended",
+          data: {
+            outcome: "failed",
+            error: { code: "session_stranded", message: "Session unavailable." },
+          },
+        },
+      ],
+      true,
+    );
+    await vi.waitFor(() => expect(current.snapshot.error?.message).toBe("Session unavailable."));
+    expect(current.snapshot.status).toBe("idle");
+    expect(activeTurn(current.snapshot.view)).toBeUndefined();
+    expect(openInteractions(current.snapshot.view)).toEqual([]);
+  });
+
   it("reports a mid-line stream failure without exposing the unfinished line", async () => {
     const server = agent();
     const current = store();
@@ -438,12 +621,12 @@ describe("SessionStore committed snapshots", () => {
     const current = store();
     await current.send({ message: "sunny." });
     server.append(testTurnFacts(0, "Later.", ["d_0"]).slice(0, 4));
-    await vi.waitFor(() => expect(current.snapshot.view.turns.turn_0?.status).toBe("running"));
+    await vi.waitFor(() => expect(turn(current.snapshot.view, "turn_0")?.status).toBe("running"));
     const before = current.snapshot;
     const seen: { cancelled: boolean; failed: boolean }[] = [];
     current.subscribe(() =>
       seen.push({
-        cancelled: current.snapshot.view.turns.turn_0?.outcome === "cancelled",
+        cancelled: turn(current.snapshot.view, "turn_0")?.outcome === "cancelled",
         failed: current.snapshot.error !== undefined,
       }),
     );
@@ -468,7 +651,7 @@ describe("SessionStore committed snapshots", () => {
     );
     await vi.waitFor(() => expect(current.snapshot.error?.message).toBe("boom"));
     expect(seen.filter(({ cancelled, failed }) => cancelled && !failed)).toEqual([]);
-    expect(before.view.turns.turn_0?.status).toBe("running");
+    expect(turn(before.view, "turn_0")?.status).toBe("running");
   });
 });
 
@@ -582,6 +765,34 @@ describe("SessionStore with followIdle disabled", () => {
     expect(server.reads[0]?.signal?.aborted).toBe(true);
   });
 
+  it("reopens from its own view after an independent session reader advances", async () => {
+    const server = agent();
+    const session = new Client({ host: "https://eve.test" }).sessions.attach("session_1", {
+      streamIndex: 0,
+    });
+    server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
+    const current = store({ followIdle: false, session });
+    await current.resume();
+    server.append(testTurnFacts(1, "Arrived while closed.", ["d_1"]));
+    for await (const _event of session.stream({ follow: false, startIndex: 0 })) {
+      /* bounded independent read */
+    }
+    expect(session.state.streamIndex).toBe(server.log.length);
+    const receipt = await current.compact();
+    server.append(
+      [
+        {
+          type: "delivery.admitted",
+          data: { deliveryId: receipt.deliveryId, source: { control: "compact" } },
+        },
+        { type: "delivery.settled", data: { deliveryId: receipt.deliveryId, outcome: "applied" } },
+      ],
+      true,
+    );
+    await receipt.result();
+    expect(texts(current)).toContain("assistant: Arrived while closed.");
+  });
+
   it("keeps a paused turn's stream attached through unrelated delivery settlements", async () => {
     const server = agent();
     server.append(testTurnFacts(0, "Later.", ["d_0"]).slice(0, 4));
@@ -617,7 +828,7 @@ describe("SessionStore with followIdle disabled", () => {
       true,
     );
     await vi.waitFor(() =>
-      expect(current.snapshot.view.deliveries.control?.status).toBe("settled"),
+      expect(delivery(current.snapshot.view, "control")?.status).toBe("settled"),
     );
     expect(current.snapshot.status).toBe("busy");
     expect(server.reads[0]?.signal?.aborted).toBe(false);

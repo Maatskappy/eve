@@ -9,7 +9,15 @@ import {
   foldLines,
   type ReceivedEvent,
 } from "#protocol/session-projection/fold.js";
-import { activeTurn, idle, reply } from "#protocol/session-projection/selectors.js";
+import {
+  activeTurn,
+  idle,
+  openInteractions,
+  openWork,
+  queue,
+  reply,
+  waiting,
+} from "#protocol/session-projection/selectors.js";
 
 const at = "2026-10-09T00:00:00.000Z";
 const spent = { inputTokens: 10, outputTokens: 2 };
@@ -67,6 +75,45 @@ function folded(lines: readonly StoredLine[], retention?: "operational") {
 }
 
 describe("the shared fold", () => {
+  it("exposes no active work after a degraded session end, without inventing row settlements", () => {
+    const view = folded(turnLines(0, { opensSession: true }).slice(0, 2));
+    foldLines(
+      view,
+      [
+        {
+          at,
+          facts: [
+            { type: "model.settled", data: { runId: "run_0", outcome: "completed" } },
+            {
+              type: "interaction.opened",
+              data: {
+                interactionId: "question",
+                subject: { turnId: "turn_0" },
+                request: { kind: "question", prompt: "Which report?" },
+              },
+            },
+            { type: "delivery.admitted", data: { deliveryId: "queued" } },
+            {
+              type: "session.ended",
+              data: {
+                outcome: "failed",
+                error: { code: "session_stranded", message: "Session unavailable." },
+              },
+            },
+          ],
+        },
+      ],
+      view.position,
+    );
+    expect(view.turns.turn_0?.status).toBe("running");
+    expect(activeTurn(view)).toBeUndefined();
+    expect(idle(view)).toBe(true);
+    expect(openInteractions(view)).toEqual([]);
+    expect(queue(view)).toEqual([]);
+    expect(waiting(view, "turn_0")).toBeUndefined();
+    expect(Object.values(openWork(view, { session: true })).flat()).toEqual([]);
+  });
+
   it("continues after malformed ownership without inventing a model run", () => {
     const view = folded(turnLines(0, { opensSession: true }).slice(0, 1));
     expect(() =>

@@ -1,3 +1,4 @@
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
@@ -9,12 +10,12 @@ import type {
   ChannelRespondOptions,
   ChannelSendOptions,
 } from "#channel/channel-operations.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
   INACTIVE_REQUEST_NOTICE,
   respondOrRetireInactivePrompt,
 } from "#channel/inactive-prompt.js";
-import type { ChannelDelivery } from "#shared/channel-delivery.js";
-import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
@@ -390,7 +391,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     // `session.auth.current` is the caller of this delivery.
     deliver(
       payload,
-      channel: ChatSdkChannelContext<TAdapters> & { readonly session: SessionHandle },
+      channel: ChatSdkChannelContext<TAdapters> & { readonly session: ChannelContext["session"] },
     ) {
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
       recordLatestMessage(channel.state, payload);
@@ -524,15 +525,16 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       const { data } = event;
       const { channel } = ctx;
       const signIns = chatSdkSignIns(channel);
-      if (signIns !== undefined) await showSignIn(ctx.view, data.interactionId, signIns);
+      if (signIns !== undefined)
+        await showSignIn(sessionTables(ctx.view), data.interactionId, signIns);
     },
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "interaction.settled"(event, ctx) {
       const { data } = event;
       const { channel } = ctx;
       const signIns = chatSdkSignIns(channel);
-      if (signIns !== undefined) await settleSignIn(ctx.view, data, signIns);
-      const resolution = requestSettlementOf(ctx.view, data);
+      if (signIns !== undefined) await settleSignIn(sessionTables(ctx.view), data, signIns);
+      const resolution = requestSettlementOf(sessionTables(ctx.view), data);
       if (resolution !== undefined)
         await clearAnsweredCards({ resolutions: [resolution] }, channel);
     },

@@ -2,7 +2,7 @@ import type { InstrumentationChannel } from "#shared/instrumentation-channel.js"
 import type { AuthoringEventType } from "#protocol/session-events/authoring.js";
 import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
-import type { SessionView } from "../../protocol/session-projection/tables.js";
+import type { SessionView } from "../../protocol/session-projection/session-view.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
@@ -48,7 +48,7 @@ export interface HookContext extends SessionContext {
    */
   readonly position: FactPosition;
   /**
-   * The session's tables as of the whole commit the event is in: what's open, and what the commit
+   * The session's immutable observation snapshot as of the whole commit the event is in: what's open, and what the commit
    * settled. Read what changed from the event, and where things stand from the view.
    */
   readonly view: SessionView;

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { ChannelInstrumentationKey, SessionKey } from "#context/keys.js";
+import { session, type SessionView } from "#protocol/session-projection/public-view.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { isChannel } from "#public/channels/index.js";
@@ -27,6 +28,7 @@ it("matches an authored HTTP channel in hooks without changing its durable adapt
     turn: { id: "turn_0", sequence: 0 },
   });
   let matched = false;
+  let view: SessionView | undefined;
   await contextStorage.run(ctx, () =>
     dispatchStreamEventHooks({
       ctx,
@@ -38,6 +40,7 @@ it("matches an authored HTTP channel in hooks without changing its durable adapt
             eventType: "*",
             handler(_event, hook) {
               matched = isChannel(hook.channel, support);
+              view = hook.view;
             },
           },
         ],
@@ -54,5 +57,7 @@ it("matches an authored HTTP channel in hooks without changing its durable adapt
     }),
   );
   expect(matched).toBe(true);
+  expect(view).not.toHaveProperty("calls");
+  expect(session(view!).status).toBe("new");
   expect(ctx.require(ChannelKey).kind).toBe("http");
 });

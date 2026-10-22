@@ -5,7 +5,6 @@
 
 import { streamSessionEvents } from "#execution/session-event-stream.js";
 import type { SessionReader } from "#shared/session.js";
-export type { SessionReader } from "#shared/session.js";
 
 /**
  * Reads session streams in process, without calling the deployment's own

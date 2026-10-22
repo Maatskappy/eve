@@ -3,7 +3,7 @@ import { emptySessionView, foldReceivedEvent } from "#protocol/session-projectio
 import { callOutputSource } from "#protocol/session-projection/selectors.js";
 import type { CallRow } from "#protocol/session-projection/tables.js";
 import { ownerOf } from "#protocol/session-projection/tree.js";
-import { interaction, type Interaction } from "#protocol/session-reader.js";
+import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
 import { isJsonObjectValue } from "#shared/json.js";
 import type {
   EveEvalDerivedFacts,

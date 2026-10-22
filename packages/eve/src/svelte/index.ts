@@ -7,8 +7,11 @@ export {
   type UseEveAgentStatus,
 } from "#svelte/use-eve-agent.js";
 
-export type { Delivery, DeliveryResult } from "#shared/delivery.js";
-export { signInEnding, type AskedCall, type Interaction } from "#protocol/session-reader.js";
+export {
+  signInEnding,
+  type AskedCall,
+  type Interaction,
+} from "#protocol/session-projection/reader.js";
 export type {
   AgentObservation,
   ConversationAgentSession,

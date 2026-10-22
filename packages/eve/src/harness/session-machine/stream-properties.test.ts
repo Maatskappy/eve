@@ -381,9 +381,11 @@ function answers(view: SessionView) {
     waiting:
       waits === undefined
         ? undefined
-        : waits.on === "person"
+        : waits.on === "interaction"
           ? waits.interactions.map((row) => row.interactionId)
-          : waits.calls.map((row) => row.callId),
+          : waits.on === "work"
+            ? waits.calls.map((row) => row.callId)
+            : "session",
   };
 }
 

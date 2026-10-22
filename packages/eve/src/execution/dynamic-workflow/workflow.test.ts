@@ -30,7 +30,7 @@ const agent = (target: string) => ({
       return {
         sessionId: "child",
         deliveryId: "child-request",
-        events: [],
+        outcome: "handled",
         sessionEnded: false,
         data: typeof output === "string" ? undefined : output,
         reply: typeof output === "string" ? output : undefined,

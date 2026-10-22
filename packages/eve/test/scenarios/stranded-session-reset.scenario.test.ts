@@ -31,7 +31,7 @@ export default defineChannel({
   routes: [
     POST("/threads/:threadId", async (request, { from, params }) => {
       const session = await from(params.threadId!).send(await request.text(), { auth: null });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
     POST("/sessions/:sessionId", async (request, { attachSession, params }) => {
       try {
@@ -46,8 +46,8 @@ export default defineChannel({
       }
     }),
     GET("/sessions/:sessionId/stream", async (_request, { attachSession, params }) => {
-      const events = await attachSession(params.sessionId!).getEventStream();
-      const ndjson = events
+      const events = attachSession(params.sessionId!).stream();
+      const ndjson = ReadableStream.from(events)
         .pipeThrough(
           new TransformStream({
             transform(event, controller) {

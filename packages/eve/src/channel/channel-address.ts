@@ -69,8 +69,8 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  */
 interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
-  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
   create(options: ChannelAddressCreateOptions<TState>): Promise<ChannelCreateResult>;
+  deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
   send(message: MessageContent, options: ChannelAddressDeliveryOptions<TState>): Promise<Delivery>;
   respond(
     answers: SendPayload["answers"],

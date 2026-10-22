@@ -62,3 +62,41 @@ it.each([
     expect(result?.message).toBeUndefined();
   }
 });
+
+it("drops the history a typed answer brought, from its input and its deliveries", () => {
+  const view = emptySessionView();
+  foldLines(
+    view,
+    [
+      {
+        at: "2026-10-15T00:00:00Z",
+        facts: [
+          {
+            type: "interaction.opened",
+            data: {
+              interactionId: "budget",
+              subject: { turnId: "turn_0" },
+              request: {
+                kind: "budget",
+                prompt: "Keep going?",
+                options: [{ id: "approve", label: "approve" }],
+              },
+            },
+          },
+        ],
+      },
+    ],
+    0,
+  );
+  const history = [{ role: "user" as const, text: "Alice asked for the weekly report." }];
+  const result = resolveTextInput(view, {
+    deliveries: [{ deliveryId: "incoming", history, parts: [{ kind: "text", text: "approve" }] }],
+    history,
+    message: "approve",
+  });
+  expect(result?.messageConsumed).toBe(true);
+  expect(result?.history).toBeUndefined();
+  expect(result?.deliveries).toEqual([
+    { deliveryId: "incoming", parts: [{ kind: "text", text: "approve" }] },
+  ]);
+});

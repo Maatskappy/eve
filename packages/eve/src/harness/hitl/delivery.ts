@@ -1,5 +1,5 @@
 import type { MessageContent } from "#shared/message-content.js";
-import { openRequests, promptQueueHead } from "#protocol/session-reader.js";
+import { openRequests, promptQueueHead } from "#protocol/session-projection/reader.js";
 
 import { answerFromText } from "#channel/resolve-text.js";
 import { coalesceTurnInputs } from "#harness/messages.js";

@@ -1,6 +1,6 @@
 "use client";
 
-import { interaction } from "eve/events";
+import { interaction, interactions } from "eve/events";
 
 import {
   createOpenAI,
@@ -179,11 +179,11 @@ export function VoiceCall() {
 
   const muted = rt.session?.isInputMuted ?? false;
   // Same input wiring as the Web Chat registry's agent-chat.
-  const canRespond = (requestId: string) => agent.view.interactions[requestId]?.status === "open";
+  const canRespond = (requestId: string) => interaction(agent.view, requestId)?.status === "open";
   const questionsFor = (callId: string) =>
-    Object.keys(agent.view.interactions)
-      .flatMap((id) => interaction(agent.view, id) ?? [])
-      .filter((input) => input.request.kind === "question" && input.call?.callId === callId);
+    interactions(agent.view).filter(
+      (input) => input.request.kind === "question" && input.call?.callId === callId,
+    );
 
   // eve's k-th user message is the k-th request sent. Its text duplicates the
   // transcript, and so does the spoken answer, so only tools and prompts show.

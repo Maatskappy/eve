@@ -1,10 +1,9 @@
 import { Worker } from "node:worker_threads";
 
-import { compileAgentInWorkspace, type CompileAgentResult } from "#compiler/compile-agent.js";
-import {
-  type DevelopmentGeneration,
-  stageDevelopmentGeneration,
-} from "#internal/nitro/development-generation.js";
+// Type-only compiler imports keep this module cheap, so the dev server can start
+// the worker before loading the compiler itself.
+import type { compileAgentInWorkspace, CompileAgentResult } from "#compiler/compile-agent.js";
+import type { DevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { toError, toErrorMessage } from "#shared/errors.js";
 
 export type DevelopmentCompileInput = Parameters<typeof compileAgentInWorkspace>[0];
@@ -17,8 +16,12 @@ export interface DevelopmentCompilation {
 // Authored code also runs in the worker and may post its own messages to `parentPort`.
 export const DEVELOPMENT_COMPILE_MESSAGE_KIND = "eve:development-compile";
 
-export interface DevelopmentCompileRequest {
+export interface DevelopmentCompileWorkerData {
+  /** Probe result from an earlier worker, adopted before anything can probe again. */
   readonly dockerAvailability: boolean | undefined;
+}
+
+export interface DevelopmentCompileRequest {
   /** The dev server's environment, including `.env` changes staged for this rebuild. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly id: number;
@@ -72,7 +75,9 @@ export function compileDevelopmentGeneration(
   // eve's own tests load this module from TypeScript source, which a worker
   // thread cannot import without the test runner's transform.
   if (import.meta.url.endsWith(".ts")) {
-    return compileAndStageDevelopmentGeneration(input);
+    return import("#internal/nitro/host/dev-compile-job.js").then((job) =>
+      job.compileAndStageDevelopmentGeneration(input),
+    );
   }
 
   const compilation = compileQueue.then(() => compileInWorker(input));
@@ -80,11 +85,11 @@ export function compileDevelopmentGeneration(
   return compilation;
 }
 
-export async function compileAndStageDevelopmentGeneration(
-  input: DevelopmentCompileInput,
-): Promise<DevelopmentCompilation> {
-  const compileResult = await compileAgentInWorkspace(input);
-  return { compileResult, generation: await stageDevelopmentGeneration(compileResult) };
+/** Starts the compile worker so it loads the compiler while the dev server loads. */
+export function prewarmDevelopmentCompileWorker(): void {
+  if (!import.meta.url.endsWith(".ts")) {
+    compileWorker ??= startCompileWorker();
+  }
 }
 
 async function compileInWorker(input: DevelopmentCompileInput): Promise<DevelopmentCompilation> {
@@ -93,7 +98,6 @@ async function compileInWorker(input: DevelopmentCompileInput): Promise<Developm
 
   try {
     response = await requestCompilation(worker, {
-      dockerAvailability,
       environment: { ...process.env },
       id: ++nextRequestId,
       input,
@@ -127,7 +131,8 @@ async function compileInWorker(input: DevelopmentCompileInput): Promise<Developm
 }
 
 function startCompileWorker(): Worker {
-  const worker = new Worker(new URL("./dev-compile-worker.js", import.meta.url));
+  const workerData: DevelopmentCompileWorkerData = { dockerAvailability };
+  const worker = new Worker(new URL("./dev-compile-worker.js", import.meta.url), { workerData });
   const forget = () => {
     if (compileWorker === worker) compileWorker = undefined;
   };

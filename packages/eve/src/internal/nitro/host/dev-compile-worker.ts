@@ -1,26 +1,28 @@
 import { getHeapStatistics } from "node:v8";
-import { parentPort } from "node:worker_threads";
+import { parentPort, workerData } from "node:worker_threads";
 
 import {
   adoptLinuxDockerDaemonAvailability,
   peekLinuxDockerDaemonAvailability,
 } from "#execution/sandbox/bindings/docker-cli.js";
 import {
-  compileAndStageDevelopmentGeneration,
   DEVELOPMENT_COMPILE_MESSAGE_KIND,
   type DevelopmentCompileOutcome,
   type DevelopmentCompileRequest,
   type DevelopmentCompileResponse,
+  type DevelopmentCompileWorkerData,
   serializeError,
 } from "#internal/nitro/host/dev-compile.js";
+import { compileAndStageDevelopmentGeneration } from "#internal/nitro/host/dev-compile-job.js";
+
+const { dockerAvailability } = workerData as DevelopmentCompileWorkerData;
+if (dockerAvailability !== undefined) {
+  adoptLinuxDockerDaemonAvailability(dockerAvailability);
+}
 
 parentPort?.on("message", async (request: Partial<DevelopmentCompileRequest> | null) => {
   if (request?.kind !== DEVELOPMENT_COMPILE_MESSAGE_KIND || request.input === undefined) {
     return;
-  }
-
-  if (request.dockerAvailability !== undefined) {
-    adoptLinuxDockerDaemonAvailability(request.dockerAvailability);
   }
 
   if (request.environment !== undefined) {

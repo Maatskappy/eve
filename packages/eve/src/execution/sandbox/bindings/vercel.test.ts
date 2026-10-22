@@ -208,8 +208,12 @@ async function templateKeyOf(build: (module: object) => Promise<unknown>): Promi
   return name;
 }
 
+/** An environment with preparation, which Vercel captures in a template snapshot. */
 function createVercelSandbox(input: Parameters<typeof createVercelImplementation>[0] = {}) {
-  return createSandboxProviderHarness(createVercelImplementation(input), {});
+  return createSandboxProviderHarness(
+    createVercelImplementation({ prepare: async () => {}, ...input }),
+    {},
+  );
 }
 
 function createTestVercelSandbox(input: Parameters<typeof createVercelImplementation>[0] = {}) {
@@ -859,11 +863,13 @@ describe("createVercelSandbox", () => {
   });
 
   describe("shared templates", () => {
-    const buildWith = (prepare?: () => Promise<void> | void) => async (sandboxModule: object) =>
-      await createTestVercelSandbox({
-        loadSandboxModule: async () => sandboxModule as never,
-        prepare,
-      }).prepare({ appRoot: "/tmp/test-app-root" });
+    const buildWith =
+      (prepare: () => Promise<void> | void = async () => {}) =>
+      async (sandboxModule: object) =>
+        await createTestVercelSandbox({
+          loadSandboxModule: async () => sandboxModule as never,
+          prepare,
+        }).prepare({ appRoot: "/tmp/test-app-root" });
 
     /** The build-private sandboxes: everything a build created except the template pointer. */
     const privateSandboxes = (fake: ReturnType<typeof createFakeVercelProvider>) =>
@@ -1156,6 +1162,40 @@ describe("createVercelSandbox", () => {
     });
   });
 
+  it("captures a template only when preparation, managed files, or an authored source need one", async () => {
+    const prepareWith = async (
+      input: Parameters<typeof createVercelImplementation>[0],
+      workspace: { content: string; relativePath: string }[] = [],
+    ) => {
+      const create = vi.fn(async (options: { name: string }) => createMockSandbox(options));
+      const provider = createSandboxProviderHarness(
+        createVercelImplementation({
+          ...input,
+          createSandbox: async ({ createOptions }) => (await create(createOptions)) as never,
+          loadSandboxModule: async () =>
+            ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
+        }),
+        {},
+      );
+      return {
+        artifact: await provider.prepare({ appRoot: "/tmp/test-app-root", workspace }),
+        create,
+      };
+    };
+
+    const empty = await prepareWith({ createOptions: { image: "example.test/agent:1" } });
+    expect(empty.artifact).toEqual({});
+    expect(empty.create).not.toHaveBeenCalled();
+
+    const sourced = await prepareWith({
+      createOptions: { source: { snapshotId: "author-snap", type: "snapshot" } },
+    });
+    const seeded = await prepareWith({}, [{ content: "notes", relativePath: "notes.md" }]);
+    for (const { artifact } of [sourced, seeded]) {
+      expect(artifact).toEqual({ snapshotId: expect.any(String) });
+    }
+  });
+
   it("reports an unavailable prepared snapshot without mutating the build template", async () => {
     const snapshotExpiredError = Object.assign(
       new Error("Vercel sandbox create API returned 410"),
@@ -1293,11 +1333,15 @@ describe("createVercelSandbox", () => {
     await expect(handle.onSandboxStop()).rejects.toThrow("provider unreachable");
   });
 
-  it("applies the open-time policy after template-less base setup", async () => {
+  it.each([
+    ["open()", {}, { networkPolicy: "deny-all" as const }],
+    ["the environment", { networkPolicy: "deny-all" as const }, {}],
+  ])("applies the policy from %s after template-less base setup", async (_, environment, open) => {
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi.fn().mockResolvedValue(sessionSandbox);
     const provider = createSandboxProviderHarness(
       createVercelImplementation({
+        createOptions: environment,
         createSandbox: async ({ createOptions }) => {
           await create(createOptions);
           return sessionSandbox as never;
@@ -1305,7 +1349,7 @@ describe("createVercelSandbox", () => {
         loadSandboxModule: async () =>
           ({ Sandbox: { create, get: vi.fn().mockResolvedValue(null) } }) as never,
       }),
-      { networkPolicy: "deny-all" },
+      open,
       { preparedArtifact: () => ({}) },
     );
 

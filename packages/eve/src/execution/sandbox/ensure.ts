@@ -21,7 +21,8 @@ import {
 import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import { owningSandboxDefinition, type RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import {
-  isRetiredSandboxSessionState,
+  getSessionEndWithArtifact,
+  resolvePersistedSandboxSessionState,
   type SandboxAccess,
   type SandboxSessionEndReason,
   type SandboxSessionState,
@@ -94,10 +95,16 @@ const log = createLogger("execution.sandbox");
 export async function ensureSandboxAccess(
   input: EnsureSandboxAccessInput,
 ): Promise<EnsuredSandboxAccess> {
+  // Production always registers a sandbox; test runtimes without one cast a null registry.
+  const registered = input.registry.sandbox;
+  const persistedOwner = registered === null ? undefined : owningSandboxDefinition(registered);
   // A retired record cannot resume, so let the selector start a fresh sandbox.
-  const session = input.state?.session ?? null;
-  let persisted: SandboxSessionState | null =
-    session === null || isRetiredSandboxSessionState(session) ? null : session;
+  let persisted = resolvePersistedSandboxSessionState(
+    input.state?.session,
+    persistedOwner?.kind === "independent"
+      ? getSandboxEnvironmentRuntime(persistedOwner.environment)
+      : undefined,
+  );
   let opened: OpenedSandbox | undefined;
   let opening: Promise<SandboxProviderHandle> | undefined;
   let requiring: Promise<SandboxProviderHandle> | undefined;
@@ -110,8 +117,6 @@ export async function ensureSandboxAccess(
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
   const captured = (): SandboxState => ({ session: persisted });
-  const registered = input.registry.sandbox;
-  // Production always registers a sandbox; test runtimes without one cast a null registry.
   if (registered === null) {
     return {
       async captureState() {
@@ -236,15 +241,16 @@ export async function ensureSandboxAccess(
   async function resumePersisted(context: SandboxProviderSessionContext) {
     if (persisted === null) throw new Error("Sandbox session state is missing.");
     const provider = getSandboxEnvironmentRuntime(activeDefinition().environment);
+    // State another provider or protocol recorded cannot resume here, for example
+    // after the app switches providers or rolls back eve, so start a fresh sandbox.
     if (persisted.providerName !== provider.providerName) {
-      throw new Error(
+      throw new SandboxSessionGoneError(
         `This session's sandbox was created by provider "${persisted.providerName}", but the agent now selects provider "${provider.providerName}". ` +
-          "eve cannot move a sandbox between providers. Start a new session, or restore the previous provider. " +
-          "With DefaultSandbox, the provider can change when Docker starts or stops between processes.",
+          "eve cannot move a sandbox between providers, so the session continues in a fresh sandbox without the old sandbox's files.",
       );
     }
     if (persisted.stateProtocolVersion !== provider.stateProtocolVersion) {
-      throw new Error(
+      throw new SandboxSessionGoneError(
         `Sandbox session state protocol ${persisted.stateProtocolVersion} is incompatible with provider "${provider.providerName}" protocol ${provider.stateProtocolVersion}.`,
       );
     }
@@ -405,9 +411,18 @@ export async function ensureSandboxAccess(
         persisted.stateProtocolVersion === provider.stateProtocolVersion
           ? persisted.state
           : null;
-      await provider.implementation.onSessionEnd(providerContext("sandbox-cleanup"), state, {
-        reason,
-      });
+      const context = providerContext("sandbox-cleanup");
+      const endWithArtifact = getSessionEndWithArtifact(provider.implementation);
+      if (endWithArtifact === undefined) {
+        await provider.implementation.onSessionEnd(context, state, { reason });
+      } else {
+        const artifact = await loadSandboxPreparedArtifact({
+          compiledArtifactsSource: input.compiledArtifactsSource,
+          nodeId: registered.inheritance?.nodeId ?? input.nodeId,
+          providerName: provider.providerName,
+        });
+        await endWithArtifact(context, state, { artifact, reason });
+      }
       forgetHandle();
       persisted = null;
     },

@@ -145,7 +145,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                              |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |
 | [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`                                                                                          |
-| `eve/models/openai`                                                               | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                                         |
+| `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                                            |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                                    |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                                            |
 | `eve/evals`                                                                       | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                                      |
@@ -182,7 +182,7 @@ export default defineAgent({
 });
 ```
 
-Pass another bare OpenAI model slug to override the default. `experimental_chatgpt()` remains as a deprecated alias.
+Pass another bare OpenAI model slug to override the default. The retired `experimental_chatgpt` alias is not exported.
 
 `chatgpt()` uses stateless requests (`store: false`). eve retains reasoning summaries and encrypted reasoning in session history and replays them after tool calls and on later turns. You do not need to configure `reasoning.encrypted_content` explicitly.
 

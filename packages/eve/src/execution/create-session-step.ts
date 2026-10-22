@@ -25,6 +25,7 @@ import type { SessionHistoryMessage } from "#shared/session-history.js";
 export interface CreateSessionStepResult {
   readonly history: HarnessModelMessage[];
   readonly state: DurableSessionState;
+  readonly prewarm?: true;
 }
 
 /**
@@ -72,5 +73,9 @@ export async function createSessionStep(input: {
   const { history, sessionState } = createDurableSessionValues(
     state === session.state ? session : { ...session, state },
   );
-  return { history, state: sessionState };
+  return {
+    history,
+    state: sessionState,
+    prewarm: (bundle.hookRegistry.prewarm?.length ?? 0) === 0 ? undefined : true,
+  };
 }

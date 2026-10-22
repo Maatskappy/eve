@@ -9,7 +9,7 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
-import type { StreamEventHook } from "#public/definitions/hook.js";
+import type { PrewarmHook, StreamEventHook } from "#public/definitions/hook.js";
 import type { Approval, ToolApproval } from "#approval/definition.js";
 import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
@@ -221,6 +221,7 @@ export type ResolvedToolDefinition = Readonly<
  * the resolved maps.
  */
 export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
+  readonly prewarm?: PrewarmHook;
   /**
    * Path-relative slug used for diagnostics and ordering.
    */

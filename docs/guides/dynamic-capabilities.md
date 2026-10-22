@@ -448,7 +448,7 @@ Skills follow the same naming rule as tools: a single `defineSkill(...)` is name
 
 A dynamic skill with `deferred: true` is left out of the dynamic skill announcement and isn't named in context. The model finds it with `eve__search` and loads it with `eve__skill({ name })`, like a static deferred skill. When it overrides a static skill that isn't deferred, the system prompt still lists the static skill's description, and loading returns the dynamic body.
 
-A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and returns them when the model loads the skill. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. A changed package replaces the previous directory, so files omitted from the new result are removed.
+A dynamic skill never starts a sandbox merely by resolving: eve keeps its instructions and supporting files in session state. Loading instructions does not use compute. When a tool or hook accesses the sandbox, eve first synchronizes the package files to the sandbox skill root. Unchanged packages are skipped; a changed package replaces the previous directory, so omitted files disappear. Withdrawn packages are removed on the next sandbox access, and a recreated sandbox receives the current packages without rerunning their resolvers. See [Skills](../skills#how-loading-works).
 
 ## Dynamic instructions
 

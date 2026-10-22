@@ -6,6 +6,7 @@ import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/ke
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getActiveRuntimeNode } from "#context/node.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
+import { withDynamicSkillFiles } from "#context/dynamic-skill-files.js";
 
 export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   key: SandboxKey,
@@ -33,7 +34,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
       state: session.sandboxState ?? (reusesOwnerSandbox ? parentSandboxState : undefined) ?? null,
     });
     ctx.setVirtualContext(SandboxTerminalCleanupKey, (reason) => access.end(reason));
-    return { value: access };
+    return { value: withDynamicSkillFiles(ctx, access) };
   },
 
   async commit(access, session) {

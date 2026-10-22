@@ -228,6 +228,38 @@ describe("workflow step authorization", () => {
     expect(starts).toEqual(["owner-session"]);
   });
 
+  it("materializes the caller's pending skill files only when a workflow step accesses its sandbox", async () => {
+    const { registry, starts } = upsertSandboxes();
+    bundle.registry = registry;
+    const owner = context();
+    const input: WorkflowStepContext = {
+      ...owner,
+      sandbox: {
+        ...owner.sandbox,
+        skills: {
+          policy: [
+            {
+              name: "policy",
+              description: "Policy",
+              markdown: "Read rules.md.",
+              revision: "policy-v1",
+              files: { "rules.md": "UnVsZXM=" },
+            },
+          ],
+        },
+      },
+    };
+    await runStep(() => "No sandbox needed", input);
+    expect(starts).toEqual([]);
+    await expect(
+      runStep(async (ctx) => {
+        const sandbox = await ctx.getSandbox();
+        return await sandbox.readTextFile({ path: "/workspace/skills/policy/rules.md" });
+      }, input),
+    ).resolves.toMatchObject({ kind: "result", output: "Rules" });
+    expect(starts).toEqual([owner.sandbox.sessionId]);
+  });
+
   it("leaves the session's handle tracked for runtime shutdown after a step uses the sandbox", async () => {
     const { handles, registry, shutDown } = upsertSandboxes();
     bundle.registry = registry;

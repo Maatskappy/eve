@@ -1,6 +1,15 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  AuthKey,
+  DynamicSkillManifestKey,
+  DynamicSkillSandboxKey,
+  InitiatorAuthKey,
+  SandboxKey,
+  SessionIdKey,
+  SessionKey,
+} from "#context/keys.js";
+import { withDynamicSkillFiles } from "#context/dynamic-skill-files.js";
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -43,8 +52,12 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
+    if (input.sandbox.skills !== undefined)
+      context.set(DynamicSkillManifestKey, input.sandbox.skills);
+    if (input.sandbox.skillsWritten !== undefined)
+      context.set(DynamicSkillSandboxKey, input.sandbox.skillsWritten);
 
-    const sandbox = openStepSandbox(input);
+    const sandbox = openStepSandbox(input, context);
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
       const auth = createAuthorizationContext({
         scope: input.toolName,
@@ -125,7 +138,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
  * session's turns may be using it, so the step can neither stop nor delete it.
  * A step that never asks for it loads nothing.
  */
-function openStepSandbox(input: WorkflowStepContext) {
+function openStepSandbox(input: WorkflowStepContext, context: ContextContainer) {
   const { bundle, sessionId, state } = input.sandbox;
   // The step's own context replaces the delivery's, which carries the
   // development generation a development source resolves to.
@@ -140,15 +153,18 @@ function openStepSandbox(input: WorkflowStepContext) {
       nodeId: bundle.nodeId,
     });
     const node = compiled.graph.root;
-    return await ensureSandboxAccess({
-      compiledArtifactsSource: compiled.compiledArtifactsSource,
-      nodeId: node.nodeId,
-      ownsSandbox: false,
-      registry: node.sandboxRegistry,
-      sessionId,
-      state: state ?? null,
-      borrowed: true,
-    });
+    return withDynamicSkillFiles(
+      context,
+      await ensureSandboxAccess({
+        compiledArtifactsSource: compiled.compiledArtifactsSource,
+        nodeId: node.nodeId,
+        ownsSandbox: false,
+        registry: node.sandboxRegistry,
+        sessionId,
+        state: state ?? null,
+        borrowed: true,
+      }),
+    );
   };
   const openOnce = (): Promise<EnsuredSandboxAccess> => {
     opening ??= open().catch((error: unknown) => {

@@ -8,6 +8,21 @@ const DYNAMIC_INSTRUCTIONS_TOKEN = "dynamic-instructions-ok-M3K8";
 const SKILL_LOAD_DIRECTIVE = "SKILL-LOAD";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
+  if (request.lastUserMessage?.includes("dynamic-tenant-policy/references/policy.md")) {
+    const result = request.toolResults.find((entry) => entry.name === "read_file");
+    return result === undefined
+      ? {
+          toolCalls: [
+            {
+              name: "read_file",
+              input: {
+                filePath: "$HOME/.agents/skills/dynamic-tenant-policy/references/policy.md",
+              },
+            },
+          ],
+        }
+      : JSON.stringify(result.output);
+  }
   const directive = request.userMessages.find((message) =>
     message.startsWith(SKILL_LOAD_DIRECTIVE),
   );

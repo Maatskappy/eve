@@ -1,6 +1,28 @@
 import type { HandleMessageStreamEvent } from "../../protocol/message.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
+import type { RuntimeSandboxSession } from "../../shared/sandbox-session.js";
+
+/** Context for optional preparation before a session receives its first message. */
+export interface PrewarmContext {
+  /** Creation-time identity; the first message may establish a different caller. */
+  readonly session: Pick<SessionContext["session"], "id" | "auth">;
+  readonly agent: { readonly name: string; readonly nodeId?: string };
+  /** Aborted when preparation ends or the session is reset or expires. */
+  readonly abortSignal: AbortSignal;
+  /**
+   * Prepares the session's sandbox, then awaits optional dependent work.
+   * Concurrent calls share acquisition, but each callback runs. Normal sandbox
+   * access reuses the prepared resource. No other asset kinds are supported.
+   */
+  preload(
+    asset: "sandbox",
+    prepare?: (sandbox: RuntimeSandboxSession) => void | Promise<void>,
+  ): Promise<void>;
+}
+
+/** Retry-safe, best-effort preparation outside the session's event stream. */
+export type PrewarmHook = (ctx: PrewarmContext) => void | Promise<void>;
 
 type ProtocolEvent<TType extends HandleMessageStreamEvent["type"]> = Extract<
   HandleMessageStreamEvent,
@@ -121,6 +143,13 @@ export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
  * `defineInstructions` in `agent/instructions/`.
  */
 export interface HookDefinition<TKey extends HookEventKey = HookEventKey> {
+  /**
+   * Runs on new session bootstrap, including message-free creation. Await all
+   * work; failures are logged and normal execution continues. Interrupted steps
+   * may retry, so external effects must be idempotent. This does not run dynamic
+   * definitions or establish the first turn's auth, history, or events.
+   */
+  readonly prewarm?: PrewarmHook;
   readonly events?: StreamEventHooks<TKey>;
 }
 
@@ -132,7 +161,7 @@ type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
 /**
  * Identity-with-types helper. Returns the passed definition unchanged at
  * runtime while preserving its authored event keys behind the public
- * {@link HookDefinition} boundary and rejecting any key outside `events`.
+ * {@link HookDefinition} boundary and rejecting unknown definition keys.
  * Authors export
  * `defineHook({ events: { "session.started": (event, ctx) => { ... } } })`.
  */

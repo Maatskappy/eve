@@ -8,6 +8,8 @@ import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-a
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
+import { prewarmSessionStep } from "#execution/prewarm-session-step.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createSessionInbox,
@@ -176,6 +178,20 @@ export async function bootInitialOwner(
     nodeId?: string;
   };
   let owner: OwnedInitialSession | undefined;
+  let sessionState: DurableSessionState | undefined;
+  let preparedContext = serializedContext;
+  let prewarm: AbortController | undefined;
+  let interrupted = false;
+  const unsubscribe = inbox.onInterrupt((payload) => {
+    if (
+      payload.kind === "reset" ||
+      payload.kind === "session-timeout" ||
+      payload.kind === "session-failure"
+    ) {
+      interrupted = true;
+      prewarm?.abort();
+    }
+  });
   try {
     const sessionCreationPromise = createSessionStep({
       agentSessionRuntimeOverrides: serializedContext["eve.agentSessionRuntimeOverrides"] as
@@ -210,6 +226,7 @@ export async function bootInitialOwner(
       owner = ownerPreparation.value;
     }
     const created = unwrapSettled(sessionCreation);
+    sessionState = created.state;
     const prepared = unwrapSettled(ownerPreparation);
     if (prepared.kind === "alias-conflict") {
       if (input.continuationConflictCommand !== undefined) {
@@ -222,6 +239,17 @@ export async function bootInitialOwner(
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);
+    if (created.prewarm === true) {
+      prewarm = new AbortController();
+      if (interrupted) prewarm.abort();
+      const prepared = await prewarmSessionStep({
+        abortSignal: prewarm.signal,
+        serializedContext,
+        sessionState,
+      });
+      preparedContext = prepared.serializedContext;
+      sessionState = prepared.sessionState;
+    }
     return {
       inbox,
       session: {
@@ -237,9 +265,9 @@ export async function bootInitialOwner(
             : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
         initialTurnControl: prepared.turnControl,
         retention: input.retention,
-        serializedContext,
+        serializedContext: preparedContext,
         sessionId,
-        sessionState: created.state,
+        sessionState,
         sessionTimeoutControl: prepared.timeoutControl,
         sessionTimeoutMs,
         sessionWritable,
@@ -249,11 +277,14 @@ export async function bootInitialOwner(
     await disposeInitialBoot(inbox, owner);
     return await failSession({
       error,
-      serializedContext,
+      serializedContext: preparedContext,
       sessionId,
-      sessionState: undefined,
+      sessionState,
       sessionWritable,
     });
+  } finally {
+    unsubscribe();
+    prewarm?.abort();
   }
 }
 

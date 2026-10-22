@@ -64,7 +64,7 @@ export interface CoordinationDispatchResult {
 /** The calls a dispatch started or refused, recorded on the session but not yet published. */
 export interface PendingDispatchFacts {
   /** Calls the turn waits on, each running from now in a run of its own. */
-  readonly executing: readonly string[];
+  readonly executing: readonly FactOf<"call.started">[];
   /** Tasks the dispatch started or sent a call to. */
   readonly started: readonly TaskCallStart[];
   /** Calls a dispatch admission refused before any run started. */

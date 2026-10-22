@@ -7,7 +7,7 @@ import { SAY, aliceSession, answers, approvalFor, asAlice } from "../helpers.ts"
  * the session, so her second echo runs without asking again.
  */
 export default defineEval({
-  description: "A once() approval grants its key for the rest of the session.",
+  description: "A once() approval remembers the tool for the rest of the session.",
   tags: ["hitl", "approval", "once"],
   timeoutMs: 60_000,
   async test(t) {

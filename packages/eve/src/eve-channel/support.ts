@@ -11,7 +11,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import {
   type ClientContextValue,
   defaultEveAuth,
-  type EveChannelInput,
+  type EveChannelConfig,
   type EveHandle,
   type EveMessageContext,
   type EveMessageResult,
@@ -126,7 +126,7 @@ interface OnMessageOutcome {
 export async function resolveOnMessage(input: {
   readonly auth: SessionAuthContext | null;
   readonly clientContext?: ClientContextValue;
-  readonly config: EveChannelInput;
+  readonly config: EveChannelConfig;
   readonly invocation?: EveHandle["invocation"];
   readonly message: MessageContent;
   readonly request: Request;

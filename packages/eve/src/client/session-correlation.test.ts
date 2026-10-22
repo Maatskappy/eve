@@ -16,7 +16,7 @@ function stream(events: readonly SessionEvent[]) {
 
 function session() {
   return new ClientSession(
-    { host: "https://eve.test", resolveHeaders: async () => new Headers() },
+    { baseUrl: "https://eve.test", resolveHeaders: async () => new Headers() },
     { sessionId: "session_1", streamIndex: 0 },
   );
 }

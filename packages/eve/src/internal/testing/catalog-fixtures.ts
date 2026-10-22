@@ -127,7 +127,7 @@ export function catalogBundle(
       skills: (input.skills ?? []).map((skill) => ({
         deferred: skill.deferred,
         description: skill.description ?? `${skill.name} skill`,
-        markdown: skill.markdown ?? `# ${skill.name}`,
+        content: skill.markdown ?? `# ${skill.name}`,
         name: skill.name,
       })),
     } as never,

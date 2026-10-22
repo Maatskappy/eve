@@ -753,7 +753,7 @@ The decision runs in a step so workflow replay records its result instead of mak
 To replace the model-facing `agent` tool with a router across every target in `ctx.agents`, export `agentRouter()` from the `agent` slot:
 
 ```ts title="agent/tools/agent.ts"
-import { agentRouter } from "eve/tools/agent-router";
+import { agentRouter } from "eve/tools/agent_router";
 
 export default agentRouter();
 ```

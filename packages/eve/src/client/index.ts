@@ -2,7 +2,7 @@
 // Client and ClientSession
 // ---------------------------------------------------------------------------
 
-export { EveAgentStore } from "#client/eve-agent-store.js";
+export { SessionStore } from "#client/session-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
@@ -41,12 +41,12 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
-  EveAgentStoreCallbacks,
-  EveAgentStoreInit,
-  EveAgentStoreSnapshot,
-  EveAgentStoreStatus,
+  SessionStoreCallbacks,
+  SessionStoreInit,
+  SessionStoreSnapshot,
+  SessionStoreStatus,
   PrepareSend,
-} from "#client/eve-agent-store.js";
+} from "#client/session-store.js";
 
 export type {
   AgentInfoEntry,

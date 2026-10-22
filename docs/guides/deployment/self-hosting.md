@@ -137,7 +137,7 @@ Apply the authentication, persistent storage, and sandbox configuration above to
 
 ### Add a peer frontend
 
-A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ host: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
+A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ baseUrl: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
 
 For path-based mounts, strip the public prefix before forwarding requests to the agent and set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
 

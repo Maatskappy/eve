@@ -86,7 +86,7 @@ function resolveStreamReconnectPolicy(
 interface FollowStreamInput {
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
-  readonly host: string;
+  readonly baseUrl: string;
   readonly resolveReconnectPolicy?: () => StreamReconnectPolicy | undefined;
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
@@ -312,7 +312,7 @@ export async function openStreamBody(
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
     throwIfAborted(input.signal);
     const url = createClientUrl(
-      input.host,
+      input.baseUrl,
       input.path,
       Object.keys(searchParams).length > 0 ? searchParams : undefined,
     );

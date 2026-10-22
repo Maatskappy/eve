@@ -1,10 +1,10 @@
 [
   "ClientContextValue",
   "EveChannel",
+  "EveChannelConfig",
   "EveChannelCors",
   "EveChannelCorsOptions",
   "EveChannelEvents",
-  "EveChannelInput",
   "EveEventContext",
   "EveHandle",
   "EveMessageContext",

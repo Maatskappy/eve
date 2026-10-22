@@ -515,7 +515,7 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
   /** Run-wide setup context, shared by reference across evals and teardown. */
   readonly context: TContext;
   /** Eval timeout signal. */
-  readonly signal: AbortSignal;
+  readonly abortSignal: AbortSignal;
   /** Current target under test. */
   readonly target: EveEvalTargetHandle;
   /** Structured eval log hook. */
@@ -739,7 +739,7 @@ export interface EveEvalConfigInput<TContext = unknown> {
   readonly judge?: EveEvalJudgeConfig;
   /**
    * Reporters that observe every eval in the run (e.g. a shared
-   * `Braintrust()` experiment). Suppressed by `eve eval --skip-report`.
+   * `braintrustReporter()` experiment). Suppressed by `eve eval --skip-report`.
    */
   readonly reporters?: readonly EvalReporter[];
   /**

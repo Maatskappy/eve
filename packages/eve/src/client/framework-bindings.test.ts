@@ -12,7 +12,7 @@ import {
 } from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { linesOf } from "#protocol/session-lines.js";
-import { useEveAgent as useReactAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
+import { useEveAgent as useReactAgent, type UseEveAgentReturn } from "#react/use-eve-agent.js";
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
 
@@ -91,9 +91,9 @@ const bindings: Record<string, () => Mounted> = {
   react() {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const finished = vi.fn();
-    let helpers: UseEveAgentHelpers | undefined;
+    let helpers: UseEveAgentReturn | undefined;
     function Probe() {
-      helpers = useReactAgent({ host: "https://eve.test", onFinish: finished });
+      helpers = useReactAgent({ baseUrl: "https://eve.test", onFinish: finished });
       return null;
     }
     let renderer: ReturnType<typeof createRenderer> | undefined;
@@ -114,7 +114,9 @@ const bindings: Record<string, () => Mounted> = {
     vi.stubGlobal("window", {});
     const finished = vi.fn();
     const scope = effectScope();
-    const binding = scope.run(() => useVueAgent({ host: "https://eve.test", onFinish: finished }))!;
+    const binding = scope.run(() =>
+      useVueAgent({ baseUrl: "https://eve.test", onFinish: finished }),
+    )!;
     return {
       data: () => ({ messages: binding.messages.value }),
       dispose: () => scope.stop(),
@@ -125,7 +127,7 @@ const bindings: Record<string, () => Mounted> = {
   svelte() {
     vi.stubGlobal("window", {});
     const finished = vi.fn();
-    const binding = useSvelteAgent({ host: "https://eve.test", onFinish: finished });
+    const binding = useSvelteAgent({ baseUrl: "https://eve.test", onFinish: finished });
     // Svelte shows the store's changes only inside a component's effects, which a unit test has
     // none of; its lifecycle is what's left to check.
     return {

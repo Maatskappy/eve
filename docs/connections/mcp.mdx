@@ -221,7 +221,7 @@ Requirements:
 
 ### Handle events
 
-Add `experimental_events` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email then starts a turn in the same conversation, with instructions to triage it:
+Add `experimental: { events: { ... } }` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email then starts a turn in the same conversation, with instructions to triage it:
 
 ```ts title="agent/connections/bird.ts"
 import { connect } from "@vercel/connect/eve";
@@ -231,19 +231,21 @@ export default defineMcpClientConnection({
   url: "https://mcp.bird.com/",
   description: "Bird: email, SMS, and contacts. Can watch a mailbox for new mail.",
   auth: connect("bird/bird"),
-  experimental_events: {
-    async onEvent({ event, origin, auth, attachSession }) {
-      if (event.name !== "email_mailbox.message_received") return;
-      await attachSession(origin.sessionId).send(
-        [
-          "A new email arrived in the mailbox you are watching:",
-          JSON.stringify(event.data),
-          "If it is a bug report, look up the sender's earlier threads, draft a reply " +
-            "that says what we know and what happens next, and ask me before sending it. " +
-            "Otherwise, summarize it in one line.",
-        ].join("\n\n"),
-        { auth, turnPolicy: "queue" },
-      );
+  experimental: {
+    events: {
+      async onEvent({ event, origin, auth, attachSession }) {
+        if (event.name !== "email_mailbox.message_received") return;
+        await attachSession(origin.sessionId).send(
+          [
+            "A new email arrived in the mailbox you are watching:",
+            JSON.stringify(event.data),
+            "If it is a bug report, look up the sender's earlier threads, draft a reply " +
+              "that says what we know and what happens next, and ask me before sending it. " +
+              "Otherwise, summarize it in one line.",
+          ].join("\n\n"),
+          { auth, turnPolicy: "queue" },
+        );
+      },
     },
   },
 });
@@ -270,23 +272,25 @@ async onEvent({ event, deliveryId }) {
 ### Handle missed events and ended subscriptions
 
 ```ts
-experimental_events: {
-  async onEvent({ event }) {
-    // ...
-  },
-  async onGap({ origin, auth, attachSession }) {
-    // The server could not deliver every event. Re-read the source.
-    await attachSession(origin.sessionId).send(
-      "Some Bird events were missed. Re-check the mailbox.",
-      { auth },
-    );
-  },
-  async onTerminated({ origin, auth, error, attachSession }) {
-    // The upstream subscription ended. The watch ends when this returns.
-    await attachSession(origin.sessionId).send(
-      `The Bird watch ended: ${error.message}`,
-      { auth },
-    );
+experimental: {
+  events: {
+    async onEvent({ event }) {
+      // ...
+    },
+    async onGap({ origin, auth, attachSession }) {
+      // The server could not deliver every event. Re-read the source.
+      await attachSession(origin.sessionId).send(
+        "Some Bird events were missed. Re-check the mailbox.",
+        { auth },
+      );
+    },
+    async onTerminated({ origin, auth, error, attachSession }) {
+      // The upstream subscription ended. The watch ends when this returns.
+      await attachSession(origin.sessionId).send(
+        `The Bird watch ended: ${error.message}`,
+        { auth },
+      );
+    },
   },
 },
 ```

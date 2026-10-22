@@ -100,7 +100,7 @@ describe("dynamic tool source edits across a restart", () => {
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });
 
       try {
-        const client = new Client({ host: server.url });
+        const client = new Client({ baseUrl: server.url });
         const created = await client.sessions.create({ message: "Hello." });
         await expect(created.delivery.result()).resolves.toMatchObject({
           interactions: [],
@@ -135,7 +135,7 @@ describe("dynamic tool source edits across a restart", () => {
         }, "The crashed development server did not release its state record.");
         server = await startEveDev(app.appRoot, { env: pinnedEnv, resume: true });
 
-        const resumedSession = new Client({ host: server.url }).sessions.attach(
+        const resumedSession = new Client({ baseUrl: server.url }).sessions.attach(
           sessionState.sessionId,
           { streamIndex: sessionState.streamIndex },
         );

@@ -167,7 +167,6 @@ export type LinearInboundResult = {
 } | null;
 
 /** Sync or async {@link LinearInboundResult}. */
-export type LinearInboundResultOrPromise = LinearInboundResult | Promise<LinearInboundResult>;
 
 /** Configuration for {@link linearChannel}. */
 export interface LinearChannelConfig {
@@ -184,7 +183,7 @@ export interface LinearChannelConfig {
   onAgentSession?(
     ctx: LinearSessionContext,
     event: LinearAgentSessionEvent,
-  ): LinearInboundResultOrPromise;
+  ): LinearInboundResult | Promise<LinearInboundResult>;
 
   /** Optional hook for generic Linear data webhooks sent to the same route. */
   onDataWebhook?(event: LinearDataWebhookEvent): void | Promise<void>;
@@ -275,7 +274,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
         });
       }
 
-      return from(linearContinuationToken(session.id)).send(input.message, {
+      return from(linearContinuationToken({ agentSessionId: session.id })).send(input.message, {
         auth: input.auth,
         state: stateFromAgentSession(session),
       });
@@ -355,17 +354,19 @@ async function dispatchAgentSession(input: {
     fetch: input.config.api?.fetch,
   });
 
-  await input.from(linearContinuationToken(event.agentSession.id)).send(message, {
-    auth: result.auth,
-    context: [
-      formatLinearContextBlock(event),
-      ...event.previousComments,
-      ...(result.context ?? []),
-    ],
-    history: result.history,
-    state: stateFromAgentSession(event.agentSession),
-    title: result.title,
-  });
+  await input
+    .from(linearContinuationToken({ agentSessionId: event.agentSession.id }))
+    .send(message, {
+      auth: result.auth,
+      context: [
+        formatLinearContextBlock(event),
+        ...event.previousComments,
+        ...(result.context ?? []),
+      ],
+      history: result.history,
+      state: stateFromAgentSession(event.agentSession),
+      title: result.title,
+    });
 }
 
 async function resolveReceiveSession(

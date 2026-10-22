@@ -8,7 +8,7 @@ import type { ChildOpened } from "#protocol/session-events/families/child.js";
 /**
  * A session an agent run opened, reached through the parent session whose
  * stream linked it with `child.opened`. Get one with
- * `session.agent(opened)`. Every read uses the parent's host and
+ * `session.agent(opened)`. Every read uses the parent's base URL and
  * credentials: a local child's own route, or the parent-origin proxy for a
  * remote child, which the parent deployment authenticates to the remote agent
  * after checking that it recorded the child.
@@ -48,7 +48,7 @@ export class ClientAgentSession implements SessionReader {
     const startIndex = options?.startIndex ?? 0;
     return followStreamIterable({
       follow: options?.follow,
-      host: this.#context.host,
+      baseUrl: this.#context.baseUrl,
       path: this.#streamPath,
       redirect: this.#context.redirect,
       resolveHeaders: () => this.#context.resolveHeaders(),

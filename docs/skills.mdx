@@ -64,7 +64,7 @@ import { defineSkill } from "eve/skills";
 
 export default defineSkill({
   description: "Research unfamiliar topics before answering with confidence.",
-  markdown:
+  content:
     "When the task is novel or ambiguous, gather evidence first, then answer with the key facts and the remaining uncertainty.",
   files: {
     "references/checklist.md": "# Checklist\n\n- Find primary sources.\n",
@@ -72,7 +72,7 @@ export default defineSkill({
 });
 ```
 
-eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
+eve generates `SKILL.md` from `content`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
 A static `defineSkill` module is evaluated during compilation and its resolved definition is stored in the manifest; a dynamic skill module is also retained as a runtime entry. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 

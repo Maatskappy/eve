@@ -16,7 +16,7 @@ it.each([undefined, "Complete the milk task."])(
         { status: 202 },
       );
     });
-    const client = new Client({ host: "https://agent.test" });
+    const client = new Client({ baseUrl: "https://agent.test" });
     const stubs = [
       {
         id: "milk",

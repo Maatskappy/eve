@@ -85,7 +85,7 @@ import {
   sessionCommandErrorResponse,
   deliveryResponse,
 } from "#eve-channel/support.js";
-import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
+import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
 
 export * from "#eve-channel/types.js";
 
@@ -96,7 +96,7 @@ const log = createLogger("eve.channel");
  * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session,
  * ID-addressed POST routes deliver follow-ups and controls, and GET streams a
  * session's NDJSON event feed). Every route
- * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
+ * runs {@link EveChannelConfig.auth} via {@link routeAuth} before dispatching.
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
@@ -116,7 +116,7 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
   return created;
 }
 
-export function eveChannel(input: EveChannelInput): EveChannel {
+export function eveChannel(input: EveChannelConfig): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
   return defineChannel<undefined, EveEventContext>({

@@ -393,7 +393,7 @@ describe("normalizeScheduleDefinition", () => {
       normalizeScheduleDefinition(
         {
           cron: "0 9 * * *",
-          markdown: "Send a digest.",
+          content: "Send a digest.",
           [field]: () => "user-approval",
         },
         "Expected the schedule config to match the public eve shape.",
@@ -418,11 +418,10 @@ describe("normalizeInstructionsDefinition", () => {
     ).toEqual({ content: "Tenant context.", role: "user" });
   });
 
-  it("normalizes the deprecated markdown shape as system content", () => {
-    expect(normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toEqual({
-      content: "Legacy.",
-      role: "system",
-    });
+  it("rejects the retired markdown alias", () => {
+    expect(() => normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toThrow(
+      'Unknown key "markdown"',
+    );
   });
 
   it.each([

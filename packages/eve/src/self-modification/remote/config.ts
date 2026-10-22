@@ -32,7 +32,7 @@ export interface GitHubCredentialProvider {
   resolve(request: GitHubCredentialRequest): Promise<string>;
 }
 
-/** Values accepted by the `eve/self-modification/remote` extension mount. */
+/** Values accepted by the `eve/extensions/self-modification/remote` extension mount. */
 export interface DeployedSelfModificationConfig {
   readonly source: {
     readonly git: {

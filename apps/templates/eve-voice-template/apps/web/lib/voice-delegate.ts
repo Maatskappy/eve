@@ -1,12 +1,12 @@
 import type { SessionStreamEvent } from "eve/client";
 import type { InteractionOption, InteractionRequest } from "eve/events";
-import type { UseEveAgentHelpers } from "eve/react";
+import type { UseEveAgentReturn } from "eve/react";
 import { VOICE_CLIENT_CONTEXT } from "./voice-config";
 
 /** GPT-Live-1 context channels: `thinking` is silent, `commentary` is spoken. */
 export type LiveContextChannel = "commentary" | "thinking";
 
-type Agent = Pick<UseEveAgentHelpers, "cancel" | "respond" | "send">;
+type Agent = Pick<UseEveAgentReturn, "cancel" | "respond" | "send">;
 type Prompt = InteractionRequest & { readonly interactionId: string };
 
 // GPT-Live-1 rejects context appends over 500 tokens.

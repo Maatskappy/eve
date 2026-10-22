@@ -8,7 +8,7 @@ import { shellQuote } from "#execution/sandbox/shell-quote.js";
 export interface WorkspaceSandbox {
   resolvePath(path: string): string;
   run(input: {
-    abortSignal?: AbortSignal;
+    signal?: AbortSignal;
     command: string;
   }): PromiseLike<{ exitCode: number; stderr: string; stdout: string }>;
 }
@@ -23,7 +23,7 @@ export async function sandboxRealPath(
   abortSignal?: AbortSignal,
 ): Promise<string> {
   const result = await sandbox.run({
-    abortSignal,
+    signal: abortSignal,
     command: `realpath -e -z -- ${shellQuote(path)}`,
   });
   if (result.exitCode !== 0) {

@@ -412,6 +412,17 @@ export async function writeExtensionCompatibilityManifest(
   );
 }
 
+/** Why this eve stopped supporting a capability epoch that an earlier release supported. */
+export function droppedExtensionCapabilityReason(
+  capability: string,
+  version: number,
+): string | undefined {
+  if (!Object.hasOwn(EXTENSION_CAPABILITY_CONTRACTS, capability)) return undefined;
+  const contract: ExtensionCapabilityContract =
+    EXTENSION_CAPABILITY_CONTRACTS[capability as ExtensionCapability];
+  return Object.hasOwn(contract.dropped, version) ? contract.dropped[version] : undefined;
+}
+
 /** Finds unknown or unsupported capability requirements without executing extension code. */
 export function findUnsupportedExtensionCapabilities(
   manifest: ExtensionCompatibilityManifest,

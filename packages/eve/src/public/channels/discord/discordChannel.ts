@@ -1,3 +1,5 @@
+import type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
+export type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
@@ -22,7 +24,6 @@ import {
   triggerDiscordTypingIndicator,
   type DiscordApiOptions,
   type DiscordApiResponse,
-  type DiscordCredentials,
   type DiscordMessageBody,
   type DiscordPostedMessage,
 } from "#public/channels/discord/api.js";
@@ -61,7 +62,6 @@ import {
   discordJsonBody,
   readMessageContent,
 } from "#public/channels/discord/responses.js";
-import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js";
 import {
   createDiscordGatewayRoute,
   type DiscordGatewayConfig,
@@ -131,10 +131,6 @@ export interface DiscordHitlPrompt {
 }
 
 /** Discord channel credentials. */
-export interface DiscordChannelCredentials extends DiscordCredentials {
-  /** Custom inbound webhook verifier. When supplied, eve skips the `DISCORD_PUBLIC_KEY` fallback and delegates verification to it. */
-  readonly webhookVerifier?: DiscordWebhookVerifier;
-}
 
 /** Target accepted by `receive(discord, { target })` for proactive sessions. */
 export interface DiscordReceiveTarget {
@@ -161,7 +157,6 @@ export type DiscordCommandResult = {
 } | null;
 
 /** Sync or async {@link DiscordCommandResult}. */
-export type DiscordCommandResultOrPromise = DiscordCommandResult | Promise<DiscordCommandResult>;
 
 /** Result of {@link DiscordChannelConfig.onAnswers}: `{ auth }` to accept the answer, or `null` to drop it. */
 export type DiscordAnswerResult = { readonly auth: SessionAuthContext | null } | null;
@@ -206,7 +201,7 @@ export interface DiscordChannelConfig {
   onCommand?(
     ctx: DiscordContext,
     interaction: DiscordCommandInteraction,
-  ): DiscordCommandResultOrPromise;
+  ): DiscordCommandResult | Promise<DiscordCommandResult>;
 
   /**
    * Authorizes a button press, select, or modal submission before it answers a
@@ -377,7 +372,9 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
         hasMessageAnchor = posted.id.length > 0;
       }
 
-      return from(discordContinuationToken(channelId, conversationId)).send(input.message, {
+      return from(
+        discordContinuationToken({ channelId: channelId, conversationId: conversationId }),
+      ).send(input.message, {
         auth: input.auth,
         state: {
           applicationId: null,
@@ -427,7 +424,9 @@ function buildDiscordHandle(input: {
       state.hasMessageAnchor = true;
     }
     if (state.channelId) {
-      input.session?.continuation?.alias(discordContinuationToken(state.channelId, posted.id));
+      input.session?.continuation?.alias(
+        discordContinuationToken({ channelId: state.channelId, conversationId: posted.id }),
+      );
     }
   }
 
@@ -779,7 +778,12 @@ async function dispatchCommand(input: {
 
   try {
     await input
-      .from(discordContinuationToken(input.interaction.channelId, input.interaction.id))
+      .from(
+        discordContinuationToken({
+          channelId: input.interaction.channelId,
+          conversationId: input.interaction.id,
+        }),
+      )
       .send(turnMessage, {
         auth: input.result.auth,
         context: [contextBlock, ...channelContext],
@@ -823,7 +827,10 @@ async function dispatchAnswers(input: {
   if (result === null) return;
   const { auth } = result;
   const source = input.from(
-    discordContinuationToken(input.interaction.channelId, input.conversationId),
+    discordContinuationToken({
+      channelId: input.interaction.channelId,
+      conversationId: input.conversationId,
+    }),
   );
   const response = await respondOrRetireInactivePrompt(
     () => source.respond(input.answers, { auth }),

@@ -17,7 +17,7 @@ const agentStreamReconnectPolicy = {
 } as const satisfies StreamReconnectPolicy;
 
 export interface AgentStreamFollowerOptions {
-  /** The session whose stream announced the agents; reads use its host and credentials. */
+  /** The session whose stream announced the agents; reads use its base URL and credentials. */
   readonly session: ClientSession;
   readonly getState: () => ConversationState;
   readonly onFollowing: (sessionId: string) => void;

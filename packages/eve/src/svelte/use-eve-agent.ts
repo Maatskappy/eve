@@ -5,15 +5,15 @@ import { createSubscriber } from "svelte/reactivity";
 import type { MessageContent } from "#shared/message-content.js";
 
 import {
-  attachEveAgentStore,
-  detachEveAgentStore,
-  EveAgentStore,
-  type EveAgentStoreCallbacks,
-  type EveAgentStoreSnapshot,
-  type EveAgentStoreStatus,
+  attachSessionStore,
+  detachSessionStore,
+  SessionStore,
+  type SessionStoreCallbacks,
+  type SessionStoreSnapshot,
+  type SessionStoreStatus,
   type PrepareSend,
-} from "#client/eve-agent-store.js";
-import { resolveEveAgentHost } from "#client/agent-host.js";
+} from "#client/session-store.js";
+import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
 import type {
   ClientAuth,
@@ -30,7 +30,7 @@ export type { PrepareSend };
  * attached session), or `"busy"` (a send is in flight, or a turn, task, or sign-in is pending).
  * Failures are reported separately in `error`.
  */
-export type UseEveAgentStatus = EveAgentStoreStatus;
+export type UseEveAgentStatus = SessionStoreStatus;
 
 /**
  * Immutable point-in-time view of an eve agent session: the conversation (`messages`,
@@ -38,7 +38,7 @@ export type UseEveAgentStatus = EveAgentStoreStatus;
  * `session` cursor, and `status`.
  * `useEveAgent` passes this snapshot to the `onFinish` callback.
  */
-export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
+export type UseEveAgentSnapshot = SessionStoreSnapshot;
 
 /**
  * Reactive return value from `useEveAgent`.
@@ -51,12 +51,12 @@ export interface UseEveAgentReturn {
   /** Request durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<Delivery>;
   /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
-  readonly previews: EveAgentStoreSnapshot["previews"];
-  readonly messages: EveAgentStoreSnapshot["messages"];
-  readonly agents: EveAgentStoreSnapshot["agents"];
+  readonly previews: SessionStoreSnapshot["previews"];
+  readonly messages: SessionStoreSnapshot["messages"];
+  readonly agents: SessionStoreSnapshot["agents"];
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: Error | undefined;
-  readonly view: EveAgentStoreSnapshot["view"];
+  readonly view: SessionStoreSnapshot["view"];
   /** Raw server events received during this session (authoritative stream). */
   readonly events: readonly SessionStreamEvent[];
   /** Resolves at the durable tail; the session stream keeps following afterward. */
@@ -91,16 +91,16 @@ export interface UseEveAgentReturn {
  * Configuration for a Svelte eve agent session.
  *
  * Read once when `useEveAgent` creates its store; create a new binding to
- * change host or session. To rotate credentials or headers without
+ * change base URL or session. To rotate credentials or headers without
  * recreating the binding, pass function values to `auth` or `headers`, which
  * the client resolves before each HTTP request.
  */
-export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
+export interface UseEveAgentOptions extends SessionStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
    * `agent: "support"` targets same-origin routes under
-   * `/eve/support/v1/...`. Do not combine with `host`.
+   * `/eve/support/v1/...`. Do not combine with `baseUrl`.
    */
   readonly agent?: string;
   /**
@@ -120,7 +120,7 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
    *
    * @default ""
    */
-  readonly host?: string;
+  readonly baseUrl?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly SessionStreamEvent[];
   /** Seed session identity and stream cursor for resuming a prior conversation. */
@@ -147,17 +147,17 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
   readonly resume?: boolean;
   /**
    * Pre-built client session to bind to. When omitted, the binding creates its
-   * own session from `auth`, `headers`, and `host`.
+   * own session from `auth`, `headers`, and `baseUrl`.
    */
   readonly session?: ClientSession;
 }
 
 class SvelteEveAgent implements UseEveAgentReturn {
-  #snapshot: EveAgentStoreSnapshot;
-  readonly #store: EveAgentStore;
+  #snapshot: SessionStoreSnapshot;
+  readonly #store: SessionStore;
   readonly #subscribe: () => void;
 
-  constructor(store: EveAgentStore) {
+  constructor(store: SessionStore) {
     this.#store = store;
     this.#snapshot = store.snapshot;
     this.#subscribe = createSubscriber((update) => {
@@ -174,20 +174,20 @@ class SvelteEveAgent implements UseEveAgentReturn {
     });
   }
 
-  get previews(): EveAgentStoreSnapshot["previews"] {
+  get previews(): SessionStoreSnapshot["previews"] {
     this.#subscribe();
     return this.#snapshot.previews;
   }
-  get messages(): EveAgentStoreSnapshot["messages"] {
+  get messages(): SessionStoreSnapshot["messages"] {
     this.#subscribe();
     return this.#snapshot.messages;
   }
-  get agents(): EveAgentStoreSnapshot["agents"] {
+  get agents(): SessionStoreSnapshot["agents"] {
     this.#subscribe();
     return this.#snapshot.agents;
   }
 
-  get view(): EveAgentStoreSnapshot["view"] {
+  get view(): SessionStoreSnapshot["view"] {
     this.#subscribe();
     return this.#snapshot.view;
   }
@@ -252,16 +252,16 @@ class SvelteEveAgent implements UseEveAgentReturn {
  *
  * The conversation's `messages`, `interactions`, `agents`, `view`, and `previews` are exposed
  * directly; derive anything else from `events`.
- * Configuration is read once; create a new binding to change host or session.
+ * Configuration is read once; create a new binding to change base URL or session.
  */
 export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
   }
-  const store = new EveAgentStore({
+  const store = new SessionStore({
     auth: options.auth,
     headers: options.headers,
-    host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
+    baseUrl: resolveEveAgentBaseUrl({ agent: options.agent, baseUrl: options.baseUrl }),
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
@@ -280,9 +280,9 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   });
   if ("window" in globalThis)
     onMount(() => {
-      attachEveAgentStore(store);
+      attachSessionStore(store);
       if (options.resume) void store.resume().catch(() => {});
-      return () => detachEveAgentStore(store);
+      return () => detachSessionStore(store);
     });
 
   return new SvelteEveAgent(store);

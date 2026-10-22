@@ -29,7 +29,7 @@ export default defineTool({
   async execute() {
     const host = process.env.WORKFLOW_LOCAL_BASE_URL;
     if (!host) throw new Error("The fixture's own server URL is unavailable.");
-    const client = new Client({ host });
+    const client = new Client({ baseUrl: host });
     const signal = AbortSignal.timeout(20_000);
     const { delivery } = await client.sessions.create({
       message: "Return a structured answer.",
@@ -51,7 +51,7 @@ export default defineTool({
     });
     const server = await startEveDev(app.appRoot);
     try {
-      const client = new Client({ host: server.url });
+      const client = new Client({ baseUrl: server.url });
       const { delivery } = await client.sessions.create({
         message: "Call call_child.",
         signal: AbortSignal.timeout(40_000),

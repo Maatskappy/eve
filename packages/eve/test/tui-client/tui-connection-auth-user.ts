@@ -137,7 +137,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   }
   const sessionId = startBody.sessionId;
 
-  const client = new Client({ host: target.baseUrl });
+  const client = new Client({ baseUrl: target.baseUrl });
   const session = client.sessions.attach(sessionId);
   const stream = session.stream();
 

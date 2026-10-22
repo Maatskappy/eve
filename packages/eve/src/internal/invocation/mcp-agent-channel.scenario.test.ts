@@ -58,10 +58,8 @@ export default mcpChannel({
 });
 `,
     "agent/instructions.md": "Follow the deterministic mock-model lifecycle.\n",
-    "agent/tools/ask_question.ts": `import { askQuestion } from "eve/tools/ask_question";
-
-export default askQuestion();
-`,
+    "agent/tools/ask_question.ts":
+      'import { askQuestion } from "eve/tools/ask_question";\n\nexport default askQuestion;\n',
   },
   dependencies: { "just-bash": "3.4.2" },
   installDependencies: true,

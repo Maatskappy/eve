@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Conversation } from "#client/conversation.js";
-import type { EveAgentStoreSnapshot } from "#client/eve-agent-store-state.js";
+import type { SessionStoreSnapshot } from "#client/session-store-state.js";
 import { stampTestEvent, testTurnFacts } from "#internal/testing/events.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
@@ -18,7 +18,7 @@ const OPTIONS = {
 function project(events: readonly SessionEvent[]) {
   const conversation = new Conversation();
   events.forEach((event, index) => conversation.observe(stampTestEvent(event, index)));
-  const snapshot: EveAgentStoreSnapshot = {
+  const snapshot: SessionStoreSnapshot = {
     ...conversation.state,
     view: conversation.view,
     error: undefined,

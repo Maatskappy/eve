@@ -152,7 +152,7 @@ void (async () => {
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    client: new Client({ host: "http://fake.invalid" }),
+    client: new Client({ baseUrl: "http://fake.invalid" }),
     screen,
     userInput: input,
     name: "TUI states smoke",

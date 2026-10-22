@@ -181,7 +181,7 @@ export class MicrosandboxVm {
     const flags = `${options.force === true ? "f" : ""}${options.recursive === true ? "r" : ""}`;
     const command = `${flags.length > 0 ? `rm -${flags}` : "rm"} -- ${shellQuote(options.path)}`;
     await this.runInternalCommand({
-      abortSignal: options.abortSignal,
+      abortSignal: options.signal,
       command,
       user: MICROSANDBOX_USER,
     });
@@ -235,7 +235,7 @@ export class MicrosandboxVm {
   }
 
   async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
-    if (options.abortSignal?.aborted) {
+    if (options.signal?.aborted) {
       throw new DOMException("The operation was aborted.", "AbortError");
     }
 
@@ -255,11 +255,11 @@ export class MicrosandboxVm {
         .user(MICROSANDBOX_USER),
     );
 
-    if (options.abortSignal !== undefined) {
+    if (options.signal !== undefined) {
       const kill = () => {
         void handle.kill().catch(() => {});
       };
-      options.abortSignal.addEventListener("abort", kill, { once: true });
+      options.signal.addEventListener("abort", kill, { once: true });
     }
 
     return adaptMicrosandboxExecToSandboxProcess(handle);

@@ -174,7 +174,7 @@ describe("compiler artifacts", () => {
     await writeFile(join(agentRoot, "instructions.md"), "Wait when requested.");
     await writeFile(
       join(agentRoot, "tools", "sleep.mjs"),
-      'import { sleep } from "eve/tools/sleep";\nexport default sleep();\n',
+      'import { sleep } from "eve/tools/sleep";\nexport default sleep;\n',
     );
 
     const result = await compileAgent({ startPath: appRoot });
@@ -243,7 +243,7 @@ describe("compiler artifacts", () => {
       instructions: [
         {
           definition: defineInstructions({
-            markdown: "You are a precise assistant.",
+            content: "You are a precise assistant.",
           }),
           sourceKind: "markdown",
           logicalPath: "instructions.md",

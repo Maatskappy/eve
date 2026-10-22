@@ -265,3 +265,7 @@ Changing sandbox source, preparation code, Dockerfile content, environment optio
 - [Subagents](/docs/subagents) explains delegation and sandbox ownership.
 - [Security model](/docs/concepts/security-model) describes the app-runtime and sandbox trust boundary.
 - [Vercel Sandbox](https://vercel.com/docs/sandbox) documents hosted sandbox behavior.
+
+For SDK-specific just-bash commands or filesystem factories, use `JustBashSandbox.environment()`
+from `eve/sandbox/just-bash`. `DefaultSandbox` keeps only `autoInstall` and `prepare` for its
+just-bash fallback, so importing the default provider does not require that optional SDK's types.

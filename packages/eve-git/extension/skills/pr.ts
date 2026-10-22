@@ -9,7 +9,7 @@ export default defineDynamic({
       const github = extension.config.github !== undefined;
       return defineSkill({
         description: prSkillDescription(github),
-        markdown: prSkillMarkdown(github),
+        content: prSkillMarkdown(github),
       });
     },
   },

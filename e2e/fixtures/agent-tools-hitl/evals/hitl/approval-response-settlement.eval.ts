@@ -1,5 +1,5 @@
 import { waitForStore } from "@eve-e2e/config/frontend";
-import { EveAgentStore, type EveToolPart } from "eve/client";
+import { SessionStore, type EveToolPart } from "eve/client";
 import { defineEval, type EveEvalContext } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -9,7 +9,7 @@ const ALICE = {
 };
 const TOOL = "authorized-change";
 
-type Store = EveAgentStore;
+type Store = SessionStore;
 
 function toolPart(store: Store, callId: string): EveToolPart {
   const parts = store.snapshot.messages.flatMap((message) => message.parts);
@@ -57,13 +57,13 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, interacti
     store.send({
       headers: ALICE,
       answers: [{ interactionId, optionId: "approve" }],
-      signal: t.signal,
+      signal: t.abortSignal,
     }),
   );
   await waitForStore(
     store,
     (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
-    t.signal,
+    t.abortSignal,
   );
   const events = store.snapshot.events.slice(start);
   const submitted = events.filter(
@@ -117,20 +117,20 @@ export default defineEval({
           `Alice prepares a change; after a refused answer and reload, finish with ${decision}.`,
         );
         const session = await t.session({ headers: ALICE });
-        const page = new EveAgentStore({
-          host,
+        const page = new SessionStore({
+          baseUrl: host,
           headers: ALICE,
           initialSession: session.state,
         });
         stores.push(page);
         const accepted = await settles(
           "Initial approval request",
-          page.send({ message: "Prepare an authorized change.", signal: t.signal }),
+          page.send({ message: "Prepare an authorized change.", signal: t.abortSignal }),
         );
         await waitForStore(
           page,
           (snapshot) => snapshot.view.deliveries[accepted.deliveryId]?.status === "settled",
-          t.signal,
+          t.abortSignal,
         );
         const parked = (await t.target.attach(session.id).watch().result()).expectOk();
         const approval = parked.session.requireInteraction({ toolName: TOOL });
@@ -144,8 +144,8 @@ export default defineEval({
         await t.require(retryCandidate !== firstCandidate, equals(true));
         page.newSession();
 
-        const reload = new EveAgentStore({
-          host,
+        const reload = new SessionStore({
+          baseUrl: host,
           headers: ALICE,
           initialSession: { sessionId: session.id, streamIndex: 0 },
         });
@@ -173,7 +173,7 @@ export default defineEval({
             headers:
               decision === "approve" ? { "x-eve-fixture-user": "e2e-approval-responder" } : ALICE,
             answers: [{ interactionId, optionId: decision }],
-            signal: t.signal,
+            signal: t.abortSignal,
           }),
         );
         await waitForStore(
@@ -181,7 +181,7 @@ export default defineEval({
           (snapshot) =>
             snapshot.status === "idle" &&
             snapshot.view.interactions[interactionId]?.status === "settled",
-          t.signal,
+          t.abortSignal,
         );
         await t.require(reload.snapshot.status, equals("idle"));
         await t.require(reload.snapshot.error, equals(undefined));

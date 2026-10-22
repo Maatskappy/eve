@@ -2652,6 +2652,38 @@ export default otelIntegration({
 \`\`\``,
     configure: `Create a write key in the Raindrop dashboard and expose it as \`RAINDROP_WRITE_KEY\`. Raindrop's Vercel AI SDK integration picks up the AI SDK spans eve emits on every turn. See the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
   },
+  oodle: {
+    logo: "oodle",
+    docsHref: "https://docs.oodle.ai/integrations/agent-observability/eve",
+    keywords: ["otel", "opentelemetry", "tracing", "observability", "agent observability", "otlp"],
+    install: `Add Oodle instrumentation from eve's registry. Oodle ingests OTLP directly:
+
+\`\`\`bash
+eve add instrumentation/oodle
+\`\`\``,
+
+    quickStart: `Create \`agent/instrumentation/oodle.ts\` and send traces to Oodle's OTLP endpoint with your API key and instance ID:
+
+\`\`\`ts
+// agent/instrumentation/oodle.ts
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: \`https://\${process.env.OODLE_OTLP_ENDPOINT}/v1/traces\`,
+    headers: {
+      "X-API-KEY": process.env.OODLE_API_KEY!,
+      "X-OODLE-INSTANCE": process.env.OODLE_INSTANCE!,
+    },
+  }),
+});
+\`\`\``,
+    configure: `Open Oodle’s eve integration tile to get your OTLP collector domain, API key, and instance ID. Set \`OODLE_OTLP_ENDPOINT\` to the domain only, without a scheme or path; the template adds \`https://\` and \`/v1/traces\`. Set \`OODLE_API_KEY\` and \`OODLE_INSTANCE\` to the supplied values. The registry template redacts inputs and outputs before export. See [Oodle’s eve guide](https://docs.oodle.ai/integrations/agent-observability/eve) for Oodle setup and the [OpenTelemetry guide](/docs/observability/otel) for trace topology and content policy.`,
+  },
   jaeger: {
     logo: "jaeger",
     docsHref: "/docs/observability/otel",

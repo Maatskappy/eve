@@ -1,11 +1,16 @@
-import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
+import {
+  owningSandboxDefinition,
+  type RuntimeRegisteredSandbox,
+  type RuntimeSandboxRegistry,
+} from "#runtime/sandbox/registry.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import type { SandboxProviderHandle, SandboxProviderRuntime } from "#shared/sandbox-provider.js";
 
 /*
- * Keyed tool sessions reuse a provider's own `start`, which must find the
- * session's sandbox again from the session id alone. Only eve's bindings that
- * do so opt in, and the marker stays internal so the public provider API is
+ * A keyed tool session has no end, so nothing ever runs its sandbox's
+ * session-end cleanup. Only eve's bindings whose kept sandboxes stay bounded
+ * opt in: Vercel's saved filesystems expire, and just-bash keeps only files on
+ * the local disk. The marker stays internal so the public provider API is
  * unchanged.
  */
 
@@ -22,7 +27,7 @@ export interface ToolSessionSandboxSupport {
 
 const supported = new WeakMap<object, ToolSessionSandboxSupport>();
 
-/** Marks a binding whose `start` reopens a session's sandbox by session id. */
+/** Marks a binding that can keep a tool-session sandbox between calls. */
 export function withToolSessionSandboxes<Implementation extends object>(
   implementation: Implementation,
   support: ToolSessionSandboxSupport = {},
@@ -62,8 +67,9 @@ export async function releaseToolSessionHandle(
 }
 
 function registeredProvider(registry: RuntimeSandboxRegistry): SandboxProviderRuntime | undefined {
-  const registered = registry.sandbox;
-  const definition = registered?.inheritance?.definition ?? registered?.definition;
+  // Test runtimes without a sandbox cast a null registry.
+  const registered = registry.sandbox as RuntimeRegisteredSandbox | null | undefined;
+  const definition = registered ? owningSandboxDefinition(registered) : undefined;
   if (definition?.kind !== "independent") return undefined;
   return getSandboxEnvironmentRuntime(definition.environment);
 }

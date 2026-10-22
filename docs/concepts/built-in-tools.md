@@ -291,7 +291,25 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
+To let the model choose an AI Gateway model for each root-copy task, export `agentWithModel` from the same slot:
+
+```ts title="agent/tools/agent.ts"
+export { agentWithModel as default } from "eve/tools/agent";
+```
+
+This is a separate workflow tool that calls `ctx.agent("agent", { model })`. The default `agent` tool remains unchanged and does not gain a `model` parameter. The opt-in definition accepts:
+
+```ts
+{
+  message: string;
+  model: string; // AI Gateway model id for the child session
+  taskId?: string;
+}
+```
+
+It otherwise has the default tool's task behavior: a call returns a receipt, the result arrives later, and `taskId` continues the same root-copy session. The selected model applies to every turn in that session. A continuation must repeat the original model; start a new task to use another one. Because the parent model controls this value, use this tool only when it may choose among every model your AI Gateway credentials and policies allow.
+
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the default definition above to restore direct root-copy delegation, export `agentWithModel` to expose model selection, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -352,7 +370,7 @@ import { askQuestion } from "eve/tools/ask_question";
 export default askQuestion();
 ```
 
-`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` withdraws its question, resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
+`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the first open request and the message matches an option or the question allows free text; see [Several requests at once](/docs/human-in-the-loop#several-requests-at-once). A steering message that doesn't answer it withdraws the question: `ask_question` resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a [markdown schedule](/docs/schedules#markdown-form-fire-and-forget), the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
 
 ### `glob`
 

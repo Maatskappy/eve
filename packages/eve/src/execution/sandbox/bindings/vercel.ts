@@ -16,6 +16,7 @@ import type {
   SandboxSession,
   SandboxSpawnOptions,
   SandboxWriteFileOptions,
+  SandboxWriteFilesOptions,
 } from "#shared/sandbox-session.js";
 import {
   isSandboxPreparedArtifactRecord,
@@ -27,6 +28,11 @@ import {
   type SandboxProviderSessionContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import {
+  invalidPreparedSandboxArtifactError,
+  invalidSandboxSessionStateError,
+} from "#shared/sandbox-recorded-data-error.js";
+import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import type {
   VercelSandboxMountOptions,
   VercelSandboxRuntimeOptions,
@@ -61,6 +67,7 @@ import {
   isVercelSnapshotCreated,
 } from "#execution/sandbox/bindings/vercel-lookup.js";
 import {
+  deleteNamedVercelSandbox,
   deleteUnusableVercelSandbox,
   deleteVercelSandbox,
   stopVercelSandbox,
@@ -122,6 +129,7 @@ export function createVercelSandbox(
     (async () => await import("#compiled/@vercel/sandbox/index.js"));
   const createOptions: ResolvedVercelCreateOptions = {
     ...input.createOptions,
+    env: { ...SANDBOX_AGENT_ENV, ...input.createOptions?.env },
     timeout: input.createOptions?.timeout ?? DEFAULT_SANDBOX_TIMEOUT_MS,
   };
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
@@ -135,7 +143,11 @@ export function createVercelSandbox(
     const artifact = requirePreparedVercelTemplate(artifactValue);
     const { mounts, ...runtimeOptions } = options ?? {};
     const toolSession = isToolSessionId(context.session.id);
-    const authoredCreateOptions = { ...createOptions, ...runtimeOptions };
+    const authoredCreateOptions = {
+      ...createOptions,
+      ...runtimeOptions,
+      env: { ...SANDBOX_AGENT_ENV, ...(runtimeOptions.env ?? createOptions.env) },
+    };
     const sessionCreateOptions = toolSession
       ? withToolSessionRetention(authoredCreateOptions)
       : authoredCreateOptions;
@@ -190,6 +202,7 @@ export function createVercelSandbox(
       if (isVercelSnapshotUnavailableError(error) && artifact.snapshotId !== undefined) {
         throw new SandboxTemplateNotProvisionedError({
           providerName: "vercel",
+          reason: "The Vercel Sandbox snapshot expired or was deleted.",
           templateKey: artifact.snapshotId,
         });
       }
@@ -207,6 +220,13 @@ export function createVercelSandbox(
   }
 
   const implementation: ReturnType<typeof createVercelSandbox> = {
+    async onSessionEnd(context, state) {
+      await deleteNamedVercelSandbox({
+        createOptions,
+        loadDeleteSandboxModule,
+        sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
+      });
+    },
     async prepare(context) {
       const seedFiles = providerResourceTargetFiles(context.resources);
       if (
@@ -252,13 +272,15 @@ export function createVercelSandbox(
         sandboxName: state.sandboxName,
       });
       if (sandbox === null) {
-        throw new Error(`Vercel sandbox session "${state.sandboxName}" no longer exists.`);
+        throw new SandboxSessionGoneError(
+          `Vercel sandbox session "${state.sandboxName}" no longer exists.`,
+        );
       }
       await ensureVercelSandboxBaseRuntime(sandbox);
       return createHandle({ createOptions, loadDeleteSandboxModule, sandbox });
     },
     async start(context, options, artifact) {
-      const sandboxName = vercelSessionName(context.session.id, options, artifact, createOptions);
+      const sandboxName = vercelSessionName(context.session.id);
       const handle = await openSession(context, options, artifact, sandboxName);
       return {
         handle,
@@ -266,25 +288,18 @@ export function createVercelSandbox(
       };
     },
   };
-  // `start` finds a session's sandbox by name, so keyed tool sessions can reuse it.
+  // Saved filesystems expire, so a keyed tool session's sandbox is bounded.
   // A handle is only an SDK client, so a call that ends has nothing to free.
   return withToolSessionSandboxes(implementation);
 }
 
-function vercelSessionName(
-  sessionId: string,
-  options: Readonly<VercelSandboxRuntimeOptions> | undefined,
-  artifactValue: SandboxPreparedArtifact,
-  createOptions: VercelCreateOptions,
-): string {
-  const artifact = requirePreparedVercelTemplate(artifactValue);
-  return `eve-sbx-vercel-${createSandboxProviderIdentity({
-    artifact,
-    createOptions: vercelIdentityOptions(createOptions),
-    options: vercelIdentityOptions(options),
-    sessionId,
-    version: 1,
-  }).slice(0, 32)}`;
+/**
+ * The session's sandbox name. Sandbox names are unique within a Vercel
+ * project, so the session id alone keeps it stable across deployments and
+ * open options; those apply only when the sandbox is created.
+ */
+function vercelSessionName(sessionId: string): string {
+  return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;
 }
 
 function vercelIdentityOptions(options: object | undefined): object | undefined {
@@ -299,7 +314,7 @@ function requireVercelSessionState(state: SandboxPreparedArtifact): VercelSandbo
     state.version !== 3 ||
     typeof state.sandboxName !== "string"
   ) {
-    throw new Error("Invalid Vercel sandbox session state.");
+    throw invalidSandboxSessionStateError("Vercel sandbox");
   }
   return { sandboxName: state.sandboxName, version: 3 };
 }
@@ -311,7 +326,7 @@ function requirePreparedVercelTemplate(
     !isSandboxPreparedArtifactRecord(artifact) ||
     (artifact.snapshotId !== undefined && typeof artifact.snapshotId !== "string")
   ) {
-    throw new Error("Invalid prepared Vercel sandbox artifact.");
+    throw invalidPreparedSandboxArtifactError("Vercel sandbox");
   }
   return artifact.snapshotId === undefined ? {} : { snapshotId: artifact.snapshotId };
 }
@@ -397,7 +412,7 @@ async function prepareTemplateSnapshot(
     await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
 
     const templateSession = buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox, input.createOptions.env),
+      createVercelInternalSandboxSession(sandbox),
       createVercelNetworkPolicySetter(sandbox),
     );
 
@@ -600,7 +615,7 @@ function createHandle(input: {
   return {
     sandbox: {
       ...buildSandboxSession(
-        createVercelInternalSandboxSession(sandbox, input.createOptions.env),
+        createVercelInternalSandboxSession(sandbox),
         createVercelNetworkPolicySetter(sandbox),
       ),
       name: sandbox.name,
@@ -626,11 +641,7 @@ function createHandle(input: {
   };
 }
 
-function createVercelInternalSandboxSession(
-  sandbox: VercelSandbox,
-  environmentEnv: Readonly<Record<string, string>> | undefined,
-): InternalSandboxSession {
-  const baseEnv = { ...SANDBOX_AGENT_ENV, ...environmentEnv };
+function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSandboxSession {
   return {
     resolvePath: resolveVercelSandboxPath,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
@@ -639,7 +650,7 @@ function createVercelInternalSandboxSession(
         cmd: "bash",
         cwd: options.workingDirectory ?? WORKSPACE_ROOT,
         detached: true,
-        env: { ...baseEnv, ...options.env },
+        env: options.env,
         signal: options.abortSignal,
       });
       return adaptMultiplexedCommandToSandboxProcess({
@@ -651,9 +662,17 @@ function createVercelInternalSandboxSession(
       return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
     },
     async writeFile(options: SandboxWriteFileOptions) {
-      const bytes = await streamToBuffer(options.content);
-      const path = await resolveVercelWritePath(sandbox, options.path, options.abortSignal);
-      await sandbox.writeFiles([{ content: bytes, path }], { signal: options.abortSignal });
+      const files = [{ content: await streamToBuffer(options.content), path: options.path }];
+      await sandbox.writeFiles(await resolveVercelWriteFiles(sandbox, files, options.abortSignal), {
+        signal: options.abortSignal,
+      });
+    },
+    async writeFiles(options: SandboxWriteFilesOptions) {
+      if (options.files.length === 0) return;
+      await sandbox.writeFiles(
+        await resolveVercelWriteFiles(sandbox, options.files, options.abortSignal),
+        { signal: options.abortSignal },
+      );
     },
     async removePath(options: SandboxRemovePathOptions) {
       await sandbox.fs.rm(options.path, {
@@ -694,21 +713,39 @@ function resolveVercelSandboxPath(path: string): string {
   return `${WORKSPACE_ROOT}/${path}`;
 }
 
-async function resolveVercelWritePath(
+/**
+ * The SDK writes by unpacking a tar archive, which replaces a symlinked
+ * destination instead of writing through it. Resolve every path first, with
+ * one `realpath` call. `-z` ends each path with NUL, so names with whitespace
+ * or newlines come back intact.
+ */
+async function resolveVercelWriteFiles(
   sandbox: VercelSandbox,
-  path: string,
+  files: SandboxWriteFilesOptions["files"],
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<{ content: Uint8Array; path: string }[]> {
   const result = await sandbox.runCommand({
-    args: ["-m", "--", path],
+    args: ["-m", "-z", "--", ...files.map((file) => file.path)],
     cmd: "realpath",
     signal,
   });
-  const resolved = (await result.stdout()).trim();
-  if (result.exitCode !== 0 || !resolved.startsWith("/") || resolved.includes("\n")) {
-    throw new Error(`Failed to resolve Vercel Sandbox write path: ${path}`);
+  if (result.exitCode !== 0) {
+    const stderr = (await result.stderr()).trim();
+    throw new Error(`Failed to resolve Vercel Sandbox write paths with realpath: ${stderr}`);
   }
-  return resolved;
+  const paths = (await result.stdout()).split("\0").slice(0, -1);
+  if (paths.length !== files.length) {
+    throw new Error(
+      `Failed to resolve Vercel Sandbox write paths: realpath printed ${paths.length} paths for ${files.length} files.`,
+    );
+  }
+  return files.map((file, index) => {
+    const path = paths[index];
+    if (path === undefined || !path.startsWith("/")) {
+      throw new Error(`Failed to resolve Vercel Sandbox write path: ${file.path}`);
+    }
+    return { content: file.content, path };
+  });
 }
 
 /**

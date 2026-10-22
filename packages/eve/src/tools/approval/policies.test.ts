@@ -10,7 +10,6 @@ import { readDurableDynamicCallback } from "#tools/durable-callbacks.js";
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
   return {
     abortSignal: new AbortController().signal,
-    approvedTools: new Set(),
     callId: "call-1",
     getSandbox: vi.fn(),
     session: {
@@ -30,12 +29,15 @@ describe("dynamic tool approval helpers", () => {
   it.each([
     ["always", always(), "user-approval"],
     ["never", never(), "not-applicable"],
+    ["once", once(), { type: "user-approval" }],
   ] as const)("gives %s a stable replay descriptor", async (_name, policy, expected) => {
     const reference = readDurableDynamicCallback(policy);
     expect(reference?.callback).toBeTypeOf("function");
     expect(reference?.closure).toEqual({});
 
-    expect(await reference!.callback(reference!.closure, {} as never)).toBe(expected);
+    expect(await reference!.callback(reference!.closure, approvalContext() as never)).toEqual(
+      expected,
+    );
   });
 
   it.each([
@@ -86,12 +88,47 @@ describe("dynamic tool approval helpers", () => {
     );
   });
 
+  it("replays automatic review with the saved model and criteria", async () => {
+    decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
+    const original = readDurableDynamicCallback(
+      auto({
+        model: "original-reviewer",
+        instructions: "Review Alice's notes.",
+        criteria: { clear: "Within Alice's policy." },
+      }),
+    )!;
+    const rebound = readDurableDynamicCallback(
+      auto({
+        model: "current-reviewer",
+        instructions: "Review Bob's notes.",
+        criteria: { clear: "Within Bob's policy." },
+      }),
+    )!;
+    await rebound.callback(
+      JSON.parse(JSON.stringify(original.closure)),
+      approvalContext() as never,
+    );
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "original-reviewer",
+        questions: {
+          permission: expect.objectContaining({
+            instructions: "Review Alice's notes.",
+            criteria: expect.objectContaining({ clear: "Within Alice's policy." }),
+          }),
+        },
+      }),
+    );
+  });
+
   it("accepts another decision model", async () => {
     decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
     const model = { modelId: "custom", provider: "test", specificationVersion: "v4" } as never;
     const context = approvalContext();
 
-    await expect(auto({ model })(context)).resolves.toBe("approved");
+    const policy = auto({ model });
+    expect(readDurableDynamicCallback(policy)).toBeUndefined();
+    await expect(policy(context)).resolves.toBe("approved");
     expect(decide).toHaveBeenCalledWith(expect.objectContaining({ model }));
   });
 
@@ -125,20 +162,10 @@ describe("dynamic tool approval helpers", () => {
     await expect(auto()(context)).rejects.toBe(reason);
   });
 
-  it("replays once against the current approval context", async () => {
-    const reference = readDurableDynamicCallback(once())!;
-
-    expect(
-      await reference.callback(reference.closure, {
-        approvedTools: new Set(),
-        toolName: "guarded",
-      } as never),
-    ).toBe("user-approval");
-    expect(
-      await reference.callback(reference.closure, {
-        approvedTools: new Set(["guarded"]),
-        toolName: "guarded",
-      } as never),
-    ).toBe("not-applicable");
+  it("rejects removed scoped options instead of broadening approval", () => {
+    expect(() => {
+      // @ts-expect-error once() remembers the tool, not a selected input scope.
+      once({ key: (input: { environment: string }) => input.environment });
+    }).toThrow("once() does not accept options");
   });
 });

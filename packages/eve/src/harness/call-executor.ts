@@ -1,3 +1,4 @@
+import type { ApprovalGrant, OnceApproval } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
@@ -75,6 +76,8 @@ export interface ToolSignIn {
 
 /** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
+  readonly once?: OnceApproval;
+  readonly clearedBy?: ClearedBy;
   readonly settled: readonly CallResult[];
   /** What `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
@@ -104,7 +107,7 @@ export async function executeToolCall(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
     readonly abortSignal: AbortSignal | undefined;
-    readonly approvedTools?: ReadonlySet<string>;
+    readonly approvalGrants?: readonly ApprovalGrant[];
     readonly definition: RunnableTool;
     readonly messages: readonly ModelMessage[];
     readonly position: CallPosition;
@@ -166,25 +169,22 @@ export async function executeToolCall(
         toolResults,
       };
     }
-    const decision: {
-      readonly awaitsPerson?: true;
-      readonly denied: boolean;
-      readonly reason?: string;
-    } =
+    const decision =
       approval === "recheck"
         ? await recheckApprovedCall(definition, {
             abortSignal: input.abortSignal,
             callId,
             input: args,
-            approvedTools: input.approvedTools,
+            approvalGrants: input.approvalGrants,
           })
         : await decideApproval(definition, {
             abortSignal: input.abortSignal,
             callId,
             input: args,
-            approvedTools: input.approvedTools,
+            approvalGrants: input.approvalGrants,
           });
-    if (decision.awaitsPerson === true) return { awaitsApproval: true, settled, toolResults };
+    if (decision.awaitsPerson === true)
+      return { awaitsApproval: true, once: decision.once, settled, toolResults };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
@@ -193,6 +193,7 @@ export async function executeToolCall(
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
+    const clearedBy = input.clearedBy ?? decision.clearedBy;
     let output: unknown;
     let failed = false;
     let failure = "";
@@ -213,12 +214,7 @@ export async function executeToolCall(
           started = true;
           // A call a person approved starts when it runs, after the recheck: the approval cleared
           // it, and the policy could still have refused it.
-          await input.publish(
-            callStarted(
-              callId,
-              input.clearedBy === undefined ? {} : { clearedBy: input.clearedBy },
-            ),
-          );
+          await input.publish(callStarted(callId, clearedBy === undefined ? {} : { clearedBy }));
           const executed = invokeTool(definition, args, {
             ...(input.responder !== undefined && { approval: { responder: input.responder } }),
             abortSignal: input.abortSignal,
@@ -466,6 +462,7 @@ export interface InlineCallResults {
   readonly approvals: readonly ApprovalAsk[];
   /** The calls that stopped for a sign-in. */
   readonly signIns: readonly ToolSignIn[];
+  readonly policyApprovals?: Readonly<Record<string, ClearedBy>>;
 }
 
 /** Nothing ran: the response ended early, or made no local calls. */
@@ -487,7 +484,7 @@ export async function executeInlineCalls(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   /** The step's entries: each call already names the entry it runs. */
   readonly tools: HarnessToolLookup;
-  readonly approvedTools: ReadonlySet<string>;
+  readonly approvalGrants: readonly ApprovalGrant[];
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
   readonly position: CallPosition;
@@ -522,7 +519,9 @@ export async function executeInlineCalls(input: {
             ? await executeToolCall(action, { ...input, definition }, "evaluate")
             : await decideDeferredCall(action, definition, input);
           const approval =
-            executed.awaitsApproval === true ? approvalRequest(call, definition) : undefined;
+            executed.awaitsApproval === true
+              ? { ...approvalRequest(call, definition), once: executed.once }
+              : undefined;
           return { call, executed, approval };
         } catch (error) {
           throwIfTurnAborted(input.abortSignal);
@@ -537,6 +536,11 @@ export async function executeInlineCalls(input: {
   if (rejected?.status === "rejected") throw rejected.reason;
   const executed = finished.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
   return {
+    policyApprovals: Object.fromEntries(
+      executed.flatMap(({ call, executed }) =>
+        executed.clearedBy === undefined ? [] : [[call.toolCallId, executed.clearedBy]],
+      ),
+    ),
     approvals: executed.flatMap(({ approval }) => (approval === undefined ? [] : [approval])),
     parts: executed.flatMap(({ executed }) => executed.settled.map((result) => result.part)),
     signIns: executed.flatMap(({ executed }) =>
@@ -552,7 +556,7 @@ async function decideDeferredCall(
   definition: HarnessToolDefinition,
   input: {
     readonly abortSignal: AbortSignal | undefined;
-    readonly approvedTools: ReadonlySet<string>;
+    readonly approvalGrants: readonly ApprovalGrant[];
     readonly position: CallPosition;
     readonly publish: HandleEventFn;
   },
@@ -560,12 +564,18 @@ async function decideDeferredCall(
   if (definition.approval === undefined) return { settled: [], toolResults: [] };
   const decision = await decideApproval(definition, {
     abortSignal: input.abortSignal,
-    approvedTools: input.approvedTools,
+    approvalGrants: input.approvalGrants,
     callId: call.callId,
     input: call.input,
   });
-  if (decision.awaitsPerson === true) return { awaitsApproval: true, settled: [], toolResults: [] };
-  if (!decision.denied) return { settled: [], toolResults: [] };
+  if (decision.awaitsPerson === true)
+    return { awaitsApproval: true, once: decision.once, settled: [], toolResults: [] };
+  if (!decision.denied)
+    return {
+      settled: [],
+      toolResults: [],
+      clearedBy: decision.clearedBy,
+    };
   return await publishDenial(call, {
     approval: "evaluate",
     position: input.position,

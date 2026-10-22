@@ -1,6 +1,6 @@
 import { asSchema, type JSONSchema7, jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -20,7 +20,7 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
 import {
-  approvalStatus,
+  decideApproval,
   buildToolSet,
   buildToolSetWithProviderTools,
   invokeTool,
@@ -29,7 +29,7 @@ import {
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import type { ApprovalContext } from "#approval/definition.js";
+import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#tools/provided/bash.js";
@@ -58,7 +58,7 @@ async function resolveApproval(
   session?: Session,
   options: {
     readonly abortSignal?: AbortSignal;
-    readonly approvedTools?: ReadonlySet<string>;
+    readonly approvalGrants?: readonly import("#approval/evaluation.js").ApprovalGrant[];
   } = {},
 ): Promise<unknown> {
   const definition = tools.get(toolName);
@@ -71,9 +71,9 @@ async function resolveApproval(
   const ctx = new ContextContainer();
   ctx.set(SessionKey, activeSession);
   return contextStorage.run(ctx, () =>
-    approvalStatus(definition, {
+    decideApproval(definition, {
       abortSignal: options.abortSignal,
-      approvedTools: options.approvedTools,
+      approvalGrants: options.approvalGrants,
       callId: "call_1",
       input,
     }),
@@ -631,7 +631,7 @@ describe("buildToolSet", () => {
       ],
     ]);
 
-    await expect(resolveApproval(tools, "dangerous_tool", {})).resolves.toBeUndefined();
+    await expect(resolveApproval(tools, "dangerous_tool", {})).resolves.toEqual({ denied: false });
   });
 
   it("toModelOutput wrapper passes only output to the authored function", async () => {
@@ -838,8 +838,11 @@ describe("buildToolSet", () => {
         ],
       ]);
 
-      await expect(resolveApproval(tools, "dangerous", {})).resolves.toBe("user-approval");
-      await expect(resolveApproval(tools, "safe", {})).resolves.toBe("not-applicable");
+      await expect(resolveApproval(tools, "dangerous", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
+      await expect(resolveApproval(tools, "safe", {})).resolves.toEqual({ denied: false });
     });
 
     it("preserves async AI SDK 7 approval statuses", async () => {
@@ -857,7 +860,7 @@ describe("buildToolSet", () => {
       ]);
 
       await expect(resolveApproval(tools, "delete_account", {})).resolves.toEqual({
-        type: "denied",
+        denied: true,
         reason: "Account is protected.",
       });
     });
@@ -875,7 +878,10 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-      await expect(resolveApproval(tools, "bash", {})).resolves.toBe("user-approval");
+      await expect(resolveApproval(tools, "bash", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
     });
 
     it("never() skips approval", async () => {
@@ -891,7 +897,7 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-      await expect(resolveApproval(tools, "bash", {})).resolves.toBe("not-applicable");
+      await expect(resolveApproval(tools, "bash", {})).resolves.toEqual({ denied: false });
     });
 
     it("once() requires approval when tool not yet approved", async () => {
@@ -907,11 +913,15 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-      await expect(resolveApproval(tools, "bash", {})).resolves.toBe("user-approval");
+      await expect(resolveApproval(tools, "bash", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
     });
 
-    it("once() skips approval when tool already approved", async () => {
-      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+    const grants = [{ toolName: "bash", interactionId: "approval-1" }];
+    const bashWith = (approval: ApprovalPolicy): HarnessToolMap =>
+      new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -919,14 +929,94 @@ describe("buildToolSet", () => {
             execute: async () => "ok",
             inputSchema: jsonSchema({}),
             name: "bash",
-            approval: once(),
+            approval,
           },
         ],
       ]);
+    const perTool = once();
 
+    it.each([
+      ["returned directly", perTool],
+      ["returned through a context spread", (context: ApprovalContext) => perTool({ ...context })],
+    ] as const)("credits the grant when once() is %s", async (_name, approval) => {
       await expect(
-        resolveApproval(tools, "bash", {}, undefined, { approvedTools: new Set(["bash"]) }),
-      ).resolves.toBe("not-applicable");
+        resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants }),
+      ).resolves.toEqual({ denied: false, clearedBy: { grant: { interactionId: "approval-1" } } });
+      await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toEqual({
+        denied: false,
+        awaitsPerson: true,
+        once: { grantable: true },
+      });
+    });
+
+    it("credits once() imported from a separate copy of eve's modules", async () => {
+      // Bundled authored tools can load eve/tools/approval apart from the harness's copy.
+      vi.resetModules();
+      const copy = await import("#tools/approval/policies.js");
+      vi.resetModules();
+      await expect(
+        resolveApproval(bashWith(copy.once()), "bash", {}, undefined, { approvalGrants: grants }),
+      ).resolves.toEqual({ denied: false, clearedBy: { grant: { interactionId: "approval-1" } } });
+      await expect(resolveApproval(bashWith(copy.once()), "bash", {})).resolves.toEqual({
+        denied: false,
+        awaitsPerson: true,
+        once: { grantable: true },
+      });
+    });
+
+    it.each([
+      ["not-applicable", "not-applicable"],
+      ["an equal status object", { type: "not-applicable" }],
+      ["a boolean", false],
+    ] as const)(
+      "does not credit a grant when a policy consults once() but returns %s",
+      async (_name, result) => {
+        const approval = async (context: ApprovalContext) => {
+          await perTool(context);
+          return result;
+        };
+        await expect(
+          resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants }),
+        ).resolves.toEqual({ denied: false });
+      },
+    );
+
+    it.each([
+      ["user-approval", "user-approval"],
+      ["an equal status object", { type: "user-approval" }],
+    ] as const)(
+      "does not offer a once() grant when a policy consults once() but returns %s",
+      async (_name, result) => {
+        const approval = async (context: ApprovalContext) => {
+          await perTool(context);
+          return result;
+        };
+        await expect(resolveApproval(bashWith(approval), "bash", {})).resolves.toEqual({
+          denied: false,
+          awaitsPerson: true,
+        });
+      },
+    );
+
+    it("gives policies a frozen evaluation without leaking grants into JSON", async () => {
+      let seen: ApprovalContext | undefined;
+      const approval = (context: ApprovalContext) => {
+        seen = context;
+        return perTool(context);
+      };
+      await resolveApproval(bashWith(approval), "bash", {}, undefined, { approvalGrants: grants });
+      const evaluation = Reflect.get(seen!, Symbol.for("eve.approval-evaluation"));
+      expect(Object.isFrozen(evaluation)).toBe(true);
+      expect(JSON.stringify(seen)).not.toContain("approval-1");
+    });
+
+    it("credits only the grant the harness was given, not a renamed policy context", async () => {
+      const approval = (context: ApprovalContext) => perTool({ ...context, toolName: "other" });
+      await expect(
+        resolveApproval(bashWith(approval), "bash", {}, undefined, {
+          approvalGrants: [{ toolName: "other", interactionId: "approval-1" }],
+        }),
+      ).resolves.toEqual({ denied: false, awaitsPerson: true, once: { grantable: true } });
     });
 
     it("tool without approval defaults to false when another tool has an override", async () => {
@@ -951,8 +1041,11 @@ describe("buildToolSet", () => {
           },
         ],
       ]);
-      await expect(resolveApproval(tools, "bash", {})).resolves.toBe("user-approval");
-      await expect(resolveApproval(tools, "write_file", {})).resolves.toBeUndefined();
+      await expect(resolveApproval(tools, "bash", {})).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
+      await expect(resolveApproval(tools, "write_file", {})).resolves.toEqual({ denied: false });
     });
 
     it("passes toolInput from the AI SDK into approval", async () => {
@@ -1070,9 +1163,10 @@ describe("buildToolSet", () => {
         turn: { id: "turn_current", sequence: 2 },
       };
 
-      await expect(resolveApproval(tools, "delete_project", {}, session)).resolves.toBe(
-        "user-approval",
-      );
+      await expect(resolveApproval(tools, "delete_project", {}, session)).resolves.toMatchObject({
+        denied: false,
+        awaitsPerson: true,
+      });
 
       expect(capturedCtx?.session).toEqual({
         auth: session.auth,
@@ -1121,53 +1215,12 @@ describe("buildToolSet", () => {
         turn: { id: "human-turn", sequence: 1 },
       };
 
-      await expect(resolveApproval(tools, "refund", {}, scheduleSession)).resolves.toBe(
-        "not-applicable",
-      );
-      await expect(resolveApproval(tools, "refund", {}, humanResumedSession)).resolves.toBe(
-        "user-approval",
-      );
-    });
-
-    it("input-aware approval skips when compound key is in approvedTools", async () => {
-      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-        [
-          "vercel__list_projects",
-          {
-            description: "List projects in the team.",
-            execute: async () => "ok",
-            inputSchema: jsonSchema({}),
-            name: "vercel__list_projects",
-            approval: ({ approvedTools, toolName, toolInput }) => {
-              if (approvedTools.has(toolName)) return "not-applicable";
-              const team = (toolInput as { teamId?: string } | undefined)?.teamId;
-              if (team === undefined) return "user-approval";
-              return approvedTools.has(`${toolName}:${team}`) ? "not-applicable" : "user-approval";
-            },
-          },
-        ],
-      ]);
-
-      const approvedTools = new Set(["vercel__list_projects:team_abc"]);
+      await expect(resolveApproval(tools, "refund", {}, scheduleSession)).resolves.toMatchObject({
+        denied: false,
+      });
       await expect(
-        resolveApproval(
-          tools,
-          "vercel__list_projects",
-          { teamId: "team_abc", limit: 10 },
-          undefined,
-          { approvedTools },
-        ),
-      ).resolves.toBe("not-applicable");
-
-      await expect(
-        resolveApproval(
-          tools,
-          "vercel__list_projects",
-          { teamId: "team_xyz", limit: 10 },
-          undefined,
-          { approvedTools },
-        ),
-      ).resolves.toBe("user-approval");
+        resolveApproval(tools, "refund", {}, humanResumedSession),
+      ).resolves.toMatchObject({ denied: false, awaitsPerson: true });
     });
   });
 });

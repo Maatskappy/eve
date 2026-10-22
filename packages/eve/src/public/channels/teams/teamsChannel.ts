@@ -1,6 +1,5 @@
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-import { defaultDeliverResult } from "#channel/adapter.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
@@ -302,7 +301,6 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     TeamsReceiveTarget,
     TeamsInstrumentationMetadata
   >({
-    kindHint: "teams",
     turnPolicy: config.turnPolicy,
     uploadPolicy: config.files?.uploadPolicy,
     state: initialTeamsState(),
@@ -322,7 +320,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     },
 
     deliver(payload, channel) {
-      const state = payload.state as Partial<TeamsChannelState> | undefined;
+      const state = payload.state;
       const cards = state?.pendingPromptCards;
       if (cards !== undefined) {
         channel.state.pendingPromptCards = {
@@ -337,7 +335,6 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
           ...responders,
         };
       }
-      return defaultDeliverResult(payload);
     },
 
     routes: [

@@ -166,7 +166,7 @@ describe("self-modification integration setup", () => {
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('case "channel:slack"'),
     );
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
+    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "channel:eve"'));
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('import { getToken } from "@vercel/connect"'),
     );
@@ -197,7 +197,7 @@ describe("self-modification integration setup", () => {
     await applySelfModificationSetup(plan, ctx.apply, effects);
 
     expect(ctx.resolveVercelProject).toHaveBeenCalledWith("self-modification");
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
+    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "channel:eve"'));
   });
 
   it("registers the production setup separately from local setup", () => {

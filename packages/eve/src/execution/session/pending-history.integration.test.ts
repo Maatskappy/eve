@@ -14,7 +14,7 @@ const channel = defineChannel({
   state: {},
   // A channel drops a delivery it does not handle by replacing it with nothing to deliver.
   deliver(payload) {
-    return payload.message === "drop me" ? undefined : { message: payload.message };
+    return payload.message === "drop me" ? {} : undefined;
   },
 });
 

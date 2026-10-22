@@ -1011,6 +1011,39 @@
       ]
     },
     {
+      "name": "connection/flora",
+      "type": "registry:item",
+      "title": "FLORA",
+      "description": "Generate image, video, audio, text, and 3D assets through FLORA's MCP server.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "flora",
+              "agents.flora.ai/mcp",
+              "flora"
+            ]
+          },
+          "requires": ">=0.82.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/flora.ts",
+          "type": "registry:file",
+          "target": "agent/connections/flora.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/egnyte",
       "type": "registry:item",
       "title": "Egnyte",
@@ -1073,6 +1106,22 @@
           "path": "registry/connections/embat.ts",
           "type": "registry:file",
           "target": "agent/connections/embat.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/firecrawl",
+      "type": "registry:item",
+      "title": "Firecrawl",
+      "description": "Search, scrape, map, crawl, parse, and monitor web content.",
+      "envVars": {
+        "FIRECRAWL_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/firecrawl.ts",
+          "type": "registry:file",
+          "target": "agent/connections/firecrawl.ts"
         }
       ]
     },

@@ -2116,6 +2116,38 @@ eve requires approval for every Stacktree tool call because the server can publi
     keywords: ["mcp", "images", "videos", "assets", "media", "oauth", "connect"],
     authModes: ["user"],
   },
+  flora: {
+    logo: "flora",
+    docsHref: "https://flora.ai/mcp",
+    keywords: ["mcp", "image", "video", "audio", "3d", "creative", "generation"],
+    authModes: ["user"],
+    connectors: {
+      user: {
+        uid: "agents.flora.ai/flora",
+        service: "agents.flora.ai/mcp",
+        name: "flora",
+      },
+    },
+    quickStart: `Create \`agent/connections/flora.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/flora.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+import { always } from "eve/tools/approval";
+
+export default defineMcpClientConnection({
+  url: "https://agents.flora.ai/mcp",
+  description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+  auth: connect("agents.flora.ai/flora"),
+  approval: always(),
+});
+\`\`\`
+
+Connect owns the OAuth flow, and each end-user authorizes in their own browser before their first tool call.`,
+    configureNote:
+      "Each user signs in to their own FLORA account when they first use a tool. Every FLORA MCP call requires approval, so confirm the quoted cost before approving a generation or technique.",
+  },
   coda: {
     logo: "coda",
     docsHref: "/docs/connections/mcp",
@@ -2152,6 +2184,35 @@ eve requires approval for every Stacktree tool call because the server can publi
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "treasury", "cash", "payments", "accounting", "oauth", "connect"],
     authModes: ["user"],
+  },
+  firecrawl: {
+    logo: "firecrawl",
+    docsHref: "https://docs.firecrawl.dev/mcp-server",
+    keywords: ["mcp", "web search", "web scraping", "crawl", "parse", "monitoring"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "FIRECRAWL_API_KEY",
+      header: "Authorization",
+    },
+    quickStart: `Create \`agent/connections/firecrawl.ts\`. The filename creates the \`firecrawl\` connection. Firecrawl calls can consume usage or create persistent work, so this connection requires approval for every call:
+
+\`\`\`ts
+import { always } from "eve/tools/approval";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.firecrawl.dev/v2/mcp",
+  description: "Firecrawl: search, scrape, map, crawl, parse, and monitor web content.",
+  headers: () => ({
+    Authorization: \`Bearer \${process.env.FIRECRAWL_API_KEY!}\`,
+  }),
+  approval: always(),
+});
+\`\`\`
+
+Keep the API key in a server-side environment variable. eve sends it directly to Firecrawl and does not expose it to the model.`,
+    configureNote:
+      "An API key enables Firecrawl's full tool surface, subject to the plan and team policy. Keep approval enabled, or use tool filters and approval rules that prevent unattended cost-sensitive or persistent actions.",
   },
   "hugging-face": {
     logo: "hugging-face",

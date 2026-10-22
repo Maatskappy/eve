@@ -333,7 +333,7 @@ export default defineDynamic({
         description: "Read email and watch new messages",
         instanceKey: account.connectionKey,
         auth: connect(account.connector),
-        experimental_events: { onEvent: handleBirdEvent },
+        experimental_events: { management: "creator", onEvent: handleBirdEvent },
       });
     },
   },
@@ -353,13 +353,16 @@ When a delivery triggers resolution, a changed account, connector, endpoint, or
 missing result retires the watch
 without running another account's callback. A thrown lookup retries instead.
 
-Dynamic subscribe results include `management.get` (`eve__event_watch_get`) and
+With `experimental_events.management: "creator"`, subscribe results include `management.get` (`eve__event_watch_get`) and
 `management.stop` (`eve__event_watch_stop`). Call them through `eve__tool` with
 `{ id }`, using the returned eve watch ID. These are creator-authorized watch
 management operations, independent of the current connection's discovery, auth,
 `tools` filter, and approval callbacks. They remain available when an account is
 removed or another connection reuses its name. Existing connection actions keep
-their normal approval and filtering. eve does not add a watch-listing API.
+their normal approval and filtering. Without this explicit opt-in, the housekeeping
+actions reject access and subscribe does not advertise them. The opt-in is saved
+with the watch; changing the definition affects future watches. eve does not add
+a watch-listing API.
 Stop existing watches before deleting the last dynamic resolver from a deployment,
 since that also removes its receiver route. Returning `null` instead keeps the
 route available to retire watches when deliveries arrive.

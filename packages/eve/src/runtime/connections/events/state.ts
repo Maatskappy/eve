@@ -17,6 +17,8 @@ export type EventOwner = {
 
 /** The handler run's input: everything a delivery needs, saved before subscribing. */
 export interface EventBinding extends EventOwner {
+  /** The application explicitly authorized creator-only housekeeping at subscribe time. */
+  readonly creatorManagement?: true;
   readonly resolution?: DynamicEventResolution;
   readonly id: string;
   readonly sessionId: string;

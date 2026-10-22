@@ -1166,8 +1166,15 @@ it("retries a failed account lookup without retiring the watch", async () => {
   expect(callback).toHaveBeenCalledOnce();
 });
 
-it("keeps removed-watch management available only to its creator", async () => {
-  const definition = eventDefinition();
+it("keeps opted-in saved-watch management available only to its creator", async () => {
+  const base = eventDefinition();
+  const definition = defineMcpClientConnection({
+    ...base,
+    experimental_events: {
+      ...base.experimental_events!,
+      management: "creator",
+    },
+  });
   await dynamicWatch(() => definition);
   const result = await watch();
   const { id } = result;
@@ -1245,3 +1252,42 @@ it("isolates two users' dynamic watches with the same connection name", async ()
     ),
   ).toEqual(["alice", "bob"]);
 });
+
+it("requires application opt-in before exposing saved-watch housekeeping", async () => {
+  await dynamicWatch(() => eventDefinition());
+  const result = await watch();
+  expect(result).not.toHaveProperty("management");
+  for (const name of ["eve__event_watch_get", "eve__event_watch_stop"]) {
+    const entry = connectionEventManagementEntry(name)!;
+    await expect(
+      contextStorage.run(ctx, () =>
+        entry.execute!({ id: result.id }, { toolCallId: name, messages: [] }),
+      ),
+    ).rejects.toThrow("Unknown subscription");
+  }
+  expect(savedGet).not.toHaveBeenCalled();
+  expect(retired.size).toBe(0);
+});
+
+it.each([false, true])(
+  "retains the original watch management policy when opt-in started as %s",
+  async (enabled) => {
+    const original = eventDefinition();
+    const resolve = () =>
+      defineMcpClientConnection({
+        ...original,
+        experimental_events: {
+          ...original.experimental_events!,
+          management: enabled ? "creator" : undefined,
+        },
+      });
+    await dynamicWatch(resolve);
+    const first = await watch();
+    enabled = !enabled;
+    await dynamicWatch(resolve);
+    const again = await watch();
+    expect(again.id).toBe(first.id);
+    expect(again).toEqual(first);
+    expect(subscriber).toHaveBeenCalledOnce();
+  },
+);

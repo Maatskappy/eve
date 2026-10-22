@@ -19,7 +19,7 @@ export function connectionEventManagementEntry(name: string): HarnessToolDefinit
     deferred: true,
     rootOnly: true,
     description:
-      "Inspect or stop a dynamic event watch owned by the current caller, using its saved watch id.",
+      "Inspect or stop an opted-in event watch owned by the current caller, using its saved watch id.",
     inputSchema: defineJsonSchema({
       type: "object",
       additionalProperties: false,
@@ -35,7 +35,7 @@ export function connectionEventManagementEntry(name: string): HarnessToolDefinit
       if (
         ctx.require(BundleKey).nodeId !== undefined ||
         watch === undefined ||
-        watch.owner.resolution === undefined ||
+        watch.owner.creatorManagement !== true ||
         watch.owner.executionPrincipal !== principalOf(ctx.get(AuthKey))
       )
         throw new Error("Unknown subscription for this caller and account.");

@@ -259,6 +259,9 @@ export class ConnectionEventActions {
         .digest("hex");
       const binding: EventBinding = {
         ...caller,
+        ...(this.events.callbacks.management === "creator"
+          ? { creatorManagement: true as const }
+          : {}),
         ...(this.events.resolution === undefined
           ? {}
           : { resolution: structuredClone(this.events.resolution) }),
@@ -281,7 +284,8 @@ export class ConnectionEventActions {
       );
       const result =
         subscription === undefined ? pendingResult(binding) : subscriptionResult(id, subscription);
-      return this.events.resolution === undefined
+      const savedOwner = await findConnectionEventOwner(id);
+      return savedOwner?.owner.creatorManagement !== true
         ? result
         : {
             ...result,

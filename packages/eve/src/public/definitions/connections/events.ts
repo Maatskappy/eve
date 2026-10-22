@@ -27,6 +27,11 @@ export interface Experimental_ConnectionEvent {
 
 /** Opts a Connect-backed MCP connection into managed webhook events. */
 export interface Experimental_ConnectionEvents {
+  /**
+   * Opts into creator-authorized get/stop tools for saved watches, even after
+   * removal. These housekeeping tools do not use connection approval or filters.
+   */
+  readonly management?: "creator";
   /** Called durably after verification and subscription binding checks. */
   readonly onEvent: (
     input: Experimental_ConnectionEventContext & {

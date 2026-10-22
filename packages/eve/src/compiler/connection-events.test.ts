@@ -39,7 +39,12 @@ it.each([
 
 it("accepts separate event/lifecycle callbacks without invoking them or allocating a subscription", () => {
   const onEvent = vi.fn();
-  const callbacks = { onEvent, onGap: vi.fn(), onTerminated: vi.fn() };
+  const callbacks = {
+    onEvent,
+    onGap: vi.fn(),
+    onTerminated: vi.fn(),
+    management: "creator" as const,
+  };
   const normalized = normalizeMcpClientConnectionDefinition(
     { ...definition, experimental_events: callbacks },
     "issues",

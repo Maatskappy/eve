@@ -99,7 +99,7 @@ export async function unsubscribeConnectionEventStep(input: {
   try {
     // Connect owns the saved token parameters. Cleanup only needs the subscription
     // from our trusted watch and fresh project authorization, even after account removal.
-    if (input.binding.resolution !== undefined) {
+    if (input.binding.resolution !== undefined || input.binding.creatorManagement === true) {
       const subscription = await withConnectionEventSpan(
         {
           ctx,

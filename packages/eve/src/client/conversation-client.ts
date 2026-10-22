@@ -1,4 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { isFactType, isProgressType } from "#protocol/session-events/catalog.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
 import { Conversation, type LocalSubmission } from "#client/conversation.js";
@@ -38,6 +39,10 @@ export class ConversationClient {
 
   holdUnconfirmedMessages(hold: boolean): void {
     this.#conversation.holdUnconfirmedMessages(hold);
+  }
+
+  get streaming(): boolean {
+    return this.#stream !== undefined && !this.#stream.ended;
   }
 
   get following(): boolean {
@@ -101,6 +106,7 @@ export class ConversationClient {
 
   /** Admits and folds a saved root event without notifying subscribers. */
   hydrate(event: SessionStreamEvent): boolean {
+    assertCurrentSavedEvent(event);
     return this.#conversation.observe(event);
   }
 
@@ -141,10 +147,11 @@ export class ConversationClient {
     return this.#stream;
   }
 
-  /** Closes the root stream; the next read starts at this conversation's folded cursor. */
+  /** Closes the root stream; the next read replays any partial line from the folded cursor. */
   closeStream(): void {
     this.#stream?.close();
     this.#stream = undefined;
+    this.#conversation.discardUncommitted();
   }
 
   stop(): void {
@@ -158,4 +165,21 @@ export class ConversationClient {
     this.#cursors.clear();
     this.#conversation = new Conversation();
   }
+}
+
+/**
+ * Saved events without a stream position, or of a type this version doesn't know, were saved by
+ * eve < 27; folding them would show an empty conversation and advance the cursor past it.
+ */
+function assertCurrentSavedEvent(event: SessionStreamEvent): void {
+  const { meta, type } = event as {
+    readonly meta?: { readonly position?: unknown };
+    type?: unknown;
+  };
+  if (meta?.position !== undefined && (isFactType(type) || isProgressType(type))) return;
+  throw new TypeError(
+    `Saved session event ${JSON.stringify(type)} has no stream position this eve version can ` +
+      "read; it was likely saved by eve < 27. Discard saved `initialEvents` and the saved " +
+      "session state from before the upgrade, then start a new session.",
+  );
 }

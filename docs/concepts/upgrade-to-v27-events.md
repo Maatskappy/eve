@@ -89,6 +89,7 @@ export default defineHook({
 
 ## Other migration points
 
+- Frontend stores and hooks replace `followIdle` with `followWhile(view)`. Omit `followWhile` to keep following between turns, as `followIdle: true` did. For `followIdle: false`, import `activeTurn` and `idle` from `eve/events` and pass `followWhile: (view) => !idle(view) || activeTurn(view) !== undefined`, which also keeps following a turn waiting on a person. See [Frontend](../guides/frontend/overview).
 - Channel CORS options use `allowHeaders`, `exposeHeaders`, and `preflight.statusCode` instead of `allowedHeaders`, `exposedHeaders`, and `preflightStatus`.
 - Authored channel identity is `channel:<name>`, including route-only channels and the default `channel:eve` (formerly `http`). Check visibility and authorization rules. Move visibility classification from `metadata().audience` to `audience(input)`; without it, audience is `unknown`. Channel context factories take `context(state, channel)`, and continuation aliases live on `channel.continuation`. See [Custom channels](../channels/custom).
 - Session readers have `id` and `stream()`; `sessions.attach(id)` returns a read-only `SessionReader`, not command authority. Use `SessionInfo` from `eve/context` for the metadata in `ctx.session`. A command that cannot reach an active session reports `SessionNotActiveError` (HTTP `409 session_not_active`). See [session handles](./sessions-runs-and-streaming#read-a-session-in-process).

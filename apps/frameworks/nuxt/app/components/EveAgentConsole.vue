@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { EveMessagePart, EveToolPart } from "eve/vue";
+import { activeTurn } from "eve/events";
 
-const { cancel, messages, status, error, prewarm, respond, send } = useEveAgent();
+const { cancel, messages, status, error, prewarm, respond, send, view } = useEveAgent();
 
 type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
 const isBusy = computed(() => status.value === "busy");
+const turnOpen = computed(() => activeTurn(view.value) !== undefined);
 const isResuming = computed(() => status.value === "resuming");
 const isInputDisabled = computed(() => isBusy.value || isResuming.value);
 const isEmpty = computed(() => messages.value.length === 0);
@@ -273,7 +275,7 @@ function formatBytes(size: number | undefined): string | undefined {
             @keydown="onKeydown"
           />
           <button
-            v-if="isBusy"
+            v-if="turnOpen"
             type="button"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
             @click="requestCancellation"

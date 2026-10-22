@@ -62,6 +62,12 @@ async function synchronize(
   const state = await access.captureState();
   const identity = state.session === null ? null : JSON.stringify(state.session);
 
+  // Identity-only records own installed files, but cannot prove a package revision.
+  for (const [name, marker] of Object.entries(written)) {
+    if (identity !== null && marker === identity) written[name] = `${identity}#`;
+  }
+  ctx.set(DynamicSkillSandboxKey, written);
+
   for (const [name, marker] of Object.entries(written)) {
     // A markdown-only result may rely on files supplied by a snapshot or Drive.
     if (kept.has(name)) continue;

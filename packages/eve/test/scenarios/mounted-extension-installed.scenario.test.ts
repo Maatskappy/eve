@@ -74,17 +74,14 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/tools/dynamic.ts": [
     'import { defineDynamic, defineTool } from "eve/tools";',
     'import extension from "../extension.js";',
-    "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () => ({',
-    "      quote: defineTool({",
-    '        description: "Quote the configured API key.",',
-    '        inputSchema: { type: "object", properties: {}, additionalProperties: false },',
-    "        async execute() { return { apiKey: extension.config.apiKey }; },",
-    "      }),",
+    "export default defineDynamic(() => ({",
+    "    quote: defineTool({",
+    '      description: "Quote the configured API key.",',
+    '      inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+    "      async execute() { return { apiKey: extension.config.apiKey }; },",
     "    }),",
-    "  },",
-    "});",
+    "  }),",
+    ");",
     "",
   ].join("\n"),
   "extension/channels/status.ts": [
@@ -166,27 +163,21 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/skills/guide/references/steps.md": "# Steps\n",
   "extension/skills/oncall.ts": [
     'import { defineDynamic, defineSkill } from "eve/skills";',
-    "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () => ({',
-    "      escalation: defineSkill({",
-    '        description: "Escalate an incident.",',
-    '        content: "# Escalation\\nPage the on-call.",',
-    "      }),",
+    "export default defineDynamic(() => ({",
+    "    escalation: defineSkill({",
+    '      description: "Escalate an incident.",',
+    '      content: "# Escalation\\nPage the on-call.",',
     "    }),",
-    "  },",
-    "});",
+    "  }),",
+    ");",
     "",
   ].join("\n"),
   "extension/instructions/policy.md": "Prefer the CRM tools for account questions.\n",
   "extension/instructions/dynamic.ts": [
     'import { defineDynamic, defineInstructions } from "eve/instructions";',
-    "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () =>',
-    '      defineInstructions({ content: "Treat CRM results as authoritative." }),',
-    "  },",
-    "});",
+    "export default defineDynamic(() =>",
+    '  defineInstructions({ content: "Treat CRM results as authoritative." }),',
+    ");",
     "",
   ].join("\n"),
 };
@@ -395,7 +386,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedTools = (await dynamicTools?.events["session.started"]?.({}, {})) as {
+    const producedTools = (await dynamicTools?.evaluate({} as never)) as {
       quote: { execute(input: unknown, context: unknown): Promise<unknown> };
     };
     await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
@@ -403,7 +394,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
       (resolver) => resolver.slug === "crm__oncall",
     );
-    const producedSkills = (await dynamicSkills?.events["session.started"]?.({}, {})) as {
+    const producedSkills = (await dynamicSkills?.evaluate({} as never)) as {
       escalation: { content: string };
     };
     expect(producedSkills.escalation.content).toContain("Page the on-call.");
@@ -411,7 +402,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicInstructions = graph.root.agent.dynamicInstructionsResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedInstructions = (await dynamicInstructions?.events["session.started"]?.({}, {})) as {
+    const producedInstructions = (await dynamicInstructions?.evaluate({} as never)) as {
       content: string;
     };
     expect(producedInstructions.content).toBe("Treat CRM results as authoritative.");

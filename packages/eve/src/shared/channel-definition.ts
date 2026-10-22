@@ -68,7 +68,10 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /** Return a replacement delivery, or void to keep it unchanged. Change state through the channel context. */
+  /**
+   * Return a replacement delivery, or void to deliver the original payload unchanged. A
+   * replacement carries no `state`; change durable channel state through `ctx.state`.
+   */
   deliver?(
     payload: ChannelDelivery<TState>,
     ctx: TCtx & ChannelContext,

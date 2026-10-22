@@ -61,6 +61,19 @@ export function unavailableToolMessage(toolName: string, searchable: boolean): s
   return `The tool "${toolName}" is no longer available, so the call didn't run. If the task still needs it, ${next}.`;
 }
 
+/** Whether a parked call's dynamic entry has changed since the model was offered it. */
+export function changedSinceOffered(
+  call: { readonly version?: string },
+  definition: { readonly version?: string } | undefined,
+): boolean {
+  return definition !== undefined && call.version !== definition.version;
+}
+
+/** What the model reads when a call's dynamic entry changed before the call could run. */
+export function changedToolMessage(toolName: string): string {
+  return `The tool "${toolName}" changed since it was offered, so the call didn't run. If the task still needs it, request it again.`;
+}
+
 /**
  * A call that ends without running: its failed runtime result, which the lifecycle reports at the
  * step's coordinates, and the `error-text` result the model reads.

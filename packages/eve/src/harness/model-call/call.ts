@@ -275,8 +275,9 @@ export class ModelCaller {
           summaryRunId: nextRunId(projection),
           turnId: step.position().turnId,
         },
+        ctx: step.ctx,
         emissionState: step.position(),
-        historyProjector: config.historyProjector,
+        // A hook's compact intent compacts before this call, once.
         messages: [...prompt.messages],
         model: this.input.model,
         promptMessages: withClientContext(prompt),
@@ -311,7 +312,7 @@ export class ModelCaller {
         thresholdPercent: settings.thresholdPercent,
       },
     };
-    this.projectedMessages = projectPrompt(step, prompt);
+    this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
   }
 

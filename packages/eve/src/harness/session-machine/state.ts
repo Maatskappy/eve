@@ -25,7 +25,13 @@ export interface StepCoordinates {
 export interface ApprovalAsk {
   readonly once?: OnceApproval;
   readonly interactionId: string;
-  readonly call: { readonly callId: string; readonly toolName: string; readonly input: JsonObject };
+  readonly call: {
+    readonly callId: string;
+    readonly toolName: string;
+    readonly input: JsonObject;
+    /** The dynamic entry's version the call was made from. */
+    readonly version?: string;
+  };
   readonly request: InteractionRequest;
 }
 

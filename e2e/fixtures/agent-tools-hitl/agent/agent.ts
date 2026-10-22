@@ -87,22 +87,14 @@ export default defineAgent({
   reasoning: "high",
   // Budget evals exhaust this with synthetic usage; ordinary HITL sessions do not.
   limits: { sessionUsage: ({ window }) => window.outputTokens >= 1_000_000 },
-  model: defineDynamic({
-    events: {
-      "session.started": () => ({
-        model: typeof base.model === "string" ? base.model : "openai/gpt-6.1-sol",
-        modelContextWindowTokens: base.modelContextWindowTokens,
-      }),
-      "step.started": (_event, ctx) => {
-        switch (ctx.session.auth.initiator?.attributes?.model) {
-          case "continuation":
-            return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
-          case "hitl":
-            return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
-          default:
-            return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
-        }
-      },
-    },
+  model: defineDynamic((ctx) => {
+    switch (ctx.session.auth.initiator?.attributes?.model) {
+      case "continuation":
+        return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
+      case "hitl":
+        return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
+      default:
+        return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
+    }
   }),
 });

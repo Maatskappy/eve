@@ -1,13 +1,7 @@
-import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-
-/** A `node` executable on PATH and the file it resolves to through symlinks. */
-export interface NodeExecutableCandidate {
-  readonly path: string;
-  readonly target: string;
-}
 
 /**
  * Executable for the eve dev server a framework integration spawns. It
@@ -17,7 +11,7 @@ export interface NodeExecutableCandidate {
 export function resolveEveDevServerCommand(hostLabel: string): string {
   if (process.versions.bun === undefined) return process.execPath;
 
-  const node = selectNodeExecutable(findNodeExecutables(), realpathSync(process.execPath));
+  const node = findNodeExecutable({ bunExecutable: process.execPath, pathEnv: process.env.PATH });
   if (node === undefined) {
     throw new Error(
       [
@@ -31,16 +25,29 @@ export function resolveEveDevServerCommand(hostLabel: string): string {
 }
 
 /**
- * Picks the first `node` on PATH that is not Bun itself. `bun --bun` prepends
- * a `node` shim that links to Bun, so the bare command name would loop back.
- * Returns the PATH entry rather than its target so version-manager shims keep
- * dispatching on their own name.
+ * First `node` on `pathEnv` that is not Bun itself. `bun --bun` prepends a
+ * `node` shim that links to Bun (a symlink, or a hard link on Windows), so
+ * candidates are compared by file identity rather than path. Returns the PATH
+ * entry, not its target, so version-manager shims keep dispatching on their name.
  */
-export function selectNodeExecutable(
-  candidates: readonly NodeExecutableCandidate[],
-  bunExecutable: string,
-): string | undefined {
-  return candidates.find((candidate) => candidate.target !== bunExecutable)?.path;
+export function findNodeExecutable(input: {
+  readonly bunExecutable: string;
+  readonly pathEnv: string | undefined;
+}): string | undefined {
+  const bun = fileIdentity(input.bunExecutable);
+  const name = process.platform === "win32" ? "node.exe" : "node";
+  for (const directory of (input.pathEnv ?? "").split(delimiter)) {
+    if (directory.length === 0) continue;
+    const candidate = join(directory, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      const stats = statSync(candidate, { bigint: true });
+      if (stats.isFile() && `${stats.dev}:${stats.ino}` !== bun) return candidate;
+    } catch {
+      // Not on this PATH entry.
+    }
+  }
+  return undefined;
 }
 
 /** Explains why `eve dev` refuses to start under Bun and how to run it instead. */
@@ -53,20 +60,10 @@ export function createBunDevServerError(): Error {
   );
 }
 
-function findNodeExecutables(): NodeExecutableCandidate[] {
-  const name = process.platform === "win32" ? "node.exe" : "node";
-  const candidates: NodeExecutableCandidate[] = [];
-  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
-    if (directory.length === 0) continue;
-    const path = join(directory, name);
-    try {
-      accessSync(path, constants.X_OK);
-      if (statSync(path).isFile()) candidates.push({ path, target: realpathSync(path) });
-    } catch {
-      // Not on this PATH entry.
-    }
-  }
-  return candidates;
+// Bigint keeps Windows' 64-bit file index exact.
+function fileIdentity(path: string): string {
+  const { dev, ino } = statSync(path, { bigint: true });
+  return `${dev}:${ino}`;
 }
 
 function readNodeEngineRange(): string {

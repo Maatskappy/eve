@@ -18,9 +18,3 @@ export {
   isChannel,
   isDisabledRouteSentinel,
 } from "../../src/public/channels/index.ts";
-export type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  ResetSessionResult,
-} from "../../src/public/channels/index.ts";

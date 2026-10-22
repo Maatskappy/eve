@@ -23,12 +23,12 @@ describe("locateExtensionMountPackage", () => {
     const source = createMemoryProjectSource({
       files: {
         [`${agentRoot}/extensions/selfmod.ts`]:
-          'export { default } from "eve/self-modification";\n',
+          'export { default } from "eve/self-modification/local";\n',
         [`${packageRoot}/package.json`]: JSON.stringify({
           name: "eve",
           eve: {
             builtInExtensions: {
-              "./self-modification": { dist: "dist/src/self-modification/extension" },
+              "./self-modification/local": { dist: "dist/src/self-modification/extension" },
             },
           },
         }),
@@ -48,7 +48,7 @@ describe("locateExtensionMountPackage", () => {
       packageName: "eve",
       packageRoot,
       sourceRoot: `${packageRoot}/dist/src/self-modification/extension`,
-      specifier: "eve/self-modification",
+      specifier: "eve/self-modification/local",
     });
   });
 

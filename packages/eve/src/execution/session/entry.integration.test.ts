@@ -1083,6 +1083,62 @@ describe("workflowEntry integration", () => {
     );
   }, 60_000);
 
+  it.each(["steer", "queue"] as const)(
+    "queues another person's typed answer behind a held approval (turn policy %s)",
+    async (turnPolicy) => {
+      const executions: string[] = [];
+      await withHeldApprovalRun(
+        {
+          agent: { name: `workflow-entry-held-other-${turnPolicy}` },
+          auth: ALICE,
+          modules: [gatedTool("approve_change", executions)],
+        },
+        async ({ commandInbox, sessionInbox, stream }) => {
+          const held = await withTimeout(stream.nextTurn(), "approval hold");
+          const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
+          expect(held.at(-1)?.type).toBe("turn.waiting");
+
+          await resumeHook(sessionInbox, {
+            auth: BOB,
+            kind: "send",
+            payload: { message: "approve" },
+            turnPolicy,
+          });
+          // Let the session admit Bob's message while the turn is held.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          await resumeHook(commandInbox, {
+            auth: ALICE,
+            kind: "send",
+            payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+          });
+
+          const resumed = await withTimeout(stream.nextTurn(), "resumed turn");
+          expect(filterEventsByType(resumed, "turn.started")).toHaveLength(0);
+          expect(filterEventsByType(resumed, "approval.settled")).toMatchObject([
+            {
+              data: {
+                outcome: "approved",
+                requestId: request!.requestId,
+                responderPrincipalId: expect.stringContaining("alice"),
+              },
+            },
+          ]);
+          expect(filterEventsByType(resumed, "message.received")).toHaveLength(0);
+          expect(executions).toEqual(["approve_change"]);
+
+          const queued = await withTimeout(stream.nextTurn(), "Bob's turn");
+          expect(
+            filterEventsByType(queued, "message.received").map((event) => [
+              event.data.turnId,
+              event.data.message,
+            ]),
+          ).toEqual([["turn_1", "approve"]]);
+        },
+      );
+    },
+    60_000,
+  );
+
   it("lets a queued message sent after the approval appeared steer before the step returns", async () => {
     const executions: string[] = [];
     const approvalShown = Promise.withResolvers<void>();

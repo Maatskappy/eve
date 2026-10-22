@@ -62,6 +62,63 @@ const groups = [
     .map(([entry, peers]) => ({ name: entry, entries: [entry], peers })),
 ];
 
+const sessionConsumer = `
+import { Client, SessionStore } from "eve/client";
+import type { SessionStoreSnapshot } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { RequestStatus } from "eve/events";
+import type { Delivery, SessionReader } from "eve/sessions";
+import type { ChannelContext } from "eve/channels";
+import { z } from "zod";
+// @ts-expect-error Shared contracts have one home, eve/sessions.
+import type { Delivery as OldDelivery } from "eve/client";
+// @ts-expect-error Routing is on ChannelContext, not a session-shaped handle.
+import type { SessionHandle } from "eve/channels";
+// @ts-expect-error Operations are declared by concrete authorized handles.
+import type { SessionOperations } from "eve/channels";
+const view = foldEvents(emptySessionView(), []);
+const observed = calls(view, { kind: "tool" });
+// @ts-expect-error The view has no table escape hatch.
+view.calls;
+// @ts-expect-error Query collections are immutable.
+observed.push(observed[0]!);
+for (const call of observed) {
+  // @ts-expect-error Observations cannot edit the fold.
+  call.name = "edited";
+  if (call.state === "failed") { const message: string = call.error.message; }
+}
+declare const snapshot: SessionStoreSnapshot;
+// @ts-expect-error Transient previews are queried, not a public dictionary.
+snapshot.previews;
+declare const reader: SessionReader;
+// @ts-expect-error Reading a session does not grant command authority.
+reader.cancel();
+declare const channel: ChannelContext;
+channel.continuation?.alias("thread");
+const id: string = channel.session.id;
+// @ts-expect-error Information does not carry routing authority.
+channel.session.continuation;
+declare const delivery: Delivery<{ ok: boolean }>;
+// @ts-expect-error A receipt is not its read or a status acknowledgment.
+delivery.status;
+delivery.stream({ signal: new AbortController().signal });
+async function result() {
+  const result = await delivery.result();
+  const status: RequestStatus = result.status;
+  if (result.status === "failed") { const message: string = result.error.message; }
+  const ok: boolean | undefined = result.data?.ok;
+  // @ts-expect-error Ordinary results do not retain event logs.
+  result.events;
+}
+async function inferred(client: Client, store: SessionStore) {
+  const schema = z.object({ ok: z.boolean() });
+  const receipt = await client.sessions.attach("session").send("hello", { outputSchema: schema });
+  const fromStore = await store.send({ message: "hello", outputSchema: schema });
+  const a: boolean | undefined = (await receipt.result()).data?.ok;
+  const b: boolean | undefined = (await fromStore.result()).data?.ok;
+}
+`;
+
 function version(name: string): string {
   for (const resolver of [require, ...frameworkRequires]) {
     const paths = [
@@ -117,7 +174,7 @@ describe("packed public declarations", () => {
               ? `import "eve/workflow-modules";`
               : `import type * as Entry${index} from ${JSON.stringify(entry)};`,
           )
-          .join("\n"),
+          .join("\n") + (group.name === "core" ? sessionConsumer : ""),
       );
       await writeFile(
         join(app, "tsconfig.json"),

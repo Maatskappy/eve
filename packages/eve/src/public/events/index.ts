@@ -97,9 +97,9 @@ export type {
 
 export type {
   DeliverySource,
-  ImportedMessage,
   DeliveryAdmittedData,
   DeliveryConsumedData,
+  ImportedMessage,
   DeliveryOutcome,
   DeliverySettledData,
   DeliveryAdmitted,
@@ -193,53 +193,60 @@ export type {
 
 export {
   emptySessionView,
-  emptyPreviews,
   foldEvents,
-  type ReceivedEvent,
-} from "#protocol/session-projection/fold.js";
-
-export {
+  position,
+  session,
+  turn,
+  turns,
   activeTurn,
-  activity,
+  conversation,
+  call,
+  calls,
   callLabel,
   callState,
-  type CallState,
   callOutputSource,
-  conversation,
+  callPreview,
+  interaction,
+  interactions,
+  openInteractions,
+  delivery,
+  deliveries,
+  queue,
+  task,
+  tasks,
+  runs,
+  part,
+  parts,
+  reply,
+  children,
+  contentPreviews,
+  usage,
   failure,
   idle,
-  openInteractions,
-  queue,
-  reply,
-  tasks,
   waiting,
+  activity,
+  type SessionView,
+  type ReceivedEvent,
+  type CallState,
+  type RequestStatus,
   type Activity,
   type Waiting,
-} from "#protocol/session-projection/selectors.js";
-export { requestStatus, type RequestStatus } from "#protocol/session-projection/request-status.js";
+  type ObservationTiming,
+  type CallObservation,
+  type CallFilter,
+  type TurnObservation,
+  type DeliveryObservation,
+  type TaskObservation,
+  type RunObservation,
+  type ContentObservation,
+  type ChildObservation,
+  type SessionObservation,
+  type SessionUsage,
+  type CallPreviewObservation,
+  type ContentPreviewObservation,
+} from "#protocol/session-projection/public-view.js";
 
-export type {
-  Introduced,
-  Ended,
-  SessionRow,
-  DeliveryRow,
-  TurnRow,
-  RunRow,
-  PartRow,
-  CallRow,
-  TaskRow,
-  InteractionRow,
-  ResponseRow,
-  ChildRow,
-  ChangeRow,
-  UsageTotals,
-  SessionView,
-  SessionPreviews,
-  PartPreview,
-  CallPreview,
-} from "#protocol/session-projection/tables.js";
-
-export { interaction, signInEnding, type Interaction } from "#protocol/session-reader.js";
+export { signInEnding, type Interaction } from "#protocol/session-projection/reader.js";
 
 export { APPROVE_OPTION_ID, DENY_OPTION_ID } from "#protocol/interaction-options.js";
 

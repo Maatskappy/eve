@@ -65,7 +65,7 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
     await expect(response.result()).rejects.toThrow();
   });
 
-  it("does not ignore a session-wide failure after observing the accepted turn", async () => {
+  it("does not synthesize a delivery settlement from a session-wide failure", async () => {
     const current = turn(1, "PARTIAL", "new");
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(accepted())
@@ -79,9 +79,7 @@ describe("delivery correlation across reconnects and concurrent sends", () => {
         ]),
       );
     const response = await session().send("new", { streamReconnectPolicy: { reconnect: false } });
-    const result = await response.result();
-    expect(result.status).toBe("failed");
-    expect(result.events.at(-1)?.type).toBe("session.ended");
+    await expect(response.result()).rejects.toThrow("before the accepted delivery settled");
   });
 
   it("does not regress the cursor when concurrent sends are consumed out of order", async () => {

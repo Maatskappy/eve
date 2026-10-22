@@ -21,22 +21,26 @@ class FakeClientSession {
     this.#turns = turns;
   }
 
-  async send(message: SendTurnInput["message"]): Promise<AsyncIterable<SessionStreamEvent>> {
+  async send(
+    message: SendTurnInput["message"],
+  ): Promise<{ stream(): AsyncIterable<SessionStreamEvent> }> {
     return this.#next({ message });
   }
 
   async respond(
     answers: NonNullable<SendTurnPayload["answers"]>,
-  ): Promise<AsyncIterable<SessionStreamEvent>> {
+  ): Promise<{ stream(): AsyncIterable<SessionStreamEvent> }> {
     return this.#next({ answers });
   }
 
-  #next(input: SendTurnPayload): AsyncIterable<SessionStreamEvent> {
+  #next(input: SendTurnPayload): { stream(): AsyncIterable<SessionStreamEvent> } {
     this.sends.push(input);
     const events = stampTestEvents(this.#turns.shift() ?? []);
-    return (async function* () {
-      yield* events;
-    })();
+    return {
+      stream: async function* () {
+        yield* events;
+      },
+    };
   }
 }
 

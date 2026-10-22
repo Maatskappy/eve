@@ -21,7 +21,7 @@ import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
 import { isFactType } from "#protocol/session-events/catalog.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { interaction, type Interaction } from "#protocol/session-reader.js";
+import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
 import { callLabel, callOutputSource, callState } from "#protocol/session-projection/selectors.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { actionLabel } from "#shared/action-label.js";
@@ -44,9 +44,13 @@ interface ActivePrompt {
   turnId?: string;
 }
 
+interface AdapterDelivery {
+  stream(): AsyncIterable<SessionStreamEvent>;
+}
+
 interface AdapterClientSession {
-  send(message: SendTurnInput["message"]): Promise<AsyncIterable<SessionStreamEvent>>;
-  respond(answers: readonly Answer[]): Promise<AsyncIterable<SessionStreamEvent>>;
+  send(message: SendTurnInput["message"]): Promise<AdapterDelivery>;
+  respond(answers: readonly Answer[]): Promise<AdapterDelivery>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
   reset(): Promise<unknown>;
 }
@@ -54,7 +58,7 @@ interface AdapterClientSession {
 interface AdapterClient {
   readonly sessions: {
     create(input: SendTurnInput): Promise<{
-      readonly response: AsyncIterable<SessionStreamEvent>;
+      readonly delivery: AdapterDelivery;
       readonly session: AdapterClientSession;
     }>;
   };
@@ -220,14 +224,14 @@ export class EveAcpAdapter {
       }
       let input: SendTurnPayload = { message };
       for (;;) {
-        let response: AsyncIterable<SessionStreamEvent>;
+        let response: AdapterDelivery;
         if (session.client === undefined) {
           if (input.message === undefined) {
             throw new Error("ACP session has not started.");
           }
           const created = await this.#client.sessions.create({ ...input, message: input.message });
           session.client = created.session;
-          response = created.response;
+          response = created.delivery;
         } else {
           response =
             input.answers === undefined
@@ -243,7 +247,7 @@ export class EveAcpAdapter {
         let failure: ErrorInfo | undefined;
         let unsupportedEvent: RequestError | undefined;
 
-        for await (const event of response) {
+        for await (const event of response.stream()) {
           const data = "data" in event ? event.data : undefined;
           const turnId = data !== undefined && "turnId" in data ? data.turnId : undefined;
           if (typeof turnId === "string") active.turnId = turnId;

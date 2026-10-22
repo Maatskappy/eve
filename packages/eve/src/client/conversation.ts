@@ -15,17 +15,20 @@ import { isFactType } from "#protocol/session-events/catalog.js";
 import {
   emptyPreviews,
   emptySessionView,
-  copyView,
   foldReceivedEvent,
 } from "#protocol/session-projection/fold.js";
 import { runTurn } from "#protocol/session-projection/selectors.js";
 import type { SessionPreviews, SessionView } from "#protocol/session-projection/tables.js";
 import {
+  snapshotOf,
+  type SessionView as PublicSessionView,
+} from "#protocol/session-projection/session-view.js";
+import {
   callPlace,
   interaction,
   interactionPlace,
   type Interaction,
-} from "#protocol/session-reader.js";
+} from "#protocol/session-projection/reader.js";
 import type { Answer } from "#shared/input.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -61,14 +64,17 @@ export class Conversation {
   #uncommitted: SessionStreamEvent[] = [];
   readonly #pendingAnswers = new Map<string, { readonly answer: Answer; deliveryId?: string }>();
   #submissions: readonly LocalSubmission[] = [];
+  #holdUnconfirmedMessages = false;
   readonly #agents = new Map<string, FollowedAgent>();
   #messages = new Map<string, readonly PlacedMessage[]>();
   readonly #users = new Map<string, EveMessage>();
+  /** The earlier conversation each consumed delivery imported, by delivery. */
   readonly #imported = new Map<string, readonly EveMessage[]>();
   readonly #submissionIds = new Map<string, string>();
   #changed: Set<string> | "all" = "all";
   #state: ConversationState | undefined;
-  #viewCopy: SessionView | undefined;
+  #viewCopy: PublicSessionView | undefined;
+  #viewPosition = -1;
 
   /** Folds one event of the session's stream; false when the tables already hold it. */
   observe(event: SessionStreamEvent): boolean {
@@ -134,6 +140,13 @@ export class Conversation {
     this.#state = undefined;
   }
 
+  /** A pending receipt has not yet identified which durable user row replaces its echo. */
+  holdUnconfirmedMessages(hold: boolean): void {
+    if (this.#holdUnconfirmedMessages === hold) return;
+    this.#holdUnconfirmedMessages = hold;
+    this.#state = undefined;
+  }
+
   /** Shows, replaces, or removes the messages this client sent that eve hasn't consumed. */
   setSubmissions(submissions: readonly LocalSubmission[]): void {
     this.#submissions = submissions;
@@ -188,19 +201,17 @@ export class Conversation {
     const state: Mutable<ConversationState> = {
       agents: this.#agentSessions(),
       view: this.#frozenView,
-      previews: { calls: { ...previews.calls }, parts: { ...previews.parts } },
       messages: this.#orderedMessages(),
     };
     this.#state = state;
     return state;
   }
 
-  /** Progress changes previews and the cursor, but not the immutable lifecycle tables. */
-  get #frozenView(): SessionView {
-    const copy = this.#viewCopy;
-    if (copy?.position === this.view.position) return copy;
-    return (this.#viewCopy =
-      copy === undefined ? copyView(this.view) : { ...copy, position: this.view.position });
+  get #frozenView(): PublicSessionView {
+    if (this.#viewCopy !== undefined && this.#viewPosition === this.view.position)
+      return this.#viewCopy;
+    this.#viewPosition = this.view.position;
+    return (this.#viewCopy = snapshotOf(this.view, this.previews));
   }
 
   #touch(turnId: string): void {
@@ -235,19 +246,22 @@ export class Conversation {
     const imported = new Map<string, PlacedMessage[]>();
     for (const row of Object.values(this.view.deliveries)) {
       if (row.consumedAt === undefined || row.turnId === undefined) continue;
+      const at = row.consumedAt;
       const history = (this.#imported.get(row.deliveryId) ?? []).map((message) => ({
-        at: row.consumedAt!,
+        at,
         message,
       }));
       if (history.length > 0)
         imported.set(row.turnId, [...(imported.get(row.turnId) ?? []), ...history]);
+      const submissionId = this.#submissionIds.get(row.deliveryId);
       let message = this.#users.get(row.deliveryId);
+      if (this.#holdUnconfirmedMessages && message === undefined && submissionId === undefined)
+        continue;
       if (message === undefined) {
         message = userMessage(row);
         if (message === undefined) continue;
         this.#users.set(row.deliveryId, message);
       }
-      const submissionId = this.#submissionIds.get(row.deliveryId);
       const shown =
         submissionId === undefined
           ? message
@@ -278,7 +292,8 @@ export class Conversation {
     }
     const messages: EveMessage[] = [];
     for (const turnId of Object.keys(this.view.turns)) {
-      // A person's message sorts before the agent's that starts on the same line.
+      // On one line, imported history sorts before what people sent, as the model reads them, and
+      // a person's message sorts before the agent's that starts there.
       const placed = [
         ...(imported.get(turnId) ?? []).map((entry) => ({ ...entry, rank: -1 })),
         ...(sent.get(turnId) ?? []).map((entry) => ({ ...entry, rank: 0 })),

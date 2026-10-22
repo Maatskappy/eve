@@ -72,7 +72,7 @@ const response = await session.send<Summary>("Summarize this turn.", {
   outputSchema,
 });
 
-for await (const event of response) {
+for await (const event of response.stream()) {
   if (event.type === "content.completed" && event.data.kind === "result") {
     const summary = event.data.value as Summary;
     console.log(summary.title);

@@ -13,6 +13,7 @@ import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-can
 import { resetSessionUsageWindow } from "#harness/session-usage.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
+import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
   admitAnswers,
   dispatch,
@@ -210,7 +211,7 @@ async function runApproved(
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
     const tools = toolsOf(step, parked);
-    const workflows: ApprovedCall[] = [];
+    const workflows = new Map<string, { approval: ApprovedCall; clearedBy?: ClearedBy }>();
     for (const approval of approvals) {
       const tool = tools.get(approval.call.toolName);
       if (tool?.workflowId === undefined) continue;
@@ -229,7 +230,15 @@ async function runApproved(
             reason: recheck.reason,
           }),
         );
-      } else workflows.push(approval);
+      } else {
+        workflows.set(approval.call.callId, {
+          approval,
+          clearedBy:
+            approval.interactionId === undefined
+              ? recheck.clearedBy
+              : { interactionId: approval.interactionId },
+        });
+      }
     }
     local.push({
       approvals: approvals
@@ -237,10 +246,10 @@ async function runApproved(
         .map((approval) => reportingOnce(step.view(), approval, claimed)),
       tools,
     });
-    if (workflows.length === 0) continue;
+    if (workflows.size === 0) continue;
     const dispatched = collectWorkflowCalls({
       session: step.session,
-      toolCalls: workflows.map(({ call }) => ({
+      toolCalls: [...workflows.values()].map(({ approval: { call } }) => ({
         input: call.input,
         toolCallId: call.callId,
         toolName: call.toolName,
@@ -250,12 +259,10 @@ async function runApproved(
     });
     step.session = dispatched.session;
     tasks.push(
-      ...dispatched.workflowRequests.map((task) => {
-        const interactionId = workflows.find(
-          (request) => request.call.callId === task.callId,
-        )?.interactionId;
-        return interactionId === undefined ? task : { ...task, clearedBy: { interactionId } };
-      }),
+      ...dispatched.workflowRequests.map((task) => ({
+        ...task,
+        clearedBy: workflows.get(task.callId)?.clearedBy,
+      })),
     );
   }
   if (denied.length > 0) await step.apply(settle(step.view(), { results: denied }));

@@ -3,7 +3,7 @@ export type { TwilioChannelCredentials } from "#public/channels/twilio/credentia
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
@@ -449,7 +449,7 @@ function handleTwilioTranscription(input: {
 
 function rebuildTwilioContext(
   state: TwilioChannelState,
-  _session: SessionHandle,
+  _session: ChannelContext,
   config: TwilioChannelConfig,
 ): TwilioChannelContext {
   return {

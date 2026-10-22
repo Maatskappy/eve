@@ -1,7 +1,7 @@
 "use client";
 
 import type { CallState, SessionView } from "eve/events";
-import { callState } from "eve/events";
+import { callState, call, part } from "eve/events";
 import type {
   Interaction,
   EveInteractionPart,
@@ -228,13 +228,12 @@ function stepState(step: Step, view: SessionView): "working" | "waiting" | "fail
   return status === "error" ? "failed" : status === undefined ? "done" : "working";
 }
 
-/** " for 12s": from the first step's start to the last one's end, when the rows say. */
+/** " for 12s": from the first step's start to the last one's end, when facts report times. */
 function duration(steps: readonly Step[], view: SessionView): string | undefined {
   const times = steps.flatMap((step) => {
-    const row = step.type === "tool" ? view.calls[step.callId] : view.parts[step.id ?? ""];
-    if (row === undefined) return [];
-    const end = "endedAt" in row ? row.endedAt : undefined;
-    return [Date.parse(row.startedAt), Date.parse(end ?? row.startedAt)];
+    const observed = step.type === "tool" ? call(view, step.callId) : part(view, step.id ?? "");
+    if (observed?.startedAt === undefined) return [];
+    return [Date.parse(observed.startedAt), Date.parse(observed.endedAt ?? observed.startedAt)];
   });
   if (times.length === 0) return undefined;
   const seconds = Math.round((Math.max(...times) - Math.min(...times)) / 1000);

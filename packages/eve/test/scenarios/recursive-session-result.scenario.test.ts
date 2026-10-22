@@ -58,7 +58,7 @@ export default defineTool({
       });
       const result = await delivery.result();
       expect(result.reply).toContain("child-result");
-      expect(result.status).toBe("waiting");
+      expect(result.status).toBe("completed");
     } catch (error) {
       throw new Error(`${String(error)}\n${server.stdout()}\n${server.stderr()}`, { cause: error });
     } finally {

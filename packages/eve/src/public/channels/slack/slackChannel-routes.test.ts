@@ -94,6 +94,7 @@ async function firePost(
   channel: unknown,
   request: Request,
   send: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ id: "s1" }),
+  resolveSession: () => Promise<unknown> = () => Promise.resolve({ id: "s1" }),
 ): Promise<void> {
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
   const post = channel.routes.find((route) => route.method === "POST");
@@ -104,7 +105,7 @@ async function firePost(
     from: mockChannelContext<SlackChannelState>(
       send as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
     ).from,
-    resolveSession: () => Promise.resolve({ id: "s1" }) as never,
+    resolveSession: resolveSession as never,
     waitUntil,
     attachSession: vi.fn() as never,
     to: vi.fn() as never,
@@ -184,5 +185,109 @@ describe("slackChannel inactive prompt press", () => {
         user: "U_APPROVER",
       }),
     ]);
+  });
+});
+
+describe("slackChannel thread history", () => {
+  it("adds earlier replies as history when a mention starts the thread's session", async () => {
+    const threadTs = "1700000000.000001";
+    const currentTs = "1700000000.000004";
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      const url = String(request);
+      if (url.includes("conversations.replies"))
+        return Response.json({
+          messages: [
+            { text: "Daily report?", thread_ts: threadTs, ts: threadTs, user: "U_ROOT" },
+            {
+              app_id: "A01",
+              bot_id: "B_AGENT",
+              text: "Deploys are green.",
+              thread_ts: threadTs,
+              ts: "1700000000.000002",
+              user: "U_BOT",
+            },
+            { text: "Thanks!", thread_ts: threadTs, ts: "1700000000.000003", user: "U_OTHER" },
+            { text: "Any flakes?", thread_ts: threadTs, ts: currentTs, user: "U_CURRENT" },
+          ],
+          ok: true,
+        });
+      if (url.includes("conversations.info"))
+        return Response.json({ channel: { is_private: false }, ok: true });
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+      threadContext: {},
+    });
+    const event = {
+      channel: "C01",
+      event_ts: currentTs,
+      text: "Any flakes?",
+      thread_ts: threadTs,
+      ts: currentTs,
+      type: "app_mention",
+      user: "U_CURRENT",
+    };
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          api_app_id: "A01",
+          authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+          event,
+          event_id: "EvHistory",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+      async () => undefined,
+    );
+
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(JSON.stringify("message" in input ? input.message : "")).not.toContain(
+      "<slack_thread_context>",
+    );
+    const history = "history" in input ? input.history : undefined;
+    expect(history?.map(({ id, role }) => ({ id, role }))).toEqual([
+      { id: threadTs, role: "user" },
+      { id: "1700000000.000002", role: "assistant" },
+      { id: "1700000000.000003", role: "user" },
+    ]);
+    expect(history?.[0]?.text).toContain("sender_id: U_ROOT");
+    expect(history?.[1]?.text).toBe("Deploys are green.");
+  });
+
+  it("passes history from a generic event's send", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.send("follow up", {
+          auth: null,
+          history: [{ role: "user", text: "Earlier question" }],
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
+      },
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          event: { type: "reaction_added", user: "U01" },
+          event_id: "EvReaction",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      "C01:1700000000.000001",
+      expect.objectContaining({ history: [{ role: "user", text: "Earlier question" }] }),
+    );
   });
 });

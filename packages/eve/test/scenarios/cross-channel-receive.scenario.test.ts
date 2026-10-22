@@ -48,7 +48,7 @@ export default {
         const session = await args
           .to(target, { sessionId: body.sessionId })
           .send(body.message, { auth: body.auth });
-        return Response.json({ ok: true, sessionId: session.id });
+        return Response.json({ ok: true, sessionId: session.sessionId });
       },
     },
   ],

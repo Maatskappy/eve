@@ -1,4 +1,4 @@
-import { emptySessionView, foldEvents } from "eve/events";
+import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
@@ -17,12 +17,11 @@ const EXPECTED_WINNERS = [
 ];
 
 function completedToolResultCount(events: readonly SessionStreamEvent[], toolName: string) {
-  const view = emptySessionView();
-  foldEvents(view, events);
+  const view = foldEvents(emptySessionView(), events);
 
   return new Set(
-    Object.values(view.calls)
-      .filter((call) => call.capability.name === toolName && call.outcome === "completed")
+    calls(view)
+      .filter((call) => call.name === toolName && call.outcome === "completed")
       .map((call) => call.callId),
   ).size;
 }

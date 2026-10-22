@@ -1,7 +1,7 @@
 "use client";
 
 import type { ClientSessionState, SessionStoreSnapshot, SessionStreamEvent } from "eve/client";
-import { activity, interaction, type Interaction } from "eve/events";
+import { activity, openInteractions, session as sessionState, type Interaction } from "eve/events";
 import type { EveMessage } from "eve/react";
 import { useEveAgent } from "eve/react";
 import {
@@ -212,12 +212,9 @@ export function AgentChatSession({
   const currentActivity = activity(agent.view);
   const displayChatId = chatId ?? activeChatId ?? "new";
   const hasLocalPendingUserMessage = Boolean(localPendingUserMessage);
-  const pendingAuthorizations = Object.keys(agent.view.interactions)
-    .flatMap((id) => interaction(agent.view, id) ?? [])
-    .filter(
-      (interaction) => interaction.status === "open" && interaction.request.kind === "sign-in",
-    )
-    .map(toPendingAuthorization);
+  const pendingAuthorizations = openInteractions(agent.view, { kind: "sign-in" }).map(
+    toPendingAuthorization,
+  );
   const isWaitingForAuthorization = pendingAuthorizations.length > 0;
 
   const latestSnapshotRef = useRef<SessionStoreSnapshot>(agent);
@@ -229,12 +226,12 @@ export function AgentChatSession({
     if (
       !resumeStartedRef.current ||
       !snapshot.session ||
-      snapshot.view.session.status === "new" ||
+      sessionState(snapshot.view).status === "new" ||
       snapshot.status === "resuming"
     )
       return;
     if (
-      activity(snapshot.view).kind !== "waiting-on-person" &&
+      activity(snapshot.view).kind !== "waiting-on-interaction" &&
       snapshot.status !== "idle" &&
       snapshot.error === undefined
     )
@@ -244,7 +241,7 @@ export function AgentChatSession({
   const isBusy =
     isResuming ||
     hasLocalPendingUserMessage ||
-    (currentActivity.kind !== "waiting-on-person" && agent.status === "busy");
+    (currentActivity.kind !== "waiting-on-interaction" && agent.status === "busy");
   const isTurnBlocked = isBusy;
   const pendingMessage = pendingUserMessage
     ? createPendingUserMessage(displayChatId, pendingUserMessage)
@@ -263,7 +260,7 @@ export function AgentChatSession({
   const isChatRoute = Boolean(shellActiveChatId || chatId);
   const showThinking =
     !isWaitingForAuthorization &&
-    currentActivity.kind !== "waiting-on-person" &&
+    currentActivity.kind !== "waiting-on-interaction" &&
     (Boolean(pendingMessage || localPendingMessage) || isTurnBlocked);
   const thinkingPresence = useThinkingPresence(showThinking);
   const displayError = clientError ?? agent.error?.message ?? null;

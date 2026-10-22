@@ -1,21 +1,21 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { summarizeTurnEvents } from "#client/session-utils.js";
-import type { Delivery, DeliveryResult } from "#shared/delivery.js";
+import { turnSummary } from "#client/session-utils.js";
+import { throwIfAborted } from "#client/abort-signal.js";
+import type { Delivery, DeliveryReadOptions, DeliveryResult } from "#shared/delivery.js";
 export type { Delivery } from "#shared/delivery.js";
 
 interface DeliveryInput {
-  readonly createStream: () => AsyncIterable<SessionStreamEvent>;
+  readonly createStream: (options?: DeliveryReadOptions) => AsyncIterable<SessionStreamEvent>;
   readonly deliveryId: string;
   readonly sessionId: string;
 }
 
-/** An accepted command: its receipt and the stream through its own settlement. */
+/** An accepted command: its receipt and independent reads through its own settlement. */
 export class StreamDelivery<TOutput = unknown> implements Delivery<TOutput> {
   readonly sessionId: string;
   readonly deliveryId: string;
   readonly #createStream: DeliveryInput["createStream"];
-  #consumed = false;
-  #result: Promise<DeliveryResult<TOutput>> | undefined;
+  #result: DeliveryResult<TOutput> | undefined;
 
   /** @internal */
   constructor(input: DeliveryInput) {
@@ -24,30 +24,44 @@ export class StreamDelivery<TOutput = unknown> implements Delivery<TOutput> {
     this.#createStream = input.createStream;
   }
 
-  /** Reads this delivery's settlement, not the end of its session. Consumes the stream. */
-  result(): Promise<DeliveryResult<TOutput>> {
-    return (this.#result ??= this.#collect());
+  /** Independent, replayable read; exiting it never consumes the handle. */
+  async *stream(options?: DeliveryReadOptions): AsyncGenerator<SessionStreamEvent> {
+    throwIfAborted(options?.signal);
+    for await (const event of this.#createStream(options)) {
+      throwIfAborted(options?.signal);
+      yield event;
+    }
+    throwIfAborted(options?.signal);
   }
 
-  async #collect(): Promise<DeliveryResult<TOutput>> {
-    const events: SessionStreamEvent[] = [];
-    for await (const event of this) events.push(event);
-    const summary = summarizeTurnEvents(events, this.deliveryId);
-    return {
+  /** Caches only a completed summary; failed/aborted reads can be retried. */
+  async result(options?: DeliveryReadOptions): Promise<DeliveryResult<TOutput>> {
+    throwIfAborted(options?.signal);
+    if (this.#result !== undefined) return this.#result;
+    const accumulator = turnSummary(this.deliveryId);
+    for await (const event of this.stream(options)) accumulator.observe(event);
+    const summary = accumulator.result();
+    if (summary.status === "working" || summary.outcome === undefined) {
+      throw new Error("The stream ended before the accepted delivery settled.");
+    }
+    const data = {
       data: summary.result as TOutput | undefined,
       deliveryId: this.deliveryId,
-      events,
       interactions: summary.interactions,
+      outcome: summary.outcome,
       reply: summary.message,
       sessionEnded: summary.sessionEnded,
       sessionId: this.sessionId,
-      status: summary.status,
     };
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<SessionStreamEvent> {
-    if (this.#consumed) throw new Error("Delivery has already been consumed.");
-    this.#consumed = true;
-    return this.#createStream()[Symbol.asyncIterator]();
+    const result: DeliveryResult<TOutput> =
+      summary.status === "failed"
+        ? {
+            ...data,
+            status: "failed",
+            error: summary.failure ?? { code: "DELIVERY_FAILED", message: "The delivery failed." },
+          }
+        : { ...data, status: summary.status };
+    this.#result = result;
+    return result;
   }
 }

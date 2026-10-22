@@ -1,7 +1,7 @@
 "use client";
 
 import { ClientError, type MessagePart } from "eve/client";
-import { activity, failure, interaction, type Activity } from "eve/events";
+import { activity, failure, interaction, interactions, turns, type Activity } from "eve/events";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -78,10 +78,10 @@ export function AgentChat({
   // Show what the agent is doing until its message has something to show, unless it waits on you.
   const showPendingThinking =
     isBusy &&
-    now.kind !== "waiting-on-person" &&
+    now.kind !== "waiting-on-interaction" &&
     (lastMessage?.role !== "assistant" || isPendingAssistantShell);
   const failed =
-    isBusy || isResuming ? undefined : failure(agent.view, agent.view.session.latestTurnId);
+    isBusy || isResuming ? undefined : failure(agent.view, turns(agent.view).at(-1)?.turnId);
   const turnFailure =
     failed?.code === "MODEL_CALL_FAILED"
       ? "The model is temporarily unavailable. Please try again."
@@ -96,12 +96,12 @@ export function AgentChat({
     agent.error instanceof ClientError && agent.error.code === "session_not_active";
   // Answers are accepted while work runs; the server's settlement closes each request.
   const canRespond = (interactionId: string) =>
-    !isResuming && !sessionEnded && agent.view.interactions[interactionId]?.status === "open";
+    !isResuming && !sessionEnded && interaction(agent.view, interactionId)?.status === "open";
   // A tool call can ask several questions at once, and its message part holds only the latest.
   const questionsFor = (callId: string) =>
-    Object.keys(agent.view.interactions)
-      .flatMap((id) => interaction(agent.view, id) ?? [])
-      .filter((input) => input.request.kind === "question" && input.call?.callId === callId);
+    interactions(agent.view).filter(
+      (input) => input.request.kind === "question" && input.call?.callId === callId,
+    );
 
   const requestCancellation = () => {
     setCancellationError(undefined);

@@ -1,4 +1,4 @@
-import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
+import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
 import type { ToolStub } from "eve/evals";
 import { defineEval } from "eve/evals";
@@ -51,12 +51,9 @@ export default defineEval({
 });
 
 function outputs(events: readonly SessionStreamEvent[]): unknown[] {
-  const view = emptySessionView();
-  foldEvents(view, events);
+  const view = foldEvents(emptySessionView(), events);
 
-  return Object.values(view.calls).flatMap((call) =>
-    call.capability.name === FANOUT_TOOL_NAME && call.outcome === "completed"
-      ? [callOutputSource(view, call.callId)?.output]
-      : [],
+  return calls(view).flatMap((call) =>
+    call.name === FANOUT_TOOL_NAME && call.outcome === "completed" ? [call.output] : [],
   );
 }

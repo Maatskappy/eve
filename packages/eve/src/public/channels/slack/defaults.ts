@@ -1,3 +1,4 @@
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { errorHintOf } from "#public/channels/reply.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -313,12 +314,13 @@ export function defaultInteractionOpenedHandler(
 ): NonNullable<SlackChannelInternalEvents["interaction.opened"]> {
   const showRequests = defaultInteractionsHandler(approvalChannel);
   return async ({ data }, ctx) => {
-    const batch = requestBatchOf(ctx.view, data);
+    const view = sessionTables(ctx.view);
+    const batch = requestBatchOf(view, data);
     if (batch !== undefined) {
       await showRequests(batch, ctx);
       return;
     }
-    const signIn = signInOf(ctx.view, data.interactionId);
+    const signIn = signInOf(view, data.interactionId);
     if (signIn !== undefined) await showSlackSignIn(signIn, ctx.channel);
   };
 }
@@ -333,18 +335,19 @@ export function defaultInteractionOpenedHandler(
 export const defaultEvents: SlackChannelInternalEvents = {
   async "interaction.settled"({ data }, ctx) {
     const { channel } = ctx;
-    const signIn = signInOf(ctx.view, data.interactionId);
+    const view = sessionTables(ctx.view);
+    const signIn = signInOf(view, data.interactionId);
     if (signIn !== undefined) {
       await settleSlackSignIn(signIn, data, channel);
       return;
     }
-    const resolution = requestSettlementOf(ctx.view, data);
+    const resolution = requestSettlementOf(view, data);
     if (resolution !== undefined) await settleApproval(resolution, channel);
   },
 
   async "response.settled"({ data }, ctx) {
     const { channel } = ctx;
-    const refused = refusedAnswerOf(ctx.view, data);
+    const refused = refusedAnswerOf(sessionTables(ctx.view), data);
     if (refused !== undefined) await notifyRefusedResponder(refused, channel);
   },
 
@@ -357,8 +360,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
   // A model run that leaves its turn waiting on tasks names them.
   async "model.settled"(event, ctx) {
     const turnId = event.scope?.turnId;
-    if (turnId === undefined || waiting(ctx.view, turnId)?.on !== "work") return;
-    const working = workingTaskNames(ctx.view, turnId);
+    if (turnId === undefined || waiting(sessionTables(ctx.view), turnId)?.on !== "work") return;
+    const working = workingTaskNames(sessionTables(ctx.view), turnId);
     if (working.length > 0) await showStatus(ctx.channel, waitingOnTasks(working));
   },
 
@@ -444,7 +447,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // Task replies settle their calls, not their reusable task. The next model run reads them.
     const { taskId, turnId } = event.scope ?? {};
     if (taskId !== undefined && turnId !== undefined && data.outcome !== "interrupted") {
-      const task = ctx.view.tasks[taskId];
+      const task = sessionTables(ctx.view).tasks[taskId];
       const pending = channel.state.pendingTaskResults;
       const names = pending?.turnId === turnId ? pending.names : [];
       const name = task?.kind === "agent" ? task.name : null;

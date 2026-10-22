@@ -1,8 +1,3 @@
-import type { SessionSendOptions, SessionRespondOptions } from "#channel/session.js";
-import type { SessionControlOptions } from "#channel/types.js";
-import type { Delivery } from "#shared/delivery.js";
-import type { Answer, StrictAnswers } from "#shared/input.js";
-import type { MessageContent } from "#shared/message-content.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { StreamReconnectPolicy } from "#client/types.js";
 
@@ -22,25 +17,8 @@ export interface SessionStreamOptions {
   readonly streamReconnectPolicy?: StreamReconnectPolicy;
 }
 
-/** A read-only session handle. Attaching it performs no I/O. */
+/** A read-only session handle. Attaching it performs no I/O and grants no command authority. */
 export interface SessionReader {
   readonly id: string;
   stream(options?: SessionStreamOptions): AsyncIterable<SessionStreamEvent>;
-}
-
-/** Commands available only on handles that already carry authenticated authority. */
-export interface SessionOperations<
-  TSendOptions = SessionSendOptions,
-  TRespondOptions = SessionRespondOptions,
-  TControlOptions = SessionControlOptions,
-> extends SessionReader {
-  send(message: MessageContent, options: TSendOptions): Promise<Delivery>;
-  respond<const TAnswers extends readonly Answer[]>(
-    answers: StrictAnswers<TAnswers>,
-    options: TRespondOptions,
-  ): Promise<Delivery>;
-  cancel(options?: TControlOptions & { readonly turnId?: string | null }): Promise<Delivery>;
-  clear(options?: TControlOptions): Promise<Delivery>;
-  compact(options?: TControlOptions): Promise<Delivery>;
-  reset(options?: TControlOptions & { readonly reason?: string }): Promise<Delivery>;
 }

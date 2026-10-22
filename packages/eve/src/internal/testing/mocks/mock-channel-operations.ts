@@ -24,11 +24,11 @@ export function mockChannelContext<TState = undefined>(
   return {
     from(continuationToken) {
       const source: ChannelSource<TState> = {
+        async create() {
+          throw new Error("This delivery-only mock does not create sessions.");
+        },
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
-        },
-        async create() {
-          return { created: true, session: { id: `session:${continuationToken}` } } as never;
         },
         async respond(answers, options) {
           return (await observeDelivery(continuationToken, {

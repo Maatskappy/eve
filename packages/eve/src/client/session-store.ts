@@ -7,7 +7,6 @@ import type {
   SessionStoreSnapshot,
 } from "#client/session-store-state.js";
 import { StreamDelivery, type Delivery } from "#client/delivery.js";
-import { deliveryEvents } from "#client/delivery-events.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type {
   SessionEventStream,
@@ -23,9 +22,9 @@ import {
   waitWithSignal,
 } from "#client/session-store-helpers.js";
 import { activeTurn, failure, idle } from "#protocol/session-projection/selectors.js";
-import { openSignIns } from "#protocol/session-reader.js";
+import { openSignIns } from "#protocol/session-projection/reader.js";
 import { toError } from "#shared/errors.js";
-import type { SendTurnPayload } from "#client/types.js";
+import type { ClientSessionState, SendTurnPayload } from "#client/types.js";
 
 export type {
   SessionStoreCallbacks,
@@ -60,9 +59,15 @@ export class SessionStore {
   #error: Error | undefined;
   #events: readonly SessionStreamEvent[];
   #snapshot: SessionStoreSnapshot;
+  #observedSession: ClientSessionState | undefined;
   #inLine = false;
   #posting = 0;
   #finishes = 0;
+  readonly #finishedTurns = new Set<string>();
+  #endings: {
+    event: Extract<SessionStreamEvent, { type: "turn.settled" | "session.ended" }>;
+    historical: boolean;
+  }[] = [];
 
   constructor(init: SessionStoreInit) {
     this.#autoPrewarm = init.prewarm ?? false;
@@ -158,21 +163,26 @@ export class SessionStore {
       // the stream beats the POST response. No renderer has to match messages by text.
       posting = true;
       this.#posting += 1;
-      const response = await this.#dispatch({ ...prepared, signal });
+      const delivery = await this.#dispatch({ ...prepared, signal });
       throwIfAborted(signal);
-      const deliveryId = response.deliveryId;
+      const deliveryId = delivery.deliveryId;
       if (deliveryId === undefined)
         throw new Error("The server did not identify the accepted delivery.");
       retract?.accept(deliveryId);
       retract = undefined;
-      this.#accepted.add(deliveryId);
-      if (submissionId !== undefined) {
-        this.#conversationClient.confirmSubmission(submissionId, deliveryId);
-        this.#messageSubmissions.correlate(submissionId, deliveryId);
+      if (lifetime === this.#controller) {
+        if (submissionId !== undefined) {
+          this.#conversationClient.confirmSubmission(submissionId, deliveryId);
+          this.#messageSubmissions.correlate(submissionId, deliveryId);
+        }
+        this.#acceptReceipt(deliveryId);
       }
-      this.#reconcile();
       accepted.resolve(deliveryId);
-      return this.#storedDelivery<TOutput>(response, signal);
+      return new StreamDelivery<TOutput>({
+        sessionId: delivery.sessionId,
+        deliveryId,
+        createStream: (read) => delivery.stream(read),
+      });
     } catch (error) {
       if (lifetime === this.#controller) {
         retract?.();
@@ -212,7 +222,6 @@ export class SessionStore {
       .finally(() => {
         if (lifetime !== this.#controller) return;
         this.#resumePromise = undefined;
-        this.#finishes = 0;
         this.#publish();
         this.#closeStreamWhenIdle();
       });
@@ -283,41 +292,13 @@ export class SessionStore {
     try {
       const receipt = await dispatch(session);
       throwIfAborted(lifetime.signal);
-      this.#accepted.add(receipt.deliveryId);
-      this.#reconcile();
-      return this.#storedDelivery(receipt, lifetime.signal);
+      this.#acceptReceipt(receipt.deliveryId);
+      return receipt;
     } finally {
       if (lifetime === this.#controller) {
         this.#posting -= 1;
         this.#publish();
         this.#closeStreamWhenIdle();
-      }
-    }
-  }
-
-  #storedDelivery<TOutput = unknown>(
-    receipt: Pick<Delivery, "sessionId" | "deliveryId">,
-    signal: AbortSignal,
-  ): Delivery<TOutput> {
-    return new StreamDelivery<TOutput>({
-      sessionId: receipt.sessionId,
-      deliveryId: receipt.deliveryId,
-      createStream: () => deliveryEvents(this.#storedEvents(signal), receipt.deliveryId, signal),
-    });
-  }
-
-  async *#storedEvents(signal: AbortSignal): AsyncIterable<SessionStreamEvent> {
-    let cursor = 0;
-    for (;;) {
-      throwIfAborted(signal);
-      while (cursor < this.#events.length) yield this.#events[cursor++]!;
-      if (this.#error !== undefined) throw this.#error;
-      const updated = Promise.withResolvers<void>();
-      const unsubscribe = this.subscribe(() => updated.resolve());
-      try {
-        if (cursor === this.#events.length) await waitWithSignal(updated.promise, signal);
-      } finally {
-        unsubscribe();
       }
     }
   }
@@ -337,12 +318,13 @@ export class SessionStore {
     this.#stop();
     if (!this.#externalSession) this.#session = undefined;
     this.#accepted.clear();
+    this.#finishedTurns.clear();
     this.#events = [];
     this.#conversationClient.reset();
     this.#messageSubmissions.reset();
     this.#error = undefined;
     if (this.#attached) this.#followAgents();
-    this.#callbacks.onSessionChange?.(this.#session?.state);
+    this.#callbacks.onSessionChange?.(this.#sessionState);
     this.#publish();
     if (this.#autoPrewarm && this.#attached) void this.prewarm().catch(() => {});
   }
@@ -356,6 +338,7 @@ export class SessionStore {
     this.#pending.clear();
     this.#posting = 0;
     this.#finishes = 0;
+    this.#endings = [];
     this.#inLine = false;
   }
 
@@ -368,10 +351,10 @@ export class SessionStore {
     const signal = input?.signal ?? lifetime.signal;
     const promise = (async () => {
       let session: ClientSession;
-      let response: Delivery | undefined;
+      let delivery: Delivery | undefined;
       if (input?.message === undefined) ({ session } = await client.sessions.create({ signal }));
       else
-        ({ session, response } = await client.sessions.create({
+        ({ session, delivery } = await client.sessions.create({
           ...input,
           message: input.message,
           signal,
@@ -379,10 +362,10 @@ export class SessionStore {
       throwIfAborted(lifetime.signal);
       this.#session = session;
       this.#error = undefined;
-      this.#callbacks.onSessionChange?.(session.state);
+      this.#callbacks.onSessionChange?.(this.#sessionState);
       this.#followAgents();
       this.#publish();
-      return response;
+      return delivery;
     })();
     this.#creation = promise;
     const clear = () => {
@@ -403,11 +386,11 @@ export class SessionStore {
     throwIfAborted(input.signal);
     if (this.#session === undefined) {
       if (input.message === undefined) throw new Error("Cannot answer before the session starts.");
-      const response = await this.#create(input);
+      const delivery = await this.#create(input);
       this.#ensureStream(input);
-      if (response === undefined)
+      if (delivery === undefined)
         throw new Error("The session was created without accepting a message.");
-      return response;
+      return delivery;
     }
     this.#ensureStream(input);
     return input.answers === undefined
@@ -424,8 +407,8 @@ export class SessionStore {
     const lifetime = this.#controller;
     return this.#conversationClient.stream(this.#session, {
       ...options,
-      onEvent: (event) => {
-        if (lifetime === this.#controller) this.#acceptServerEvent(event);
+      onEvent: (event, historical) => {
+        if (lifetime === this.#controller) this.#acceptServerEvent(event, historical);
       },
       onError: (error) => {
         if (lifetime === this.#controller) this.#fail(error);
@@ -438,37 +421,66 @@ export class SessionStore {
       this.#conversationClient.follow(this.#session, this.#events);
   }
 
-  #acceptServerEvent(event: SessionStreamEvent): void {
+  #acceptServerEvent(event: SessionStreamEvent, historical: boolean): void {
+    const lifetime = this.#controller;
     this.#inLine = event.meta.endOfLine === false;
     if (!this.#conversationClient.observe(event, { notify: false })) return;
     this.#events = [...this.#events, event];
     this.#callbacks.onEvent?.(event);
-    if (event.type === "turn.started") this.#error = undefined;
-    if (event.type === "turn.settled") this.#finishes += 1;
-    if (
-      (event.type === "session.ended" && event.data.outcome === "failed") ||
-      (event.type === "turn.settled" && event.data.outcome === "failed")
-    ) {
-      const error = new Error(event.data.error?.message ?? "The session failed.");
-      error.name = event.data.error?.code ?? "SESSION_FAILED";
-      this.#messageSubmissions.failAll(error);
-      this.#fail(error);
-    }
+    if (lifetime !== this.#controller) return;
+    if (event.type === "turn.started" && !historical) this.#error = undefined;
+    if (event.type === "turn.settled" || event.type === "session.ended")
+      this.#endings.push({ event, historical });
     if (this.#inLine) return;
+    const view = this.#conversationClient.view;
+    const submitted = this.#accepted.size > 0;
+    const submittedTurns = new Set(
+      [...this.#accepted].flatMap((id) => {
+        const turnId = view.deliveries[id]?.turnId;
+        return turnId === undefined ? [] : [turnId];
+      }),
+    );
     this.#reconcile();
-    // Stop observes committed facts even while POST receipts gate public snapshots.
+    for (const ending of this.#endings.splice(0)) {
+      if (ending.event.type === "turn.settled") {
+        if (!ending.historical || submittedTurns.has(ending.event.data.turnId))
+          this.#finishTurn(ending.event.data.turnId);
+      } else if ((!ending.historical || submitted) && ending.event.data.outcome === "failed") {
+        this.#fail(
+          Object.assign(new Error(ending.event.data.error?.message ?? "The session failed."), {
+            name: ending.event.data.error?.code ?? "SESSION_FAILED",
+          }),
+        );
+      }
+      if (lifetime !== this.#controller) return;
+    }
     for (const check of this.#turnWaiters) check();
-    this.#callbacks.onSessionChange?.(this.#session?.state);
+    this.#callbacks.onSessionChange?.(this.#sessionState);
+    if (lifetime !== this.#controller) return;
     this.#publish();
     this.#closeStreamWhenIdle();
   }
 
+  #acceptReceipt(deliveryId: string): void {
+    const lifetime = this.#controller;
+    this.#accepted.add(deliveryId);
+    this.#reconcile();
+    const view = this.#conversationClient.view;
+    const error = view.session.status === "ended" ? failure(view) : undefined;
+    if (error !== undefined)
+      this.#fail(Object.assign(new Error(error.message), { name: error.code }));
+    if (lifetime !== this.#controller) return;
+    const turnId = view.deliveries[deliveryId]?.turnId;
+    if (turnId !== undefined && view.turns[turnId]?.status === "settled") this.#finishTurn(turnId);
+  }
+
   #reconcile(): void {
     const view = this.#conversationClient.view;
+    if (view.session.status === "ended") this.#accepted.clear();
     this.#messageSubmissions.reconcile(view);
     for (const id of this.#accepted) {
       const delivery = view.deliveries[id];
-      if (delivery !== undefined && delivery.status !== "admitted") this.#accepted.delete(id);
+      if (delivery?.status === "settled") this.#accepted.delete(id);
     }
   }
 
@@ -488,6 +500,17 @@ export class SessionStore {
     this.#conversationClient.closeStream();
   }
 
+  #finishTurn(turnId: string): void {
+    if (this.#finishedTurns.has(turnId)) return;
+    const row = this.#conversationClient.view.turns[turnId];
+    if (row?.status !== "settled") return;
+    this.#finishedTurns.add(turnId);
+    this.#finishes += 1;
+    const error = failure(this.#conversationClient.view, turnId);
+    if (error !== undefined)
+      this.#fail(Object.assign(new Error(error.message), { name: error.code }));
+  }
+
   #recordedFailure(): Error | undefined {
     const view = this.#conversationClient.view;
     const error = failure(view, view.session.latestTurnId);
@@ -504,7 +527,24 @@ export class SessionStore {
     this.#publish();
   }
 
+  /** Other Delivery/session readers may have read further than this store's committed prefix. */
+  get #sessionState(): ClientSessionState | undefined {
+    if (this.#session === undefined) return (this.#observedSession = undefined);
+    const sessionId = this.#session.id;
+    const streamIndex = this.#conversationClient.view.position;
+    if (
+      this.#observedSession?.sessionId !== sessionId ||
+      this.#observedSession.streamIndex !== streamIndex
+    ) {
+      this.#observedSession = { sessionId, streamIndex };
+    }
+    return this.#observedSession;
+  }
+
   #createSnapshot(): SessionStoreSnapshot {
+    this.#conversationClient.holdUnconfirmedMessages(
+      this.#posting > 0 && this.#messageSubmissions.awaitingReceipt,
+    );
     const data = this.#conversationClient.conversation;
     const { view } = data;
     return {
@@ -512,12 +552,12 @@ export class SessionStore {
       view,
       error: this.#error,
       events: this.#events,
-      session: this.#session?.state,
+      session: this.#sessionState,
       status:
         this.#resumePromise !== undefined
           ? "resuming"
-          : activeTurn(view) !== undefined ||
-              !idle(view) ||
+          : activeTurn(this.#conversationClient.view) !== undefined ||
+              !idle(this.#conversationClient.view) ||
               this.#pending.size > 0 ||
               this.#accepted.size > 0
             ? "busy"
@@ -526,7 +566,7 @@ export class SessionStore {
   }
 
   #publish(force = false): void {
-    if (this.#posting > 0 || (this.#resumePromise !== undefined && !force)) return;
+    if (this.#resumePromise !== undefined && !force) return;
     if (this.#inLine) {
       if (this.#error === undefined) return;
       // Transport or observer failure must be visible without publishing an unfinished line.
@@ -536,9 +576,11 @@ export class SessionStore {
     }
     this.#snapshot = this.#createSnapshot();
     const finishes = this.#finishes;
+    const lifetime = this.#controller;
     this.#finishes = 0;
     for (const subscriber of this.#subscribers) subscriber();
-    for (let index = 0; index < finishes; index += 1) this.#callbacks.onFinish?.(this.#snapshot);
+    for (let index = 0; index < finishes && lifetime === this.#controller; index += 1)
+      this.#callbacks.onFinish?.(this.#snapshot);
   }
 }
 

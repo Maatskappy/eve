@@ -130,9 +130,9 @@ export class ActiveTurn {
   }
 
   /** Admits everything the pump accepted while the last step ran. */
-  async admitBoundary(): Promise<void> {
+  async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
-    for (const payload of pending) await this.admit(payload);
+    for (const payload of pending) await this.admit(payload, settled);
   }
 
   /**
@@ -272,7 +272,7 @@ export class ActiveTurn {
   }
 
   /** Admits one payload; returns whether it was a delivery or sign-in callback. */
-  private async admit(value: SessionInboxPayload): Promise<boolean> {
+  private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
@@ -288,7 +288,11 @@ export class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return false;
       case "cancel":
-        if (this.cancelsThisTurn(value) && this.#cancelledBy === undefined) {
+        if (
+          (!settled || value.kind !== "cancel") &&
+          this.cancelsThisTurn(value) &&
+          this.#cancelledBy === undefined
+        ) {
           this.#cancelledBy ??= admitted.origin;
           this.abort();
         } else if (admitted.origin !== undefined) {

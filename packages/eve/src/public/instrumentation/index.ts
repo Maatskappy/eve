@@ -7,6 +7,7 @@ import type { InstrumentationChannel } from "#public/channels/index.js";
 import type { JsonObject } from "#shared/json.js";
 
 export * from "#public/instrumentation/provider.js";
+export type { InstrumentationModelOutcome } from "#instrumentation/lifecycle.js";
 
 /**
  * User-authored runtime context values attached to AI SDK telemetry spans.

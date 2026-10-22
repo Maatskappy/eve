@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
-import { viewOfEvents } from "#protocol/session-projection/fold.js";
+import { emptySessionView, foldEvents } from "#protocol/session-projection/public-view.js";
 import { combineDerivedFacts } from "#evals/runner/execute-task.js";
 import type { EveEvalSessionResult } from "#evals/types.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
@@ -19,7 +19,7 @@ function handle(firstLine: number, events: readonly SessionEvent[]): EveEvalSess
     },
   }));
   return {
-    view: viewOfEvents(stamped).view,
+    view: foldEvents(emptySessionView(), stamped),
     derived: deriveRunFacts(stamped, { sessionId: "session-1" }),
     events: stamped,
     primary: true,

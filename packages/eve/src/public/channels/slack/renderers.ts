@@ -1,4 +1,5 @@
 import type { TaskCard } from "#channel/task-card.js";
+import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
@@ -106,6 +107,10 @@ export interface SlackRenderer {
 
 /** Types a Slack renderer. */
 export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
+  for (const key of Object.keys(renderer.events ?? {})) {
+    const removed = removedEventKeyMessage(key);
+    if (removed !== undefined) throw new Error(`A Slack renderer handles ${removed}`);
+  }
   return renderer;
 }
 
@@ -125,6 +130,7 @@ export function composeSlackRenderers(
   renderers: readonly SlackRenderer[],
   defaults: SlackRenderChain,
 ): SlackRenderChain {
+  for (const renderer of renderers) defineSlackRenderer(renderer);
   return {
     events: composeEvents(renderers, defaults.events),
     received: (message, channel) => composeReceived(renderers, defaults, message, channel, 0),

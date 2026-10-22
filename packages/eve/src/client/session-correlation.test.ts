@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { collectTurnEvents, summarizeTurnEvents } from "#client/session-utils.js";
+import type { Delivery } from "#shared/delivery.js";
 import { ClientSession } from "#client/session.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
@@ -25,6 +27,11 @@ function accepted(deliveryId = "new-delivery") {
   return Response.json({ sessionId: "session_1", deliveryId }, { status: 202 });
 }
 
+async function capture(receipt: Delivery) {
+  const events = await collectTurnEvents(receipt.stream(), receipt.deliveryId);
+  return { ...summarizeTurnEvents(events, receipt.deliveryId), events };
+}
+
 describe("accepted message correlation", () => {
   it.each(["steer", "queue"] as const)(
     "skips completed and in-flight older turns for a %s send from a stale cursor",
@@ -39,8 +46,8 @@ describe("accepted message correlation", () => {
         .mockResolvedValueOnce(accepted())
         .mockResolvedValueOnce(stream(events));
       const resumed = session();
-      const result = await (await resumed.send("new report", { turnPolicy })).result();
-      expect(result.reply).toBe("NEW REPORT");
+      const result = await capture(await resumed.send("new report", { turnPolicy }));
+      expect(result.message).toBe("NEW REPORT");
       expect(result.events).toHaveLength(current.length);
       expect(resumed.state.streamIndex).toBe(events.length);
     },
@@ -65,8 +72,8 @@ describe("accepted message correlation", () => {
       .mockResolvedValueOnce(
         stream([...current.slice(0, settled), ...other, ...current.slice(settled)]),
       );
-    const result = await (await session().send("new report")).result();
-    expect(result.reply).toBe("NEW REPORT");
+    const result = await capture(await session().send("new report"));
+    expect(result.message).toBe("NEW REPORT");
     expect(result.events).toHaveLength(current.length + other.length);
   });
 
@@ -83,7 +90,7 @@ describe("accepted message correlation", () => {
           headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
         }),
       );
-    const result = await (await session().send("hello")).result();
+    const result = await capture(await session().send("hello"));
     expect(result.events.map((event) => event.type).slice(0, 2)).toEqual([
       "session.started",
       "delivery.admitted",

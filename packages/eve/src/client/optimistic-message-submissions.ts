@@ -49,7 +49,11 @@ export class OptimisticMessageSubmissions {
       const row =
         submission.deliveryId === undefined ? undefined : view.deliveries[submission.deliveryId];
       if (row?.consumedAt !== undefined) this.#submissions.delete(id);
-      else if (row?.status === "settled" && submission.error === undefined) {
+      else if (
+        row !== undefined &&
+        (row.status === "settled" || view.session.status === "ended") &&
+        submission.error === undefined
+      ) {
         this.fail(new Error(row.reason ?? "The message was not consumed."), id);
       }
     }
@@ -65,10 +69,10 @@ export class OptimisticMessageSubmissions {
     }
   }
 
-  failAll(error: Error): void {
-    for (const [id, submission] of this.#submissions) {
-      if (submission.error === undefined) this.fail(error, id);
-    }
+  get awaitingReceipt(): boolean {
+    return [...this.#submissions.values()].some(
+      (submission) => submission.deliveryId === undefined && submission.error === undefined,
+    );
   }
 
   #publish(): void {

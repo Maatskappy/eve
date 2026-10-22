@@ -1,6 +1,6 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverPayload } from "#channel/types.js";
-import { promptQueueHead } from "#protocol/session-reader.js";
+import { promptQueueHead } from "#protocol/session-projection/reader.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";

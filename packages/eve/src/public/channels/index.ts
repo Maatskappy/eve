@@ -1,3 +1,4 @@
+export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
 export {
   defineChannel,
   disableRoute,
@@ -11,9 +12,6 @@ export {
   WS,
   type AttachSessionFn,
   SessionStrandedError,
-  SessionNotActiveError,
-  type Delivery,
-  type DeliveryResult,
   type Channel,
   type ChannelAudience,
   type AudienceCaller,
@@ -32,14 +30,10 @@ export {
   type ChannelDefinition,
   type ChannelDelivery,
   type DisabledRouteSentinel,
+  type ChannelContext,
   type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
-  type Session,
-  type SessionOperations,
-  type SessionHandle,
-  type SessionRespondOptions,
-  type SessionSendOptions,
   type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
@@ -75,7 +69,6 @@ export type {
   MessagePart,
   MessageTextPart,
 } from "#shared/message-content.js";
-export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,

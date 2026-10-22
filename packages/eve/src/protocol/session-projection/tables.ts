@@ -1,4 +1,4 @@
-// The public tables: one per family, read-only, holding what the facts introduced and settled,
+// Private fold tables: one per family, holding what the facts introduced and settled,
 // with each row's status and the position of the line that introduced it.
 
 import type {
@@ -202,7 +202,7 @@ export interface UsageTotals {
 type Table<TRow> = { readonly [id: string]: TRow };
 
 /**
- * A session's lifecycle as of one position. Rows are replaced, never edited, when their entity
+ * Private projection state as of one position. Rows are replaced, never edited, when their entity
  * changes; a missing row means "not retained here", not "never existed".
  */
 export interface SessionView {

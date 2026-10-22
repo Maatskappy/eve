@@ -94,8 +94,9 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
     const result = (name: string) =>
       ({
         callId: "call_1",
-        capability: { kind: "tool", name },
-        outcome: "completed",
+        kind: "tool",
+        name,
+        state: "completed",
         output: {},
       }) as const;
 
@@ -135,8 +136,9 @@ describe("toolResultFrom identity for connections sharing a host (#202)", () => 
     const match = toolResultFrom(
       {
         callId: "call_1",
-        capability: { kind: "tool", name: "spec_only__list" },
-        outcome: "completed",
+        kind: "tool",
+        name: "spec_only__list",
+        state: "completed",
         output: {},
       },
       define(),

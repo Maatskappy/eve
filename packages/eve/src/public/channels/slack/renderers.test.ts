@@ -27,6 +27,18 @@ const completed: ChannelEventOf<"content.completed"> = {
 };
 
 describe("composeSlackRenderers", () => {
+  it("rejects retired event handlers in factories and directly supplied renderers", () => {
+    const renderer = { events: { "input.requested": () => {} } };
+    expect(() => defineSlackRenderer(renderer as never)).toThrow("interaction.opened");
+    expect(() =>
+      composeSlackRenderers([renderer as never], {
+        events: {},
+        received: async () => undefined,
+        taskCard: () => null,
+      }),
+    ).toThrow("interaction.opened");
+  });
+
   it("runs each renderer around the default with the event and its context", async () => {
     const calls: string[] = [];
     const fallback = vi.fn(async (event: ChannelEventOf<"content.completed">) => {

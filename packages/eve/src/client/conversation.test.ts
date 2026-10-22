@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { call, interaction, turn } from "#protocol/session-projection/public-view.js";
 import { Conversation, conversationOf } from "#client/conversation.js";
 import type { EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -117,11 +118,11 @@ describe("the conversation", () => {
       at,
     );
     conversation.observe(events[0]!);
-    expect(conversation.state.view.calls.call_0).toBeUndefined();
+    expect(call(conversation.state.view, "call_0")).toBeUndefined();
     conversation.observe(events[1]!);
-    expect(conversation.state.view.calls.call_0?.status).toBe("requested");
-    expect(conversation.state.view.interactions.i_0?.status).toBe("open");
-    expect(before.view.calls.call_0).toBeUndefined();
+    expect(call(conversation.state.view, "call_0")?.state).toBe("approval");
+    expect(interaction(conversation.state.view, "i_0")?.status).toBe("open");
+    expect(call(before.view, "call_0")).toBeUndefined();
   });
 
   it("shows a turn's parts and calls in the order the stream introduced them", () => {
@@ -443,7 +444,82 @@ describe("the conversation", () => {
     const state = conversationOf(
       [...started, text("p_0", "Done.")].map((event, index) => stampTestEvent(event, index)),
     );
-    expect(state.view.turns[turnId]?.status).toBe("running");
+    expect(turn(state.view, turnId)?.status).toBe("running");
     expect(state.messages).toHaveLength(2);
+  });
+  it("shows imported history before what its line's deliveries sent, apart from the reply", () => {
+    const line = (at: number, events: readonly SessionEvent[]) =>
+      events.map((event, index) => ({
+        ...event,
+        meta: {
+          at: new Date(Date.UTC(2026, 0, 1) + at).toISOString(),
+          endOfLine: index === events.length - 1,
+          position: { index, line: at },
+        },
+      }));
+    const consumed = (
+      deliveryId: string,
+      history: readonly {
+        readonly id?: string;
+        readonly role: "user" | "assistant";
+        readonly text: string;
+      }[],
+      message: string,
+    ): SessionEvent => ({
+      data: { deliveryId, history, parts: [{ kind: "text", text: message }], turnId },
+      scope: { turnId },
+      type: "delivery.consumed",
+    });
+    const conversation = new Conversation();
+    for (const event of [
+      ...line(0, [
+        { data: { deliveryId: "d_0" }, type: "delivery.admitted" },
+        { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
+      ]),
+      ...line(1, [
+        {
+          data: { cause: { deliveryId: "d_0" }, follows: null, turnId },
+          scope: { turnId },
+          type: "turn.started",
+        },
+        consumed(
+          "d_0",
+          [
+            { id: "app-1", role: "user", text: "Earlier question" },
+            { role: "assistant", text: "Earlier answer" },
+          ],
+          "Deploy it.",
+        ),
+        consumed("d_1", [{ role: "user", text: "Bob's note" }], "Use staging."),
+        { data: { owner: { turnId }, runId }, scope, type: "model.requested" },
+      ]),
+      ...line(2, [text("p_0", "Done.")]),
+    ])
+      conversation.observe(event);
+
+    const { messages } = conversation.state;
+    expect(
+      messages.map(
+        (message) =>
+          `${message.role}: ${message.parts.map((part) => ("text" in part ? part.text : part.type)).join("")}`,
+      ),
+    ).toEqual([
+      "user: Earlier question",
+      "assistant: Earlier answer",
+      "user: Bob's note",
+      "user: Deploy it.",
+      "user: Use staging.",
+      "assistant: Done.",
+    ]);
+    // Imported messages name no turn, so the turn's reply never streams into one.
+    expect(messages[0]?.metadata).toEqual({
+      historyId: "app-1",
+      imported: true,
+      status: "complete",
+    });
+    expect(messages[1]?.metadata).toEqual({ imported: true, status: "complete" });
+    expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
+    // The delivery's row keeps no copy of the history its fact carried.
+    expect(conversation.view.deliveries.d_0).not.toHaveProperty("history");
   });
 });

@@ -3,26 +3,17 @@ import { resolveActiveAuthorizationChallenges } from "./sign-ins.js";
 import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { isObject } from "#shared/guards.js";
 
-import type { ActiveApprovalCandidate, DurableApprovalState } from "./candidates.js";
-import { parseProxyInputRequest, type ProxyInputRequest } from "./relays.js";
+import type { PendingResponder } from "./responders.js";
+import { parseRelay, type Relay } from "./relays.js";
 
-// Storage stays in hitl/ to keep the rule 50 import seam around the request codecs.
-// Sign-ins and relays use machine transitions; approval writes through candidates.ts remain
-// direct, and checkpoint upgrades migrate legacy storage outside the machine.
-// The module that owns the human-in-the-loop storage key: the requests the
-// session holds, i.e. responders' approval candidates, the sign-ins it waits on, and the requests
-// it relays for a workflow run or a child session. Nothing else names their session-state key;
-// `candidates.ts` and `relays.ts` model the records it stores.
+// The module that owns the human-in-the-loop storage key: the records the session holds while
+// people act, i.e. who gave each answer a response policy weighs, the sign-ins it waits on, and
+// the requests it relays for a workflow run or a child session. Nothing else names their
+// session-state key; `responders.ts` and `relays.ts` model the records it stores. Machine
+// transitions write them.
 
 /** The session-state key of the human-in-the-loop requests. */
 const REQUESTS_KEY = "eve.runtime.hitl.requests";
-
-/** Where builds before checkpoint version 15 kept the requests. Only checkpoint upgrades read them. */
-export const LEGACY_HITL_STATE_KEYS = {
-  approvals: "eve.runtime.hitl.approvalState",
-  signIns: "eve.runtime.pendingAuthorization",
-  relays: "eve.runtime.proxyInputRequests",
-} as const;
 
 /**
  * A read-only snapshot of the human-in-the-loop records, the one way code outside `harness/hitl/`
@@ -31,17 +22,23 @@ export const LEGACY_HITL_STATE_KEYS = {
 export interface HitlState {
   /** The sign-in attempts the session waits on. */
   readonly signIns: readonly AuthorizationChallenge[];
-  /** Requests this session relays for a child session or a workflow run, by `requestId`. */
-  readonly relays: ReadonlyMap<string, ProxyInputRequest>;
+  /** Who gave each answer a response policy still weighs, by response id. */
+  readonly responders: Readonly<Record<string, PendingResponder>>;
+  /** Where answers go for the requests this session relays, by interaction id. */
+  readonly relays: ReadonlyMap<string, Relay>;
 }
 
 /** Each record is parsed on first read: most readers want one. */
 export function readHitlState(state: SessionStateMap | undefined): HitlState {
   let signIns: readonly AuthorizationChallenge[] | undefined;
-  let relays: ReadonlyMap<string, ProxyInputRequest> | undefined;
+  let relays: ReadonlyMap<string, Relay> | undefined;
+  let responders: Readonly<Record<string, PendingResponder>> | undefined;
   return {
     get signIns() {
       return (signIns ??= readSignIns(state));
+    },
+    get responders() {
+      return (responders ??= readResponders(state));
     },
     get relays() {
       return (relays ??= new Map(Object.entries(readRelays(state))));
@@ -68,17 +65,21 @@ export interface HitlStateChange {
   /** Every sign-in the session waits on once the change applies; `[]` withdraws them all. */
   readonly signIns?: readonly AuthorizationChallenge[];
   readonly relays?: RelayChange;
+  readonly responders?: ResponderChange;
 }
 
-/** Relay routes a transition records or retires. */
+/** Responder records a transition writes. Each retires once its response closes. */
+export interface ResponderChange {
+  readonly upsert?: Readonly<Record<string, PendingResponder>>;
+  /** Responses whose record goes now: `dropClosedRecords` retires closed ones. */
+  readonly retire?: readonly string[];
+}
+
+/** Relay routes a transition records. Each retires once its request closes or is answered. */
 export interface RelayChange {
-  /** A child's fresh batch: it replaces the routes that child's input source held. */
-  readonly upsert?: {
-    readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-    readonly forChildContinuationToken: string;
-    readonly inputSource?: string;
-  };
-  /** Routes whose answers went down to the asker, or whose request closed. */
+  /** Routes of requests that opened, by interaction id. */
+  readonly upsert?: Readonly<Record<string, Relay>>;
+  /** Routes whose record goes now: `dropClosedRecords` retires closed ones. */
   readonly retire?: readonly string[];
 }
 
@@ -93,6 +94,7 @@ export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
   }
   if (change.relays?.upsert !== undefined) state = upsertRelays(state, change.relays.upsert);
   if (change.relays?.retire !== undefined) state = retireRelays(state, change.relays.retire);
+  if (change.responders !== undefined) state = changeResponders(state, change.responders);
   return state === session.state ? session : { ...session, state };
 }
 
@@ -103,7 +105,8 @@ export function writeHitlState<T extends { readonly state?: SessionStateMap }>(
 // Every request the session holds sits under one key, a field per kind, so no kind's ids can
 // collide with another's.
 interface StoredRequests {
-  readonly approvals?: unknown;
+  /** Who gave each answer a response policy still weighs, by response id. */
+  readonly responders?: unknown;
   /** The sign-in attempts the session waits on. */
   readonly signIns?: unknown;
   /** Workflow runs' `ctx.ask()` questions and child sessions' requests, by request id. */
@@ -129,104 +132,37 @@ function writeRequests(
   return Object.keys(rest).length > 0 ? rest : undefined;
 }
 
-/**
- * Moves the records builds before checkpoint version 15 kept under
- * {@link LEGACY_HITL_STATE_KEYS} into the requests record as they were stored; each reader is as
- * lenient as its old one. Only the checkpoint upgrade calls it.
- */
-export function upgradeLegacyHitlState(
-  state: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const {
-    [LEGACY_HITL_STATE_KEYS.approvals]: approvals,
-    [LEGACY_HITL_STATE_KEYS.signIns]: signIns,
-    [LEGACY_HITL_STATE_KEYS.relays]: relays,
-    ...rest
-  } = state;
-  let next: SessionStateMap | undefined = rest;
-  next = writeRequests(next, "approvals", approvals);
-  next = writeRequests(
-    next,
-    "signIns",
-    isObject(signIns) && signIns.challenges !== undefined ? signIns.challenges : signIns,
-  );
-  const noRelays = isObject(relays) && Object.keys(relays).length === 0;
-  next = writeRequests(next, "relays", noRelays ? undefined : relays);
-  return next ?? {};
-}
-
 // ---------------------------------------------------------------------------
-// Approval candidates
+// Responders
 // ---------------------------------------------------------------------------
 
-/**
- * A candidate is an Approve unless it records Cancel: candidates persisted
- * before Cancel was authorized carry no decision, and their responder pressed
- * Approve.
- */
-function readActiveCandidates(
-  candidates: Readonly<Record<string, ActiveApprovalCandidate>>,
-): Readonly<Record<string, ActiveApprovalCandidate>> {
-  return Object.fromEntries(
-    Object.entries(candidates).map(([candidateId, candidate]) => [
-      candidateId,
-      { ...candidate, decision: candidate.decision === "cancel" ? "cancel" : "approve" },
-    ]),
-  );
-}
-
-/** The approval records. Only `candidates.ts` calls it. */
-export function readApprovalState(state: SessionStateMap | undefined): DurableApprovalState {
-  const value = readRequests(state).approvals;
-  if (typeof value !== "object" || value === null) {
-    return {
-      activeCandidates: {},
-      candidateHistory: [],
-      nextCandidateSequence: 0,
-      settlements: {},
-    };
-  }
-  const candidate = value as Partial<DurableApprovalState>;
-  return {
-    activeCandidates:
-      typeof candidate.activeCandidates === "object" && candidate.activeCandidates !== null
-        ? readActiveCandidates(candidate.activeCandidates)
-        : {},
-    candidateHistory: Array.isArray(candidate.candidateHistory) ? candidate.candidateHistory : [],
-    nextCandidateSequence:
-      typeof candidate.nextCandidateSequence === "number" &&
-      Number.isSafeInteger(candidate.nextCandidateSequence) &&
-      candidate.nextCandidateSequence >= 0
-        ? candidate.nextCandidateSequence
-        : deriveNextCandidateSequence(candidate),
-    settlements:
-      typeof candidate.settlements === "object" && candidate.settlements !== null
-        ? candidate.settlements
-        : {},
-  };
-}
-
-function deriveNextCandidateSequence(state: Partial<DurableApprovalState>): number {
-  return (
-    Object.keys(state.activeCandidates ?? {}).length +
-    (Array.isArray(state.candidateHistory) ? state.candidateHistory.length : 0)
-  );
-}
-
-/** Saves the approval records. Only `candidates.ts` calls it. */
-export function writeApprovalState(
+function readResponders(
   state: SessionStateMap | undefined,
-  approvalState: DurableApprovalState,
-): SessionStateMap {
-  return writeRequests(state, "approvals", approvalState) ?? {};
+): Readonly<Record<string, PendingResponder>> {
+  const value = readRequests(state).responders;
+  return isObject(value) && !Array.isArray(value)
+    ? (value as Record<string, PendingResponder>)
+    : {};
+}
+
+function changeResponders(
+  state: SessionStateMap | undefined,
+  change: ResponderChange,
+): SessionStateMap | undefined {
+  const current = readResponders(state);
+  const retired = Object.fromEntries(
+    Object.entries(current).filter(([id]) => !(change.retire ?? []).includes(id)),
+  );
+  const next = { ...retired, ...change.upsert };
+  return writeRequests(state, "responders", Object.keys(next).length > 0 ? next : undefined);
 }
 
 /**
- * Drops what a cleared context owned: sign-in attempts and responders' approval progress. `clear`
+ * Drops what a cleared context owned: sign-in attempts and the responders policies weigh. `clear`
  * reported each close; relay routes for live tasks stay.
  */
 export function discardClearedHitlState<T extends HarnessSessionBase>(session: T): T {
-  const state = writeRequests(writeSignIns(session.state, []), "approvals", undefined);
+  const state = writeRequests(writeSignIns(session.state, []), "responders", undefined);
   return { ...session, state };
 }
 
@@ -250,52 +186,39 @@ function writeSignIns(
 // Relayed requests
 // ---------------------------------------------------------------------------
 
-function readRelays(
-  state: SessionStateMap | undefined,
-): Readonly<Record<string, ProxyInputRequest>> {
+function readRelays(state: SessionStateMap | undefined): Readonly<Record<string, Relay>> {
   const raw = readRequests(state).relays;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const result: Record<string, ProxyInputRequest> = {};
-  for (const [requestId, value] of Object.entries(raw)) {
-    const request = parseProxyInputRequest(value, requestId);
-    if (request !== undefined) result[requestId] = request;
+  const result: Record<string, Relay> = {};
+  for (const [interactionId, value] of Object.entries(raw)) {
+    const relay = parseRelay(value);
+    if (relay !== undefined) result[interactionId] = relay;
   }
   return result;
 }
 
 function writeRelays(
   state: SessionStateMap | undefined,
-  relays: Readonly<Record<string, ProxyInputRequest>>,
+  relays: Readonly<Record<string, Relay>>,
 ): SessionStateMap | undefined {
   return writeRequests(state, "relays", Object.keys(relays).length > 0 ? relays : undefined);
 }
 
-/**
- * A child raising a fresh batch replaces the routes it held for that input source, so the parent
- * never keeps stale request metadata. Other sources' routes stay independently answerable.
- */
 function upsertRelays(
   state: SessionStateMap | undefined,
-  upsert: NonNullable<RelayChange["upsert"]>,
+  upsert: Readonly<Record<string, Relay>>,
 ): SessionStateMap | undefined {
-  const kept = Object.entries(readRelays(state)).filter(
-    ([, route]) =>
-      route.childContinuationToken !== upsert.forChildContinuationToken ||
-      route.inputSource !== upsert.inputSource,
-  );
-  return writeRelays(state, Object.fromEntries([...kept, ...upsert.entries]));
+  return writeRelays(state, { ...readRelays(state), ...upsert });
 }
 
 function retireRelays(
   state: SessionStateMap | undefined,
-  requestIds: readonly string[],
+  interactionIds: readonly string[],
 ): SessionStateMap | undefined {
   const relays = readRelays(state);
-  if (!requestIds.some((requestId) => Object.hasOwn(relays, requestId))) return state;
+  if (!interactionIds.some((id) => Object.hasOwn(relays, id))) return state;
   return writeRelays(
     state,
-    Object.fromEntries(
-      Object.entries(relays).filter(([requestId]) => !requestIds.includes(requestId)),
-    ),
+    Object.fromEntries(Object.entries(relays).filter(([id]) => !interactionIds.includes(id))),
   );
 }

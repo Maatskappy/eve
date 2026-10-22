@@ -69,13 +69,13 @@ export function buildSandboxSession(
     },
     async readFile(options: SandboxReadFileOptions) {
       return await primitives.readFile({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         path: primitives.resolvePath(options.path),
       });
     },
     async readBinaryFile(options: SandboxReadBinaryFileOptions) {
       const stream = await primitives.readFile({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         path: primitives.resolvePath(options.path),
       });
       if (stream === null) {
@@ -86,7 +86,7 @@ export function buildSandboxSession(
     async readTextFile(options: SandboxReadTextFileOptions) {
       validateReadTextFileOptions(options);
       const stream = await primitives.readFile({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         path: primitives.resolvePath(options.path),
       });
       if (stream === null) {
@@ -98,14 +98,14 @@ export function buildSandboxSession(
     },
     async writeFile(options: SandboxWriteFileOptions) {
       await primitives.writeFile({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         content: options.content,
         path: primitives.resolvePath(options.path),
       });
     },
     async writeBinaryFile(options: SandboxWriteBinaryFileOptions) {
       await primitives.writeFile({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         content: bufferToStream(options.content),
         path: primitives.resolvePath(options.path),
       });
@@ -113,14 +113,14 @@ export function buildSandboxSession(
     async writeTextFile(options: SandboxWriteTextFileOptions) {
       const buf = encodeString(options.content, options.encoding ?? "utf-8");
       await primitives.writeFile({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         content: bufferToStream(buf),
         path: primitives.resolvePath(options.path),
       });
     },
     async removePath(options: SandboxRemovePathOptions) {
       await primitives.removePath({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         force: options.force,
         path: primitives.resolvePath(options.path),
         recursive: options.recursive,
@@ -131,7 +131,7 @@ export function buildSandboxSession(
     Object.assign(session, {
       [SANDBOX_WRITE_FILES]: async (options: SandboxWriteFilesOptions) => {
         await primitives.writeFiles?.({
-          abortSignal: options.abortSignal,
+          signal: options.signal,
           files: options.files.map((file) => ({
             content: file.content,
             path: primitives.resolvePath(file.path),

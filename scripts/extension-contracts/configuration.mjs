@@ -18,7 +18,10 @@ export const COMPATIBILITY_FIXTURE_PLACEHOLDER = "REPLACE_WITH_RETAINED_AUTHORIN
 
 export const PUBLIC_SURFACES = [
   { path: "src/public/extension/index.ts", capabilities: ["extension", "config"] },
-  { path: "src/public/channels/index.ts", capabilities: ["channel"] },
+  {
+    paths: ["src/public/channels/index.ts", "src/public/sessions/index.ts"],
+    capabilities: ["channel"],
+  },
   { path: "src/public/schedules/index.ts", capabilities: ["schedule"] },
   { path: "src/public/index.ts", capabilities: ["subagent"] },
   {
@@ -194,12 +197,16 @@ export function bumpCapabilityConfiguration(source, capability, decision) {
   const configuration = parseCapabilityConfiguration(source);
   const contract = configuration.contracts[capability];
   const nextVersion = contract.current + 1;
+  const removed = decision.dropAll ? contract.supported : [contract.current];
   const supported = decision.retain
     ? [...contract.supported, nextVersion]
-    : [...contract.supported.filter((version) => version !== contract.current), nextVersion];
+    : [...contract.supported.filter((version) => !removed.includes(version)), nextVersion];
   const dropped = decision.retain
     ? contract.dropped
-    : { ...contract.dropped, [contract.current]: decision.reason };
+    : {
+        ...contract.dropped,
+        ...Object.fromEntries(removed.map((version) => [version, decision.reason])),
+      };
   const droppedSource = Object.entries(dropped)
     .map(([version, reason]) => `${version}: ${JSON.stringify(reason)}`)
     .join(", ");

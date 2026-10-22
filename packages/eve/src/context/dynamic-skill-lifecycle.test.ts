@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { withDynamicSkillFiles } from "#context/dynamic-skill-files.js";
+import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { createSkillLoader, sessionSkills } from "#execution/catalog/skills.js";
 import {
+  AuthKey,
   StaticModelReferenceKey,
   DynamicSkillManifestKey,
   DynamicSkillSandboxKey,
@@ -295,6 +297,67 @@ describe("dispatchDynamicSkillEvent", () => {
 });
 
 describe("dynamic skill supporting files", () => {
+  it.each([false, true])(
+    "removes pre-upgrade installed files for a later caller (cleanup retries: %s)",
+    async (retry) => {
+      const first = createCtx();
+      first.ctx.set(AuthKey, {
+        attributes: {},
+        authenticator: "test",
+        principalId: "alice",
+        principalType: "user",
+      });
+      const resolver: ResolvedDynamicSkillResolver = {
+        ...createResolver("policy", () => null),
+        events: {
+          "session.started": (_event, context) =>
+            (context as DynamicResolveContext).session.auth.current?.principalId === "alice"
+              ? makeSkill("Alice's policy", "Read the reference.", {
+                  "private.md": "Alice's supporting data",
+                })
+              : null,
+        },
+      };
+      await dispatch(first.ctx, resolver);
+      await first.access.get();
+      const resumed = await deserializeContext(
+        JSON.parse(
+          JSON.stringify({
+            [StaticModelReferenceKey.name]: first.ctx.get(StaticModelReferenceKey),
+            [AuthKey.name]: {
+              attributes: {},
+              authenticator: "test",
+              principalId: "bob",
+              principalType: "user",
+            },
+            [DynamicSkillManifestKey.name]: first.ctx.get(DynamicSkillManifestKey),
+            [DynamicSkillSandboxKey.name]: { policy: JSON.stringify(first.state.session) },
+          }),
+        ),
+      );
+      const access = withDynamicSkillFiles(resumed, {
+        captureState: async () => ({ session: first.state.session }),
+        get: async () => first.sandbox.session,
+        stop: async () => {},
+      });
+      resumed.set(SandboxKey, access);
+      await dispatch(resumed, resolver);
+      if (retry) {
+        vi.spyOn(first.sandbox.session, "removePath").mockRejectedValueOnce(
+          new Error("cleanup interrupted"),
+        );
+        await expect(access.get()).rejects.toThrow("cleanup interrupted");
+        expect(resumed.get(DynamicSkillSandboxKey)?.policy).toBe(
+          `${JSON.stringify(first.state.session)}#`,
+        );
+      }
+      const sandbox = await access.get();
+
+      expect(await sandbox?.readTextFile({ path: `${SKILL_ROOT}/policy/private.md` })).toBeNull();
+      expect(resumed.get(DynamicSkillSandboxKey)).toEqual({});
+    },
+  );
+
   it("serves packaged instructions without a sandbox and synchronizes concurrent first access once", async () => {
     const { access, ctx, get, sandbox } = createCtx();
     const resolver = createResolver("policy", () =>

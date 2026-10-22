@@ -214,7 +214,12 @@ describe("ensureSandboxAccess", () => {
     expect(setup).toHaveBeenCalledOnce();
     expect(value.start).toHaveBeenCalledOnce();
     await expect(access.captureState()).resolves.toEqual({
-      session: { providerName: "test", state: { key: "session-1" }, stateProtocolVersion: 1 },
+      session: {
+        generation: expect.any(String),
+        providerName: "test",
+        state: { key: "session-1" },
+        stateProtocolVersion: 1,
+      },
     });
   });
 

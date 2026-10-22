@@ -17,10 +17,8 @@ import {
   type PublishedSessionEvents,
   type SessionStepState,
 } from "#execution/publish-session-events.js";
-import {
-  withSessionStateDelta,
-  type WithSessionStateDelta,
-} from "#execution/session/state-delta.js";
+import { type WithSessionStateDelta } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {

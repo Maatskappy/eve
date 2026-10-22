@@ -68,10 +68,10 @@ export function eventsOfLine(
 }
 
 /** Reads events from consecutive lines, keeping the time progress records inherit. */
-export function createEventReader(): {
+export function createEventReader(progressAt = new Date(0).toISOString()): {
   read(line: StoredLine, position: number): SessionStreamEvent[];
 } {
-  let lastAt = new Date(0).toISOString();
+  let lastAt = progressAt;
   return {
     read(line, position) {
       if ("facts" in line) lastAt = line.at;

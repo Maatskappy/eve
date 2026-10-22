@@ -9,10 +9,10 @@ import {
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
 import {
-  withSessionStateDelta,
   type SessionStateTransition,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
   startWorkflowTask,
   startWorkflowToolCallRun,
@@ -51,8 +51,8 @@ export async function dispatchCoordinationStep(
 
 /**
  * Publishes, as one commit, what {@link dispatchCoordinationStep} recorded: the calls the turn
- * waits on started, the tasks it started or reached, and the calls it refused. A retry only
- * publishes again.
+ * waits on started, the tasks it started or reached, and the calls it refused. Run ownership is
+ * checkpointed first, so retrying the publication cannot start those runs again.
  */
 export async function publishDispatchedCallsStep(
   input: SessionStepState & { readonly pending: PendingDispatchFacts },

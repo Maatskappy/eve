@@ -34,7 +34,8 @@ vi.mock("#execution/session-inbox/release-step.js", () => ({
   releaseSessionHooksStep: vi.fn(async () => {}),
 }));
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWritable: vi.fn(),
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),

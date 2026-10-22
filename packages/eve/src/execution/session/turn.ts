@@ -43,6 +43,7 @@ import type {
   TurnStepPayload,
 } from "#execution/session/turn-step-types.js";
 import { turnStep } from "#execution/session/turn-step.js";
+import { exhaustedStepError, normalizeSerializableError } from "#execution/workflow-errors.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
 import type { TurnControl } from "#execution/session/turn-control.js";
 import {
@@ -193,15 +194,23 @@ export class SessionExecution {
       const { cursor } = this.input;
       const caller = bindCaller;
       bindCaller = undefined;
-      const result = await cursor.advanceWithHistory((state) =>
-        turnStep({
-          ...state,
-          abortSignal: turn.signal,
-          caller,
-          input: nextStepInput,
-          steeringSignal: turn.steeringSignal,
-        }),
-      );
+      // A step that fails every attempt fails its turn, not the session; only a failed recovery
+      // ends the session. What fails once a step has returned, such as adopting its state, is
+      // not the step's failure, so it is not recovered.
+      const result = await cursor.advanceWithHistory((state) => {
+        const run = (recover?: { readonly error: unknown }) =>
+          turnStep({
+            ...state,
+            abortSignal: turn.signal,
+            caller,
+            input: nextStepInput,
+            recover,
+            steeringSignal: turn.steeringSignal,
+          });
+        return run().catch((error: unknown) =>
+          run({ error: normalizeSerializableError(exhaustedStepError(error)) }),
+        );
+      });
       if (result.compacted === true) turn.compacted = true;
 
       // Deliveries the boundary admits next arrived while the step ran. A step

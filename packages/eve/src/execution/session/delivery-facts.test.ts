@@ -1,6 +1,35 @@
 import { expect, it } from "vitest";
 import { admitDeliveries } from "#execution/session/delivery-facts.js";
 
+it.each([
+  { status: undefined, facts: ["delivery.admitted", "delivery.settled"] },
+  { status: "admitted" as const, facts: ["delivery.settled"] },
+  { status: "settled" as const, facts: [] },
+])("settles an ignored delivery once when its recorded status is $status", ({ status, facts }) => {
+  const payload = {};
+  const admission = admitDeliveries({
+    channelKind: "channel:test",
+    sessionStarted: true,
+    status: () => status,
+    delivery: {
+      kind: "deliver",
+      auth: null,
+      payloads: [payload],
+      deliveryMetadata: [
+        {
+          channelKind: "channel:test",
+          channelName: "test",
+          deliveryId: "ignored",
+          payloadIndex: 0,
+        },
+      ],
+    },
+    payloads: [{ payload, input: undefined }],
+  });
+  expect(admission.facts.map((fact) => fact.type)).toEqual(facts);
+  expect(admission.inputs).toEqual([]);
+});
+
 it("takes answer provenance from admission, not helper fields returned by a delivery hook", () => {
   const alice = {
     authenticator: "test",

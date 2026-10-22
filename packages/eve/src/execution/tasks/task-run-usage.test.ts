@@ -43,6 +43,8 @@ vi.mock("#execution/publish-session-events.js", async () => {
     await import("#harness/session-machine/view.js");
   const { copyView, foldReceivedEvent } = await import("#protocol/session-projection/fold.js");
   return {
+    followInterruptedAttempt: (_writable: unknown, state: DurableSessionState) => state,
+    readOrphanedLines: async () => [],
     commitSessionStep: async (
       target: { serializedContext: Record<string, unknown>; sessionState: DurableSessionState },
       decide: (view: SessionView) => readonly { readonly events: readonly SessionEvent[] }[],

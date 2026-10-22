@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { contextStorage } from "#context/container.js";
+import { SandboxKey } from "#context/keys.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessStepInput, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -12,6 +13,7 @@ import {
   textStreamResult,
   toolCallsStreamResult,
 } from "#internal/testing/approval-resume.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
 import { eachEvent, parkedSteps } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -70,6 +72,8 @@ function setup(tools: readonly HarnessToolDefinition[]) {
     sessionId: "approval-answers",
   };
   const ctx = recorder.enter(createApprovalContext());
+  const sandbox = mockSandbox();
+  ctx.set(SandboxKey, sandbox.access);
   const step = (current: HarnessSession, input?: HarnessStepInput) =>
     contextStorage.run(ctx, () => createToolLoopHarness(config)(current, input));
   /** The approval the step asked for `toolName`'s call. */
@@ -83,10 +87,66 @@ function setup(tools: readonly HarnessToolDefinition[]) {
     if (opened?.type !== "interaction.opened") throw new Error(`No approval for ${toolName}.`);
     return opened.data.interactionId;
   };
-  return { approvalOf, events, session, step };
+  return { approvalOf, events, model, sandbox, session, step };
 }
 
 describe("approval answers (real AI SDK)", () => {
+  it("preserves a newer message when runtime results release an older queued message", async () => {
+    const deploy = {
+      ...gated("deploy"),
+      execute: undefined,
+      workflowId: "workflow//./agent/tools/deploy//execute",
+    };
+    const fixture = setup([deploy]);
+    const parked = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+    const running = await fixture.step(parked.session, {
+      answers: [
+        {
+          deliveryId: "d-approve",
+          interactionId: fixture.approvalOf("deploy"),
+          optionId: "approve",
+          responseId: "r-approve",
+        },
+      ],
+      message: "First, check the deployment notes.",
+    });
+    let resumed = await fixture.step(running.session, {
+      message: [
+        { text: "Then, notify Bob.", type: "text" },
+        {
+          data: "Qm9iJ3MgY29udGFjdHM=",
+          filename: "bob.txt",
+          mediaType: "text/plain",
+          type: "file",
+        },
+      ],
+      runtimeActionResults: [
+        {
+          callId: "call-deploy",
+          kind: "tool-result",
+          output: "deployed",
+          toolName: "deploy",
+        },
+      ],
+    });
+    while (typeof resumed.next === "function") resumed = await fixture.step(resumed.session);
+
+    const prompt = JSON.stringify(fixture.model.doStreamCalls.at(-1)?.prompt);
+    const history = JSON.stringify(resumed.session.history);
+    for (const text of [prompt, history]) {
+      expect(text.split("First, check the deployment notes.")).toHaveLength(2);
+      expect(text.split("Then, notify Bob.")).toHaveLength(2);
+    }
+    const files = resumed.session.history.flatMap(({ content }) =>
+      Array.isArray(content) ? content.filter((part) => part.type === "file") : [],
+    );
+    expect(files).toHaveLength(1);
+    expect(fixture.sandbox.writes.map(({ path }) => path)).toEqual([
+      expect.stringMatching(/bob\.txt$/u),
+    ]);
+    expect(prompt.indexOf("First, check")).toBeLessThan(prompt.indexOf("Then, notify"));
+  });
+
   // #4817: a second press of the same Approve reaches the pass that authorizes the first.
   it("authorizes a pending approval when a duplicate answer joins its pass", async () => {
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));

@@ -89,20 +89,15 @@ export function extractUpstreamRejectionMessage(error: unknown): UpstreamRejecti
 }
 
 /**
- * The provider rejected what the request contains (400, 413, 422), not the
- * caller's credentials, budget, or capacity. Something in the conversation,
- * such as an attachment the provider won't accept, then fails every later
- * call the same way, so the request has to change before it can succeed.
+ * The provider rejected an image in the request, such as one over a size or dimension limit.
+ * The image stays in history, so the same rejection would fail every later call.
  */
-export function isRequestContentRejection(error: unknown): boolean {
-  if (isTurnCancellation(error) || hasRetryableFlag(error)) return false;
-  // Catalog shapes carry their own judgment; unsupported provider tools have their own recovery.
-  if (summarizeKnownError(error) !== null) return false;
-  if (extractUnsupportedProviderToolTypes(error).length > 0) return false;
-  const { statusCode, upstreamStatusCode } = readModelCallErrorSignals(error);
-  return [statusCode, upstreamStatusCode].some(
-    (status) => status === 400 || status === 413 || status === 422,
-  );
+export function isImageRejection(error: unknown): boolean {
+  if (hasRetryableFlag(error) || summarizeKnownError(error) !== null) return false;
+  const { statusCode } = readModelCallErrorSignals(error);
+  if (statusCode !== 400 && statusCode !== 413 && statusCode !== 422) return false;
+  const message = extractUpstreamRejectionMessage(error)?.message;
+  return message !== undefined && /\bimages?\b/i.test(message);
 }
 
 function upstreamRejectionName(signals: ModelCallErrorSignals): string {

@@ -169,7 +169,7 @@ To let the agent answer voice notes and other audio, add a tool that transcribes
 
 If a referenced file is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
 
-Providers sometimes reject a request because of what it contains, for example an image over a per-request size limit. Since every model call resends earlier attachments, such a rejection would fail every later call in the session. When a provider rejects a request's content with a 400, 413, or 422 response, eve reissues the call once with every attachment as its label alone and a note carrying the provider's error, so the agent can continue the turn or tell the user what failed. The turn fails as before only if the reissue is rejected too.
+If a provider rejects a request because of an image, eve retries the step once with every image as its label alone and a note telling the agent why, so the turn continues instead of failing on every later call.
 
 A file that eve can't stage never enters session history. When a channel's `fetchFile` fails, or a file part's `data` is not bytes, base64, a `data:` URL, or a URL, the model receives a note that names the file instead.
 

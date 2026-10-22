@@ -14,7 +14,11 @@ import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.j
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
-import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
+import {
+  INLINE_IMAGE_MEDIA_TYPES,
+  readMediaMetadata,
+  verifyMediaType,
+} from "#internal/attachments/media-metadata.js";
 import {
   DEFAULT_UPLOAD_POLICY,
   isMediaTypeAllowed,
@@ -180,12 +184,12 @@ export async function stageToolResultMedia<T extends ModelMessage>(
  * call and the provider's prompt cache stays valid. The returned messages
  * must not be written back to session history, which stays ref-only.
  *
- * With `pathsOnly`, every attachment renders as its label alone: the
- * recovery for a provider that rejected the request's content.
+ * With `imagesAsPaths`, images render as their label alone: the recovery
+ * for a provider that rejected an image.
  */
 export async function hydrateSandboxAttachments(
   input: readonly ModelMessage[],
-  options: { readonly pathsOnly?: boolean } = {},
+  options: { readonly imagesAsPaths?: boolean } = {},
 ): Promise<ModelMessage[]> {
   const messages = replaceUnresolvedFileParts(input);
   if (!messagesContainSandboxRef(messages)) {
@@ -201,7 +205,9 @@ export async function hydrateSandboxAttachments(
   }
 
   const sandbox = await activeSandbox(sandboxAccess);
-  const inlines = options.pathsOnly === true ? () => false : inlinesSandboxRefAsBytes;
+  const inlines = (ref: SandboxRef) =>
+    inlinesSandboxRefAsBytes(ref) &&
+    !(options.imagesAsPaths === true && INLINE_IMAGE_MEDIA_TYPES.has(ref.mediaType));
   return Promise.all(
     messages.map(async (message) => {
       if (!messageContainsSandboxRef(message)) {

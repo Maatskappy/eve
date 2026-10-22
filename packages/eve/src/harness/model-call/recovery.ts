@@ -3,21 +3,20 @@ import {
   EmptyModelResponseError,
   extractUpstreamRejectionMessage,
   extractUnsupportedProviderToolTypes,
+  isImageRejection,
   isNoOutputGeneratedError,
-  isRequestContentRejection,
 } from "#harness/model-call/errors.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
-import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("harness.tool-loop");
 /** How a recovery reissues the call. */
 type RecoveryCall = (options: {
-  readonly attachmentsAsPaths?: boolean;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response" | "request-rejected";
+  readonly imagesAsPaths?: boolean;
+  readonly retryReason?: "empty-response";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
 }) => Promise<HarnessStepResult>;
@@ -33,12 +32,9 @@ type RecoveryCall = (options: {
  * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.
- * 3. The provider rejected the request's content (see {@link isRequestContentRejection}),
- *    including an earlier recovery's: the call is reissued with every attachment shown as its
- *    sandbox path and a note carrying the provider's error, so the model can decide how to
- *    continue instead of the turn failing. Attachments are the conversation content eve controls
- *    that providers most often reject, and the same rejection would otherwise fail every later
- *    call in the session.
+ * 3. The provider rejected an image (see {@link isImageRejection}): the call is reissued with
+ *    every image shown as its sandbox path, and a system note tells the model why, so the turn
+ *    continues instead of failing on an image that stays in history.
  *
  * Each reissue goes through `call` so it gets fresh step hooks: the failed attempt's one-shot
  * `stepResult` already resolved. Returns the error that remains when nothing recovered.
@@ -92,20 +88,20 @@ export async function recoverModelCall(input: {
     }
   }
 
-  if (isRequestContentRejection(error)) {
-    const message = extractUpstreamRejectionMessage(error)?.message ?? toErrorMessage(error);
-    log.warn("model provider rejected the request; reissuing once with attachments as paths", {
+  if (isImageRejection(error)) {
+    log.warn("model provider rejected an image; retrying step once with images as paths", {
       ...diagnostics,
-      message,
     });
     try {
       return {
         result: await input.call({
           ...options,
-          attachmentsAsPaths: true,
-          retryReason: "request-rejected",
+          extraSystemNote: joinNotes(
+            options.extraSystemNote,
+            buildImageRejectedNote(extractUpstreamRejectionMessage(error)?.message),
+          ),
+          imagesAsPaths: true,
           suppressStepStartedEmission: true,
-          trailingUserNote: buildRejectedRequestNote(message),
         }),
       };
     } catch (retryError) {
@@ -130,15 +126,18 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
   );
 }
 
-/** Wire-only note the request-rejected reissue appends, carrying the provider's error. */
-function buildRejectedRequestNote(message: string): string {
+/** The one-shot system note for the image-rejected retry. */
+function buildImageRejectedNote(message: string | undefined): string {
+  const reason = message === undefined ? "" : ` (${message})`;
   return (
-    `The model provider rejected the previous request with this error: ${JSON.stringify(message)}. ` +
-    "For this request, files attached in the conversation are shown only as their sandbox paths. " +
-    "Continue the current user request, working around the error where you can. If it blocks " +
-    "the request, tell the user what failed. Do not repeat writes or other side effects that " +
-    "already completed."
+    `The model provider rejected an image in this conversation${reason}, so images are shown ` +
+    "only as their sandbox file paths. Proceed without viewing them, or resize or convert one " +
+    "in the sandbox if you need to see it."
   );
+}
+
+function joinNotes(...notes: readonly (string | undefined)[]): string {
+  return notes.filter((note) => note !== undefined).join("\n\n");
 }
 
 /**

@@ -28,7 +28,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import { initialSessionProjection } from "#protocol/session-projection.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
-import { withOpenTurn, withPublished } from "#internal/testing/session-machine.js";
+import { withOpenTurn, withPublished, withQueuedInput } from "#internal/testing/session-machine.js";
 
 const BASE: HarnessSession = {
   agent: { modelReference: { id: "test" }, system: "", tools: [] },
@@ -384,6 +384,35 @@ describe("controls and callbacks as deliveries", () => {
     });
     expect(accepted(session, events)).toEqual([]);
   });
+
+  it.each(["cancel", "clear"] as const)(
+    "%s settles input the turn queued but never read as ignored",
+    (control) => {
+      const admitted = withPublished(waitingTurn(), [
+        { data: { deliveryId: "d-typed" }, type: "delivery.admitted" },
+        { data: { deliveryId: "d-kept" }, type: "delivery.admitted" },
+        { data: { deliveryId: "d-kept", parts: [], turnId }, type: "delivery.consumed" },
+      ]);
+      const queued = withQueuedInput(admitted, {
+        deliveries: [
+          { deliveryId: "d-typed", parts: [] },
+          { deliveryId: "d-kept", parts: [] },
+        ],
+        message: "approve",
+      });
+      const view = viewOf(queued);
+      const transition =
+        control === "cancel" ? cancel(view) : clear(view, { sessionId: BASE.sessionId });
+      const events = cascade(view.projection.view, transition.events);
+
+      expect(settledBy(events)).toMatchObject({
+        "delivery.settled:d-typed": "ignored",
+        "delivery.settled:d-kept": "handled",
+      });
+      expect(transition.turn).not.toHaveProperty("queued");
+      expect(accepted(queued, events)).toEqual([]);
+    },
+  );
 
   it("completes a sign-in from its callback without recording the provider's payload", () => {
     const session = waitingTurn();

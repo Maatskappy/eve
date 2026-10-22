@@ -278,7 +278,7 @@ describe("ensureChannel", () => {
       "if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId)",
     );
     expect(agentChatSource).toContain(
-      '!isResuming && !sessionEnded && agent.view.interactions[interactionId]?.status === "open"',
+      '!isResuming && !sessionEnded && interaction(agent.view, interactionId)?.status === "open"',
     );
     await expect(readFile(join(projectRoot, "components/ui/trace.tsx"), "utf8")).resolves.toMatch(
       /export\s*\{[^}]*\bTraceLine\b/s,

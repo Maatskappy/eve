@@ -65,25 +65,24 @@ import {
   parseSessionControlBody,
   parseSessionMessageBody,
   parseStartIndex,
-  rejectSessionContinuationToken,
   requireSessionId,
 } from "#eve-channel/request.js";
+import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import { attachClientContext } from "#internal/client-context.js";
 import {
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   formatEarlierRemoteChildStreamError,
 } from "#protocol/remote-agent-protocol.js";
-import { type SessionHistoryMessage, validateSessionHistory } from "#shared/session-history.js";
 import type { ParsedCreateBody } from "#eve-channel/create-request.js";
 import {
   findRemoteAgentBinding,
   healthResponse,
   type RemoteAgentBinding,
   resolveOnMessage,
-  resolveTurnClientContext,
   sessionCommandErrorResponse,
   deliveryResponse,
+  resolveTurnClientContext,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
 
@@ -175,9 +174,6 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
             { status: 403 },
           );
         }
-        const tokenRejection = rejectSessionContinuationToken(payload);
-        if (tokenRejection !== null) return tokenRejection;
-
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
           forwarder: auth,

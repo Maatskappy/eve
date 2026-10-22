@@ -229,7 +229,9 @@ its own sandbox, so CI exercises it.
   `EVE_SANDBOX_JOB_ROOT=<session dir>/jobs`, and the tool keeps its job files
   there instead of `/tmp/.eve/jobs`. The record format lives in
   `execution/sandbox/job-records.ts`; the launcher keeps a finished command's
-  record (minus its output files), because processes the command started in the
+  record (minus its output files) only while its group still has members, and
+  job ids are full UUIDs because kept records outlive their command. Processes
+  the command started in the
   background stay in its group. `stop()`, runtime shutdown, `delete()`, and
   session end kill the session's groups, claim and kill every job without an
   `exit` file, and kill what finished jobs left behind. Releasing a keyed

@@ -19,9 +19,10 @@ const MAX_LOG_COMMAND_LENGTH = 240;
 // a claim also signals the launcher to exit, which ends the provider's stream
 // without touching the command. The command holds none of the launcher's file
 // descriptors, or the stream would stay open until the command exits. A
-// reported command's output files go, but its record stays: processes it
-// started in the background still run in its group, and a provider stopping
-// the session finds them through it.
+// reported command's record goes, unless processes it started in the
+// background still run in its group: a provider stopping the session finds
+// them through it. An empty group never gains members, so no later record is
+// needed for it.
 const F = JOB_FILE;
 const LAUNCHER = `d=$1
 mkdir -p "$d" 2>/dev/null || { eval "$2"; exit; }
@@ -44,6 +45,7 @@ mkdir "$d/${F.claimed}" 2> /dev/null || exit 0
 cat "$d/${F.stdout}"
 cat "$d/${F.stderr}" >&2
 rm -f "$d/${F.stdout}" "$d/${F.stderr}"
+kill -0 -- -"$pid" 2>/dev/null || rm -rf "$d"
 exit "$code"`;
 
 // ---------------------------------------------------------------------------
@@ -139,7 +141,8 @@ async function runCommand(
   signal: AbortSignal | undefined,
 ): Promise<BashResult> {
   signal?.throwIfAborted();
-  const jobId = randomUUID().slice(0, 8);
+  // A full UUID: kept records outlive their command, so ids must not repeat.
+  const jobId = randomUUID();
   const directory = jobDirectoryWord(jobId);
   // The call's signal also aborts after the call returns, so it is linked
   // only while the call runs; a returned `running` command must survive it.

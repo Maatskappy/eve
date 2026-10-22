@@ -403,6 +403,24 @@ describe("HostSandbox", () => {
       await expect(readFile(join(outputDirectory, "exit"), "utf8")).resolves.toBe("137");
     });
 
+    it("keeps a finished command's record only while it left processes running", async () => {
+      const appRoot = await createScratchDirectory("eve-host-records-");
+      const { sandbox, onSandboxStop } = await createHostProvider().openSession({
+        appRoot,
+        sandboxName: "session-records",
+      });
+      const jobRoot = (await sandbox.run({ command: 'printf %s "$EVE_SANDBOX_JOB_ROOT"' })).stdout;
+
+      await expect(
+        executeBashOnSandbox(sandbox, { command: "echo hello; exit 7" }),
+      ).resolves.toMatchObject({ exitCode: 7, status: "completed", stdout: "hello\n" });
+      expect(await readdir(jobRoot)).toEqual([]);
+
+      await executeBashOnSandbox(sandbox, { command: "sleep 60 > /dev/null 2>&1 &" });
+      expect(await readdir(jobRoot)).toHaveLength(1);
+      await onSandboxStop();
+    });
+
     it("stops what a finished command left running, on release and on stop", async () => {
       const appRoot = await createScratchDirectory("eve-host-leftover-");
       const environment = HostSandbox.environment();

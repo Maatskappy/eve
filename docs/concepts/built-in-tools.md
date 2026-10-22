@@ -48,8 +48,8 @@ export { default } from "eve/tools/bash";
 The command keeps writing to `stdout` and `stderr` files in `outputDirectory` and writes its exit code to an `exit` file when it finishes. The model checks on or stops it with ordinary shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
 ```sh
-tail /tmp/.eve/jobs/3f9a1c2e/stdout   # latest output
-cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
+tail /tmp/.eve/jobs/3f9a1c2e-7b4d-4e1a-9c2f-5d8e6a0b1c3d/stdout   # latest output
+cat /tmp/.eve/jobs/3f9a1c2e-7b4d-4e1a-9c2f-5d8e6a0b1c3d/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 

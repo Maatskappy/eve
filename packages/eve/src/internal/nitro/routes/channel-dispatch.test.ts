@@ -484,8 +484,8 @@ describe("dispatchChannelRequest", () => {
     );
 
     await expect(response.json()).resolves.toEqual({
-      previousSessionId: "sess_previous",
-      status: "reset",
+      sessionId: "sess_previous",
+      deliveryId: expect.any(String),
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
       // A control is a delivery with its own id.
@@ -527,7 +527,7 @@ describe("dispatchChannelRequest", () => {
 
     await expect(response.json()).resolves.toEqual({
       sessionId: "sess_active",
-      status: "accepted",
+      deliveryId: expect.any(String),
     });
     expect(runtimeForTest.dispatchContinuation).toHaveBeenCalledWith({
       command: { deliveryId: expect.any(String), kind: "clear" },

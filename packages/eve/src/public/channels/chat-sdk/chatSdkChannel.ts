@@ -53,7 +53,7 @@ import {
   type ChannelEvents,
   type ChannelContinuationOps,
   type RouteHandlerArgs,
-  type Session,
+  type Delivery,
 } from "#public/definitions/channel.js";
 import { chatSdkInstrumentation } from "#public/channels/chat-sdk/audience.js";
 
@@ -265,7 +265,7 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(message: MessageContent, options: ChatSdkSendOptions): Promise<Session>;
+  send(message: MessageContent, options: ChatSdkSendOptions): Promise<Delivery>;
   /**
    * Answers pending input requests on the thread's session from inside a Chat
    * SDK webhook handler. Never creates a session.
@@ -273,7 +273,7 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
   respond<const TResponses extends readonly Answer[]>(
     answers: StrictAnswers<TResponses>,
     options: ChatSdkRespondOptions,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
 }
 
 /**
@@ -395,7 +395,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       recordPrincipalUser(channel.state, channel.session.auth.current, payload);
       recordLatestMessage(channel.state, payload);
       const answer = resolveInputAnswer(channel.state, payload);
-      if (answer !== undefined) return { answers: parseAnswers([answer]) };
+      if (answer !== undefined)
+        return { answers: parseAnswers([answer]), context: payload.context };
     },
     events: mergedEvents,
   });
@@ -674,7 +675,7 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   message: MessageContent,
   options: ChatSdkSendOptions,
-): Promise<Session> {
+): Promise<Delivery> {
   const from = activeFrom("send");
   const { adapterName, auth, inputAnswer, thread: threadInput, ...sendOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);
@@ -691,7 +692,7 @@ async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
   answers: readonly Answer[],
   options: ChatSdkRespondOptions,
-): Promise<Session> {
+): Promise<Delivery> {
   const from = activeFrom("respond");
   const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
   const thread = serializeThread(bot, threadInput, adapterName);

@@ -142,7 +142,7 @@ describe("dynamic tool cold replay", () => {
       try {
         const client = new Client({ host: server.url });
         const created = await client.sessions.create({ message: "Hello." });
-        await expect(created.response.result()).resolves.toMatchObject({
+        await expect(created.delivery.result()).resolves.toMatchObject({
           interactions: [],
           status: "waiting",
         });

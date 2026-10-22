@@ -1,6 +1,6 @@
 ---
 title: "Output Schema"
-description: "Request structured results from eve client turns and read typed data from MessageResult."
+description: "Request structured results from eve client turns and read typed data from DeliveryResult."
 ---
 
 Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles, then emits the final payload as a `content.completed` part with `kind: "result"`.
@@ -27,12 +27,12 @@ const outputSchema = {
 } as const;
 
 const client = new Client({ host: "http://127.0.0.1:2000" });
-const { session, response } = await client.sessions.create<Summary>({
+const { session, delivery } = await client.sessions.create<Summary>({
   message: "Summarize this turn.",
   outputSchema,
 });
 
-const result = await response.result();
+const result = await delivery.result();
 
 console.log(result.data?.title);
 console.log(result.data?.count);
@@ -61,7 +61,7 @@ const response = await session.send<Summary>("Summarize this turn.", {
 const { data } = await response.result();
 ```
 
-The server is authoritative for validation. The client types `MessageResult.data` from your generic and schema, but it doesn't revalidate the streamed payload client-side.
+The server is authoritative for validation. The client types `DeliveryResult.data` from your generic and schema, but it doesn't revalidate the streamed payload client-side.
 
 ## Stream the result event
 

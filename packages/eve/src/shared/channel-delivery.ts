@@ -13,3 +13,6 @@ export interface ChannelDelivery<TState = undefined> {
   /** Per-delivery state; the hook chooses what to merge into durable channel state. */
   readonly state?: Partial<TState>;
 }
+
+/** What a `deliver` hook may return. Channel state changes go through `channel.state`. */
+export type ChannelDeliveryReplacement = Omit<ChannelDelivery, "state">;

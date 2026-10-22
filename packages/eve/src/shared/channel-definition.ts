@@ -2,9 +2,10 @@ import { type ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { ChannelDelivery } from "#shared/channel-delivery.js";
+import type { ChannelDelivery, ChannelDeliveryReplacement } from "#shared/channel-delivery.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -67,11 +68,11 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /** Return a replacement delivery, or void to deliver the original payload unchanged. */
+  /** Return a replacement delivery, or void to keep it unchanged. Change state through the channel context. */
   deliver?(
     payload: ChannelDelivery<TState>,
     ctx: TCtx,
-  ): ChannelDelivery<TState> | void | Promise<ChannelDelivery<TState> | void>;
+  ): ChannelDeliveryReplacement | void | Promise<ChannelDeliveryReplacement | void>;
   readonly state?: TState;
   /**
    * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's
@@ -96,7 +97,7 @@ export interface GenericChannelDefinition<
   receive?(
     input: GenericReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
 
   readonly events?: TEvents;
 

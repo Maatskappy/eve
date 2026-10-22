@@ -9,7 +9,7 @@ import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-targe
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
-import { encodeTestLine } from "#internal/testing/events.js";
+import { encodeLine } from "#protocol/session-events/envelope.js";
 
 const AGENT_INFO = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
@@ -36,9 +36,19 @@ function testBinding(
 
 /** A stream whose one line ends the session. */
 function endedStream(): Response {
-  return new Response(encodeTestLine({ data: { outcome: "completed" }, type: "session.ended" }), {
-    headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-  });
+  return new Response(
+    encodeLine({
+      at: "2026-10-20T00:00:00.000Z",
+      facts: [
+        { type: "delivery.admitted", data: { deliveryId: "delivery_1" } },
+        { type: "delivery.settled", data: { deliveryId: "delivery_1", outcome: "ignored" } },
+        { type: "session.ended", data: { outcome: "completed" } },
+      ],
+    }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
+  );
 }
 
 afterEach(() => {
@@ -76,7 +86,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
       .mockResolvedValueOnce(endedStream());
     const client = new Client({
@@ -86,7 +96,7 @@ describe("Client request policy", () => {
     await client.info();
     await client.health();
     await client.fetch("/custom");
-    await (await client.sessions.create({ message: "hello" })).response.result();
+    await (await client.sessions.create({ message: "hello" })).delivery.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [request] of fetchMock.mock.calls) {
@@ -103,7 +113,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
       .mockResolvedValueOnce(endedStream());
     const client = new Client({ host: "https://eve.test", redirect: "manual" });
@@ -111,7 +121,7 @@ describe("Client request policy", () => {
     await client.info();
     await client.health();
     await client.fetch("/custom", { redirect: "follow" });
-    await (await client.sessions.create({ message: "hello" })).response.result();
+    await (await client.sessions.create({ message: "hello" })).delivery.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [, init] of fetchMock.mock.calls) {
@@ -139,7 +149,7 @@ describe("Client request policy", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
       .mockResolvedValueOnce(endedStream());
     const client = new Client({
@@ -152,7 +162,7 @@ describe("Client request policy", () => {
         headers: { authorization: "Bearer application-user" },
         message: "hello",
       })
-    ).response.result();
+    ).delivery.result();
 
     expect(fetchMock.mock.calls).toHaveLength(2);
     for (const [, init] of fetchMock.mock.calls) {
@@ -166,7 +176,7 @@ describe("Client request policy", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
       .mockResolvedValueOnce(endedStream());
     const client = new Client({ host: "https://eve.test" });
@@ -181,7 +191,7 @@ describe("Client request policy", () => {
           { data: new URL("https://files.test/note.txt"), mediaType: "text/plain", type: "file" },
         ],
       })
-    ).response.result();
+    ).delivery.result();
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.message).toEqual([

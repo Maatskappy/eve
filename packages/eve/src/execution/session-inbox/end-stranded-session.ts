@@ -15,10 +15,14 @@ import {
 import { logicalSessionToken, requireSessionId } from "#execution/session-inbox/resume.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
+import { streamSessionEvents } from "#execution/session-event-stream.js";
+import { cascade } from "#harness/session-machine/cascade.js";
 import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
 type World = Awaited<ReturnType<typeof getWorld>>;
 
@@ -27,6 +31,8 @@ const HOOK_PAGE_LIMIT = 100;
 const MAX_HOOK_PAGES = 10;
 /** Publication is best effort; a stalled stream write must not hold up the reset. */
 const TERMINAL_EVENT_TIMEOUT_MS = 5_000;
+/** A long but healthy history must finish reading; only a stalled read gives up. */
+const HISTORY_READ_TIMEOUT_MS = 30_000;
 
 const log = createLogger("execution.session-inbox");
 
@@ -108,15 +114,18 @@ async function assertStillServesSession(sessionId: string, ownerRunId: string): 
 }
 
 /**
- * Appends `session.ended` and closes the stream without running authored
- * hooks. Unavailable payload keys, an already-closed stream, or a stalled
- * write must not prevent the reset.
+ * Appends `session.ended`, closing what it leaves open, and closes the stream without running
+ * authored hooks. Unavailable payload keys, an already-closed stream, or a stalled
+ * write must not prevent the reset; a stalled history read fails it before anything is cancelled.
  */
 async function publishTerminalEvent(
   sessionId: string,
   trigger: StrandedSessionEndTrigger,
   control?: SessionControlIdentity,
 ): Promise<void> {
+  // An owner's end ends everything under it in the same commit, as the session's own end would.
+  const view = await readRecordedView(sessionId);
+  if (view === undefined) return;
   const writer = getRun(sessionId).getWritable<Uint8Array>().getWriter();
   const publication = (async () => {
     // A replacement reading this history skips it when a reset ended the session.
@@ -148,7 +157,9 @@ async function publishTerminalEvent(
     }
     facts.push(ended);
     await writer.write(
-      new TextEncoder().encode(encodeLine({ at: new Date().toISOString(), facts })),
+      new TextEncoder().encode(
+        encodeLine({ at: new Date().toISOString(), facts: cascade(view, facts) }),
+      ),
     );
     await writer.close();
     return true;
@@ -169,6 +180,45 @@ async function publishTerminalEvent(
     clearTimeout(timer);
     writer.releaseLock();
   }
+}
+
+/**
+ * An incomplete history cannot safely determine which descendants or terminal outcomes remain.
+ * Undecodable history skips the terminal event; a stalled read fails before anything is cancelled.
+ */
+async function readRecordedView(sessionId: string): Promise<SessionView | undefined> {
+  const view = emptySessionView();
+  const controller = new AbortController();
+  const read = (async () => {
+    for await (const event of streamSessionEvents(sessionId, {
+      follow: false,
+      signal: controller.signal,
+    })) {
+      foldReceivedEvent(view, event);
+    }
+  })();
+  // Settles after the reset fails when the read stalls.
+  read.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), HISTORY_READ_TIMEOUT_MS);
+  });
+  let timedOut: boolean;
+  try {
+    timedOut = !(await Promise.race([read.then(() => true), timeout]));
+  } catch (error) {
+    log.warn("Could not read the stranded session history", { error, sessionId });
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (timedOut) {
+    controller.abort();
+    throw new Error(
+      `Timed out reading the history of stranded session "${sessionId}". Nothing was ended; retry the request.`,
+    );
+  }
+  return view;
 }
 
 /** Cancels exactly these runs; one that already ended counts as cancelled. */

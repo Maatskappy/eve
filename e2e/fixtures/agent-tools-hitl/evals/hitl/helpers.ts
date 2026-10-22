@@ -1,11 +1,5 @@
-import type { InteractionOutcome } from "eve/client";
-import type {
-  EveEvalAssertions,
-  EveEvalContext,
-  EveEvalSession,
-  EveEvalTurn,
-  Interaction,
-} from "eve/evals";
+import type { Interaction, InteractionOutcome } from "eve/events";
+import type { EveEvalAssertions, EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
 
 import { SAY } from "../../agent/lib/hitl/respond.ts";
 
@@ -144,7 +138,7 @@ export async function completeAuthorization(t: EveEvalContext, url: URL) {
 
 /** Everything the session streams from `startIndex` to the next turn boundary. */
 export function follow(t: EveEvalContext, session: EveEvalSession, startIndex: number) {
-  return t.target.watchTurn(session.sessionId, { startIndex }).result();
+  return t.target.attach(session.id, { startIndex }).watch().result();
 }
 
 /**

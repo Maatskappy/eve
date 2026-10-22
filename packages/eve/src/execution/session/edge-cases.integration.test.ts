@@ -956,6 +956,49 @@ describe("approvals off the happy path", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
+  it("waits on the next approvals after a message steered past the last ones", async () => {
+    let asked = 0;
+    const { events, ran } = await withSession(
+      "edge-steer-then-ask",
+      {
+        message: "Deploy twice.",
+        model: scriptedModel(({ results }) => {
+          if (results.length === 0 || asked === 1) {
+            asked += 1;
+            return [
+              { toolName: "deploy", toolCallId: `call_${asked}a` },
+              { toolName: "deploy", toolCallId: `call_${asked}b` },
+            ];
+          }
+          return "Deployed.";
+        }),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the first approvals");
+        await session.answer(session.approvals()[0]!, "approve");
+        await session.until(
+          "the first answer stands",
+          (event) => event.type === "response.admitted",
+        );
+        await session.until("the remaining approval", (event) => event.type === "turn.paused");
+        await session.send("Actually, go ahead with what you have.");
+        const opened = new Set<string>();
+        await session.until("the next approvals", (event) => {
+          if (event.type === "interaction.opened") opened.add(event.data.interactionId);
+          return (
+            event.type === "turn.paused" &&
+            event.data.awaiting.length === 2 &&
+            event.data.awaiting.every(({ interactionId }) => opened.has(interactionId))
+          );
+        });
+      },
+    );
+    expect(ran).toEqual(["deploy"]);
+    expect(ofType(events, "interaction.opened")).toHaveLength(4);
+    expect(ofType(events, "turn.paused").at(-1)?.data.awaiting).toHaveLength(2);
+  });
+
   it("settles a cancel that arrives as its turn ends as ignored", async () => {
     const hold = gate();
     const held = gate();

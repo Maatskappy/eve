@@ -1,6 +1,6 @@
 import { waitForStore } from "@eve-e2e/config/frontend";
 import { SessionStore, type EveToolPart } from "eve/client";
-import { delivery, interaction } from "eve/events";
+import { activeTurn, delivery, interaction } from "eve/events";
 import { defineEval, type EveEvalContext } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
@@ -41,8 +41,9 @@ async function expectAnswerable(
   callId: string,
   interactionId: string,
 ) {
-  // The approval holds its turn open, and the store keeps following it live.
-  await t.require(store.snapshot.status, equals("busy"));
+  // Waiting only on a person is idle, but the approval still holds its turn open.
+  await t.require(store.snapshot.status, equals("idle"));
+  await t.require(activeTurn(store.snapshot.view) !== undefined, equals(true));
   await t.require(store.snapshot.error, equals(undefined));
   const part = toolPart(store, callId);
   await t.require(part.state, equals("approval"));

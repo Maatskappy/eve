@@ -10,7 +10,7 @@ export interface DeliveryReadOptions {
   readonly signal?: AbortSignal;
 }
 
-/** An accepted command: a serializable receipt and reusable, independent reads. */
+/** An accepted command: its session and delivery ids form a receipt you can pass to `store.follow()`, alongside reusable, independent reads. */
 export interface Delivery<TOutput = unknown> {
   readonly sessionId: string;
   readonly deliveryId: string;

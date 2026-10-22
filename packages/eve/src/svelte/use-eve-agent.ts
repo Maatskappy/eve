@@ -26,15 +26,23 @@ import type {
 export type { PrepareSend };
 
 /**
- * Local activity of the session: `"idle"` (nothing pending), `"resuming"` (catching up on an
- * attached session), or `"busy"` (a send is in flight, or a turn, task, or sign-in is pending).
- * Failures are reported separately in `error`.
+ * Outstanding work this binding has observed or still owes. Failures are reported separately in
+ * `error`.
+ *
+ * - `"idle"`: no command, answer, or followed receipt is pending, and the last observed view is
+ *   idle. A turn waiting only on a person can still be open; read `activeTurn(view)`.
+ * - `"resuming"`: catching up on an attached session; submission is disabled.
+ * - `"busy"`: a send, answer, or control command is pending, a followed receipt has not settled,
+ *   or the session has running or queued work.
+ *
+ * After `followWhile` closes the stream, `status` reflects the last observed view, not the
+ * current server state.
  */
 export type UseEveAgentStatus = SessionStoreStatus;
 
 /**
  * Immutable point-in-time view of an eve agent session: the conversation (`messages`,
- * `interactions`, `agents`, `view`, `previews`), the last `error`, the raw `events` stream, the
+ * `agents`, `view`), the last `error`, the raw `events` stream, the
  * `session` cursor, and `status`.
  * `useEveAgent` passes this snapshot to the `onFinish` callback.
  */
@@ -48,7 +56,10 @@ export type UseEveAgentSnapshot = SessionStoreSnapshot;
  * new events.
  */
 export interface UseEveAgentReturn {
-  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  /**
+   * Request durable cancellation of the active turn while continuing to receive its events.
+   * Offer it while `activeTurn(view)` returns a turn, including one waiting on a person.
+   */
   readonly cancel: () => Promise<Delivery>;
   /** Rendered messages, local answers, native lifecycle tables, and followed agents. */
   readonly messages: SessionStoreSnapshot["messages"];
@@ -58,7 +69,9 @@ export interface UseEveAgentReturn {
   readonly view: SessionStoreSnapshot["view"];
   /** Raw server events received during this session (authoritative stream). */
   readonly events: readonly SessionStreamEvent[];
-  /** Resolves at the durable tail; the session stream keeps following afterward. */
+  /** Follow a same-session delivery receipt until settlement. */
+  readonly follow: (receipt: Pick<Delivery, "sessionId" | "deliveryId">) => void;
+  /** Resolves at the durable tail; subsequent following obeys `followWhile`. */
   readonly resume: () => Promise<void>;
   /** Create the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
@@ -80,8 +93,8 @@ export interface UseEveAgentReturn {
   /** Current session identity and stream cursor. */
   readonly session: ClientSessionState | undefined;
   /**
-   * Local activity: `"idle"`, `"resuming"` (catching up on an attached session), or `"busy"`.
-   * Failures are reported separately in `error`.
+   * Outstanding work: `"idle"`, `"resuming"` (catching up on an attached session), or `"busy"`.
+   * Read `activeTurn(view)` for turn openness. Failures are reported separately in `error`.
    */
   readonly status: UseEveAgentStatus;
 }
@@ -134,13 +147,9 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
   readonly optimistic?: boolean;
   /** Follow each subagent call's session into `agents` while mounted. @default false */
   readonly followAgents?: boolean;
-  /**
-   * Keep the session stream open between turns to show events that arrive from schedules,
-   * channels, or other clients. Set to false to close it once the session is idle and reopen it
-   * on the next send, answer, or resume. @default true
-   */
-  readonly followIdle?: boolean;
-  /** Prewarm an owned session on mount and after reset. @default false */
+  /** Keep following while the committed view matches; local obligations take priority. @default () => true */
+  readonly followWhile?: (view: SessionStoreSnapshot["view"]) => boolean;
+  /** Prewarm an owned session on mount and after `newSession()`. @default false */
   readonly prewarm?: boolean;
   /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
   readonly resume?: boolean;
@@ -207,6 +216,10 @@ class SvelteEveAgent implements UseEveAgentReturn {
     return this.#snapshot.status;
   }
 
+  follow = (receipt: Pick<Delivery, "sessionId" | "deliveryId">): void => {
+    this.#store.follow(receipt);
+  };
+
   cancel = (): Promise<Delivery> => {
     return this.#store.cancel();
   };
@@ -245,7 +258,7 @@ class SvelteEveAgent implements UseEveAgentReturn {
  * Svelte 5 binding that drives an eve session and projects its events into
  * rune-friendly reactive data.
  *
- * The conversation's `messages`, `interactions`, `agents`, `view`, and `previews` are exposed
+ * The conversation's `messages`, `agents`, and `view` are exposed
  * directly; derive anything else from `events`.
  * Configuration is read once; create a new binding to change base URL or session.
  */
@@ -261,7 +274,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     initialSession: options.initialSession,
     optimistic: options.optimistic,
     followAgents: options.followAgents,
-    followIdle: options.followIdle,
+    followWhile: (view) => options.followWhile?.(view) ?? true,
     prewarm: options.prewarm,
     session: options.session,
   });

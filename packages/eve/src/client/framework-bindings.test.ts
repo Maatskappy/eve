@@ -147,6 +147,7 @@ describe("the framework bindings", () => {
       const binding = bindings[name]!();
 
       await binding.send("Weather?");
+      await vi.waitFor(() => expect(server.reading).toBe(1));
       server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
       await vi.waitFor(() => expect(binding.finished).toHaveBeenCalledTimes(1));
       const data = binding.data();

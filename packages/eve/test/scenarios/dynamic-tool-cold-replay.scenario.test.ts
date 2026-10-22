@@ -140,7 +140,7 @@ describe("dynamic tool cold replay", () => {
       });
 
       try {
-        const client = new Client({ host: server.url });
+        const client = new Client({ baseUrl: server.url });
         const created = await client.sessions.create({ message: "Hello." });
         await expect(created.delivery.result()).resolves.toMatchObject({
           interactions: [],
@@ -179,7 +179,7 @@ describe("dynamic tool cold replay", () => {
           env: { ...pinnedEnv, EVE_SCHEMA_TEST_SUFFIX: ":changed" },
         });
 
-        const resumedSession = new Client({ host: server.url }).sessions.attach(
+        const resumedSession = new Client({ baseUrl: server.url }).sessions.attach(
           sessionState.sessionId,
           { streamIndex: sessionState.streamIndex },
         );

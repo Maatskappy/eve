@@ -18,7 +18,7 @@ const paths = {
 
 export async function sendClientControl(input: {
   readonly context: {
-    readonly host: string;
+    readonly baseUrl: string;
     readonly redirect?: ClientRedirectPolicy;
     resolveHeaders(): Promise<Headers>;
   };
@@ -34,7 +34,7 @@ export async function sendClientControl(input: {
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
   const response = await fetch(
-    createClientUrl(input.context.host, paths[input.kind](input.sessionId)),
+    createClientUrl(input.context.baseUrl, paths[input.kind](input.sessionId)),
     {
       body: JSON.stringify(body),
       headers,

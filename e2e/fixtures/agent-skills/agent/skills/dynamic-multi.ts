@@ -11,7 +11,7 @@ export default defineDynamic({
           description:
             "Smoke-test fixture: alpha skill from a multi-skill resolver. " +
             'Only load when the user explicitly asks for "dynamic multi alpha".',
-          markdown: [
+          content: [
             "# Alpha Skill",
             "",
             "When this skill is loaded, reply with exactly:",
@@ -23,7 +23,7 @@ export default defineDynamic({
           description:
             "Smoke-test fixture: beta skill from a multi-skill resolver. " +
             'Only load when the user explicitly asks for "dynamic multi beta".',
-          markdown: [
+          content: [
             "# Beta Skill",
             "",
             "When this skill is loaded, reply with exactly:",

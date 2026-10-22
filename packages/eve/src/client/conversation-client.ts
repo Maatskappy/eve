@@ -2,7 +2,7 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
 import { Conversation, type LocalSubmission } from "#client/conversation.js";
-import { assertAnswerable } from "#client/eve-agent-store-helpers.js";
+import { assertAnswerable } from "#client/session-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { Answer } from "#shared/input.js";

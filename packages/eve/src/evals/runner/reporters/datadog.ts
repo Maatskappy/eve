@@ -82,7 +82,7 @@ type DatadogRecordingOptions = Required<
  * package and `DD_API_KEY`/`DD_APP_KEY` credentials unless `config.client` is
  * provided.
  */
-export function Datadog(config: DatadogReporterConfig = {}): EvalReporter {
+export function datadogReporter(config: DatadogReporterConfig = {}): EvalReporter {
   return new DatadogReporter(config);
 }
 

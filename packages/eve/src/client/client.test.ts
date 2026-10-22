@@ -62,7 +62,7 @@ describe("Client request policy", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(AGENT_INFO));
     const controller = new AbortController();
-    const client = new Client({ host: "https://eve.test", auth: { bearer: "test-token" } });
+    const client = new Client({ baseUrl: "https://eve.test", auth: { bearer: "test-token" } });
     await client.info({ signal: controller.signal });
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.signal).toBe(controller.signal);
@@ -74,12 +74,24 @@ describe("Client request policy", () => {
       Response.json({ ok: true, status: "ready", workflowId: "wf", extra: true }),
     );
 
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.health()).rejects.toThrow(HealthResponseError);
   });
 
-  it("includes host query parameters on every agent request", async () => {
+  it("requires a base URL and sends an empty one to same-origin routes", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
+    // @ts-expect-error A direct client names its base URL; pass "" for same-origin routes.
+    void (() => new Client({}));
+
+    await new Client({ baseUrl: "" }).health();
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/eve/v1/health");
+  });
+
+  it("includes base URL query parameters on every agent request", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(AGENT_INFO))
@@ -90,7 +102,7 @@ describe("Client request policy", () => {
       )
       .mockResolvedValueOnce(endedStream());
     const client = new Client({
-      host: "https://eve.test?x-vercel-protection-bypass=secret",
+      baseUrl: "https://eve.test?x-vercel-protection-bypass=secret",
     });
 
     await client.info();
@@ -116,7 +128,7 @@ describe("Client request policy", () => {
         Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
       .mockResolvedValueOnce(endedStream());
-    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+    const client = new Client({ baseUrl: "https://eve.test", redirect: "manual" });
 
     await client.info();
     await client.health();
@@ -134,7 +146,7 @@ describe("Client request policy", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(AGENT_INFO));
     const client = new Client({
-      host: "https://eve.test",
+      baseUrl: "https://eve.test",
       auth: { vercelOidc: { token: () => Promise.resolve("oidc-tok") } },
     });
 
@@ -153,7 +165,7 @@ describe("Client request policy", () => {
       )
       .mockResolvedValueOnce(endedStream());
     const client = new Client({
-      host: "https://eve.test",
+      baseUrl: "https://eve.test",
       auth: { vercelOidc: { token: "oidc-tok" } },
     });
 
@@ -179,7 +191,7 @@ describe("Client request policy", () => {
         Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
       )
       .mockResolvedValueOnce(endedStream());
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
     const hello = new TextEncoder().encode("hello");
 
     await (
@@ -214,7 +226,7 @@ describe("Client request policy", () => {
         headers: { location: "https://vercel.com/sso-api?url=https://eve.test" },
       }),
     );
-    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+    const client = new Client({ baseUrl: "https://eve.test", redirect: "manual" });
 
     const error = await client.info().catch((cause: unknown) => cause);
 
@@ -274,7 +286,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const info = await client.info();
 
@@ -309,7 +321,7 @@ describe("Client request policy", () => {
           instructions: { ...AGENT_INFO.instructions, static: [instructions] },
         }),
       );
-      const client = new Client({ host: "https://eve.test" });
+      const client = new Client({ baseUrl: "https://eve.test" });
 
       if (mountId === "") {
         await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
@@ -353,7 +365,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, tools: { ...AGENT_INFO.tools, static: tools } }),
     );
-    const info = await new Client({ host: "https://eve.test" }).info();
+    const info = await new Client({ baseUrl: "https://eve.test" }).info();
     expect(info.tools.static.map((tool) => tool.binding?.backing)).toEqual(
       tools.map((tool) => tool.binding.backing),
     );
@@ -373,7 +385,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const info = await client.info();
 
@@ -394,7 +406,7 @@ describe("Client request policy", () => {
         ],
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const info = await client.info();
 
@@ -412,7 +424,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, ignoredByClient: true }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -451,7 +463,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -487,7 +499,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -502,7 +514,7 @@ describe("Client request policy", () => {
         },
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -511,7 +523,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, subagents: { local: [], total: 1 } }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -520,7 +532,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ kind: "eve-agent-info", version: 1 }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -539,7 +551,7 @@ describe("Client request policy", () => {
         version: 1,
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -558,7 +570,7 @@ describe("Client request policy", () => {
         version: 1,
       }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     const error = await client.info().catch((cause: unknown) => cause);
 
@@ -571,7 +583,7 @@ describe("Client request policy", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("<!doctype html>", { headers: { "content-type": "text/html" } }),
     );
-    const client = new Client({ host: "https://eve.test" });
+    const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
@@ -588,7 +600,7 @@ describe("Client request policy", () => {
           },
         }),
       );
-      const client = new Client({ host: "https://eve.test" });
+      const client = new Client({ baseUrl: "https://eve.test" });
 
       await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
     },

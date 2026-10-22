@@ -133,11 +133,6 @@
       "import": "./dist/src/public/memory/file/vercel.js",
       "default": "./dist/src/public/memory/file/vercel.js"
     },
-    "./tools/agent-router": {
-      "types": "./dist/src/public/tools/agent-router.d.ts",
-      "import": "./dist/src/public/tools/agent-router.js",
-      "default": "./dist/src/public/tools/agent-router.js"
-    },
     "./tools/sleep": {
       "types": "./dist/src/public/tools/sleep.d.ts",
       "import": "./dist/src/public/tools/sleep.js",
@@ -333,18 +328,6 @@
       "import": "./dist/src/public/local-dev.js",
       "default": "./dist/src/public/local-dev.js"
     },
-    "./self-modification/local": {
-      "eve-source": "./dist/src/self-modification/extension/extension.js",
-      "types": "./dist/src/self-modification/extension/extension.d.ts",
-      "import": "./dist/src/self-modification/extension/extension.js",
-      "default": "./dist/src/self-modification/extension/extension.js"
-    },
-    "./self-modification/remote": {
-      "eve-source": "./dist/src/self-modification/remote/extension.js",
-      "types": "./dist/src/self-modification/remote/extension.d.ts",
-      "import": "./dist/src/self-modification/remote/extension.js",
-      "default": "./dist/src/self-modification/remote/extension.js"
-    },
     "./extensions/code": {
       "eve-source": "./dist/src/extensions/code/extension/extension.js",
       "types": "./dist/src/extensions/code/extension/extension.d.ts",
@@ -380,24 +363,6 @@
       "types": "./dist/src/extensions/git/extension/lib/sandbox.d.ts",
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
-    },
-    "./computer-use": {
-      "eve-source": "./dist/src/computer-use/extension/extension.js",
-      "types": "./dist/src/computer-use/extension/extension.d.ts",
-      "import": "./dist/src/computer-use/extension/extension.js",
-      "default": "./dist/src/computer-use/extension/extension.js"
-    },
-    "./computer-use/tools": {
-      "eve-source": "./dist/src/computer-use/tools.js",
-      "types": "./dist/src/computer-use/tools.d.ts",
-      "import": "./dist/src/computer-use/tools.js",
-      "default": "./dist/src/computer-use/tools.js"
-    },
-    "./computer-use/sandbox": {
-      "eve-source": "./dist/src/computer-use/extension/lib/sandbox.js",
-      "types": "./dist/src/computer-use/extension/lib/sandbox.d.ts",
-      "import": "./dist/src/computer-use/extension/lib/sandbox.js",
-      "default": "./dist/src/computer-use/extension/lib/sandbox.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -559,6 +524,47 @@
       "types": "./dist/src/internal/git.d.ts",
       "import": "./dist/src/internal/git.js",
       "default": "./dist/src/internal/git.js"
+    },
+    "./tools/agent_router": {
+      "types": "./dist/src/public/tools/agent-router.d.ts",
+      "import": "./dist/src/public/tools/agent-router.js",
+      "default": "./dist/src/public/tools/agent-router.js"
+    },
+    "./extensions/self-modification/local": {
+      "eve-source": "./dist/src/self-modification/extension/extension.js",
+      "types": "./dist/src/self-modification/extension/extension.d.ts",
+      "import": "./dist/src/self-modification/extension/extension.js",
+      "default": "./dist/src/self-modification/extension/extension.js"
+    },
+    "./extensions/self-modification/remote": {
+      "eve-source": "./dist/src/self-modification/remote/extension.js",
+      "types": "./dist/src/self-modification/remote/extension.d.ts",
+      "import": "./dist/src/self-modification/remote/extension.js",
+      "default": "./dist/src/self-modification/remote/extension.js"
+    },
+    "./extensions/computer-use": {
+      "eve-source": "./dist/src/computer-use/extension/extension.js",
+      "types": "./dist/src/computer-use/extension/extension.d.ts",
+      "import": "./dist/src/computer-use/extension/extension.js",
+      "default": "./dist/src/computer-use/extension/extension.js"
+    },
+    "./extensions/computer-use/tools": {
+      "eve-source": "./dist/src/computer-use/tools.js",
+      "types": "./dist/src/computer-use/tools.d.ts",
+      "import": "./dist/src/computer-use/tools.js",
+      "default": "./dist/src/computer-use/tools.js"
+    },
+    "./extensions/computer-use/sandbox": {
+      "eve-source": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "types": "./dist/src/computer-use/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "default": "./dist/src/computer-use/extension/lib/sandbox.js"
+    },
+    "./experimental/connections": {
+      "eve-source": "./dist/src/public/experimental/connections/index.js",
+      "types": "./dist/src/public/experimental/connections/index.d.ts",
+      "import": "./dist/src/public/experimental/connections/index.js",
+      "default": "./dist/src/public/experimental/connections/index.js"
     }
   },
   "publishConfig": {
@@ -648,7 +654,7 @@
     "jose": "6.2.3",
     "js-yaml": "4.3.2",
     "jsonc-parser": "3.3.1",
-    "just-bash": "3.1.0",
+    "just-bash": "3.6.0",
     "just-secrets": "0.0.2",
     "marked": "catalog:",
     "microsandbox": "0.5.5",
@@ -668,15 +674,48 @@
     "zod-validation-error": "5.0.0"
   },
   "peerDependencies": {
+    "@linqapp/sdk": "^0.47.1",
+    "@nuxt/kit": "^4.0.0",
+    "@nuxt/schema": "^4.0.0",
     "@opentelemetry/api": "^1.0.0",
+    "@vercel/connect": "^2.5.2",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
     "dd-trace": "^6.13.0",
-    "just-bash": "^3.1.0",
-    "microsandbox": "^0.5.0"
+    "just-bash": "^3.6.0",
+    "microsandbox": "^0.5.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "svelte": "^5.0.0",
+    "vite": "^8.3.1",
+    "vue": "^3.5.0"
   },
   "peerDependenciesMeta": {
+    "@nuxt/kit": {
+      "optional": true
+    },
+    "@nuxt/schema": {
+      "optional": true
+    },
+    "@vercel/connect": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    },
     "@opentelemetry/api": {
       "optional": true
     },
@@ -694,6 +733,9 @@
     },
     "microsandbox": {
       "optional": true
+    },
+    "@linqapp/sdk": {
+      "optional": true
     }
   },
   "engines": {
@@ -701,20 +743,20 @@
   },
   "eve": {
     "builtInExtensions": {
-      "./self-modification/local": {
-        "dist": "./dist/src/self-modification/extension"
-      },
-      "./self-modification/remote": {
-        "dist": "./dist/src/self-modification/remote"
-      },
       "./extensions/code": {
         "dist": "./dist/src/extensions/code/extension"
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
       },
-      "./computer-use": {
+      "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
+      },
+      "./extensions/self-modification/local": {
+        "dist": "./dist/src/self-modification/extension"
+      },
+      "./extensions/self-modification/remote": {
+        "dist": "./dist/src/self-modification/remote"
       }
     }
   }

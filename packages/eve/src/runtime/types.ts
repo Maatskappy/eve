@@ -1,4 +1,4 @@
-import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
+import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
@@ -107,7 +107,7 @@ export type ResolvedScheduleDefinition = Readonly<
  */
 /** A connection's event watching, checked once when the connection resolves. */
 export interface ResolvedConnectionEvents {
-  readonly callbacks: Experimental_ConnectionEvents;
+  readonly callbacks: ConnectionEvents;
   /** The static Connect authorization every watch subscribes and runs under. */
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly connector: string;

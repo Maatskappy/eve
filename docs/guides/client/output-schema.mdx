@@ -26,7 +26,7 @@ const outputSchema = {
   required: ["title", "count"],
 } as const;
 
-const client = new Client({ host: "http://127.0.0.1:2000" });
+const client = new Client({ baseUrl: "http://127.0.0.1:2000" });
 const { session, delivery } = await client.sessions.create<Summary>({
   message: "Summarize this turn.",
   outputSchema,

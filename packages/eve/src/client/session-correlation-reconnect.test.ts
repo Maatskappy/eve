@@ -22,7 +22,7 @@ function session(
   resolveHeaders = async (_headers?: Readonly<Record<string, string>>) => new Headers(),
 ) {
   return new ClientSession(
-    { host: "https://eve.test", resolveHeaders },
+    { baseUrl: "https://eve.test", resolveHeaders },
     { sessionId: "session_1", streamIndex: 0 },
   );
 }

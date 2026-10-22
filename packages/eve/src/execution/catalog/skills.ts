@@ -35,7 +35,7 @@ export function sessionSkills(ctx: ContextReader | undefined): ReadonlyMap<strin
     skills.set(skill.name, {
       deferred: skill.deferred === true,
       description: skill.description,
-      markdown: skill.markdown,
+      markdown: skill.content,
       name: skill.name,
       path: skillFilePath(skill.name),
     });

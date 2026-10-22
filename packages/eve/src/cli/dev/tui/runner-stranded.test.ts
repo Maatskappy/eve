@@ -67,7 +67,7 @@ describe("EveTUIRunner with a stranded session", () => {
     const outcomes: unknown[] = [];
     const renderError = vi.fn();
     await new EveTUIRunner({
-      client: new Client({ host: "http://localhost:3000" }),
+      client: new Client({ baseUrl: "http://localhost:3000" }),
       renderer: turnTaking(
         ["Hello.", "Still there?", "/clear", "/new", "Fresh start.", undefined],
         { finishCommand: (outcome) => outcomes.push(outcome), renderError },

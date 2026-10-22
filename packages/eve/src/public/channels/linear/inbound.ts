@@ -88,7 +88,11 @@ export interface LinearDataWebhookEvent {
 export type LinearInboundEvent = LinearAgentSessionEvent | LinearDataWebhookEvent;
 
 /** Builds the continuation token for one Linear Agent Session. */
-export function linearContinuationToken(agentSessionId: string): string {
+export function linearContinuationToken({
+  agentSessionId,
+}: {
+  readonly agentSessionId: string;
+}): string {
   return `agent-session:${agentSessionId}`;
 }
 

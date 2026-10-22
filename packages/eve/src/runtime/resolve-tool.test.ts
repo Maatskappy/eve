@@ -36,8 +36,8 @@ function moduleMap(value: unknown): CompiledModuleMap {
 
 describe("resolveToolDefinition", () => {
   it.each([
-    { tool: sleep(), action: "sleep", workflow: true },
-    { tool: noReply(), action: "no_reply", workflow: false },
+    { tool: sleep, action: "sleep", workflow: true },
+    { tool: noReply, action: "no_reply", workflow: false },
   ])(
     "marks $action after an author spreads and renames the provided definition",
     async ({ tool, workflow }) => {

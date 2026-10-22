@@ -5,7 +5,7 @@ function resolve(event: "session.started" | "turn.started", ctx: DynamicResolveC
   recordDynamicSkillContext(event, ctx);
   return defineSkill({
     description: "Policy for auditing dynamic skill context.",
-    markdown: "Read the recorded resolver context when asked to audit it.",
+    content: "Read the recorded resolver context when asked to audit it.",
   });
 }
 

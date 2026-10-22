@@ -19,7 +19,7 @@ describe("runtime-artifact refresher session continuity", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const client = new Client({ baseUrl: "http://127.0.0.1:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
@@ -53,7 +53,7 @@ describe("runtime-artifact refresher session continuity", () => {
       revisions: ["snapshot-a", "snapshot-a"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const client = new Client({ baseUrl: "http://127.0.0.1:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
@@ -83,7 +83,7 @@ describe("runtime-artifact refresher session continuity", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
@@ -124,7 +124,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
@@ -155,7 +155,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
       revisions: ["snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });

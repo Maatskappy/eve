@@ -8,7 +8,7 @@ export default defineDynamic({
       return defineSkill({
         description:
           'Use ONLY when the user asks for the smoke-test dynamic tenant policy skill. Triggered by the literal phrase "dynamic tenant policy skill".',
-        markdown: [
+        content: [
           "# Dynamic Tenant Policy Skill",
           "",
           "This skill is a fixture for the dynamic-skill smoke test.",

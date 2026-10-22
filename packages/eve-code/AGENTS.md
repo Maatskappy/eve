@@ -13,7 +13,7 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 - Use real `git`, `gh`, and `vc` CLIs rather than bespoke repository lifecycle tools.
 - Keep `apply_patch` as the only extension-owned file editing primitive.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
-- Computer use lives in `@eve/computer-use` (`eve/computer-use`). Import its public helpers directly; do not add computer-use code or re-exports here.
+- Computer use lives in `@eve/computer-use` (`eve/extensions/computer-use`). Import its public helpers directly; do not add computer-use code or re-exports here.
 
 ## Build and publish
 

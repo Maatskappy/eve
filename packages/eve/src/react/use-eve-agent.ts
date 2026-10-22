@@ -3,15 +3,15 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
-  attachEveAgentStore,
-  detachEveAgentStore,
-  EveAgentStore,
-  type EveAgentStoreCallbacks,
-  type EveAgentStoreSnapshot,
-  type EveAgentStoreStatus,
+  attachSessionStore,
+  detachSessionStore,
+  SessionStore,
+  type SessionStoreCallbacks,
+  type SessionStoreSnapshot,
+  type SessionStoreStatus,
   type PrepareSend,
-} from "#client/eve-agent-store.js";
-import { resolveEveAgentHost } from "#client/agent-host.js";
+} from "#client/session-store.js";
+import { resolveEveAgentBaseUrl } from "#client/agent-base-url.js";
 import type { ClientSession } from "#client/session.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type {
@@ -31,19 +31,19 @@ export type { PrepareSend };
  * - `"resuming"`: catching up on an attached session; submission is disabled.
  * - `"busy"`: a send is in flight, or a turn, task, or sign-in is still pending.
  */
-export type UseEveAgentStatus = EveAgentStoreStatus;
+export type UseEveAgentStatus = SessionStoreStatus;
 
 /**
  * Snapshot of an eve agent session: the conversation (`messages`, `interactions`, `agents`,
  * `view`, `previews`), `events` (the authoritative server stream), `session` (resumable cursor),
  * `status`, and `error`.
  */
-export type UseEveAgentSnapshot = EveAgentStoreSnapshot;
+export type UseEveAgentSnapshot = SessionStoreSnapshot;
 
 /**
  * Snapshot plus commands returned by `useEveAgent`.
  */
-export interface UseEveAgentHelpers extends UseEveAgentSnapshot {
+export interface UseEveAgentReturn extends UseEveAgentSnapshot {
   /** Requests durable cancellation of the active turn while continuing to receive its events. */
   readonly cancel: () => Promise<Delivery>;
   /** Resolves at the durable tail; the session stream keeps following afterward. */
@@ -71,18 +71,18 @@ export interface UseEveAgentHelpers extends UseEveAgentSnapshot {
  * Configuration for creating or binding a React eve agent session.
  *
  * Session configuration is read when the hook creates its internal store;
- * remount the component to point at a different host or session.
+ * remount the component to point at a different base URL or session.
  * Lifecycle callbacks update on every render.
  *
  * For credentials or headers that must change without remounting, pass function
  * values to `auth` or `headers`; the client resolves those before each request.
  */
-export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
+export interface UseEveAgentOptions extends SessionStoreCallbacks {
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
    * `agent: "support"` targets same-origin routes under
-   * `/eve/support/v1/...`. Do not combine with `host`.
+   * `/eve/support/v1/...`. Do not combine with `baseUrl`.
    */
   readonly agent?: string;
   readonly auth?: ClientAuth;
@@ -96,7 +96,7 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
    *
    * @default ""
    */
-  readonly host?: string;
+  readonly baseUrl?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
   readonly initialEvents?: readonly SessionStreamEvent[];
   readonly initialSession?: ClientSessionState;
@@ -147,14 +147,14 @@ export interface UseEveAgentOptions extends EveAgentStoreCallbacks {
  * `send`, `respond`, `resume`, `cancel`, and `reset`. Read lifecycle from `view` with selectors
  * from `eve/events`.
  *
- * Session-shaping options (`host`, `session`, `initialEvents`,
+ * Session-shaping options (`baseUrl`, `session`, `initialEvents`,
  * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are read once
  * when the store is created; remount to change them. `prewarm` and lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
  * refresh on every render.
  */
-export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelpers {
-  const storeRef = useRef<EveAgentStore | undefined>(undefined);
+export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
+  const storeRef = useRef<SessionStore | undefined>(undefined);
   const mountedRef = useRef(false);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
@@ -169,10 +169,10 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelper
     ) {
       throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
     }
-    storeRef.current = new EveAgentStore({
+    storeRef.current = new SessionStore({
       auth: options.auth,
       headers: options.headers,
-      host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
+      baseUrl: resolveEveAgentBaseUrl({ agent: options.agent, baseUrl: options.baseUrl }),
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
       optimistic: options.optimistic,
@@ -203,13 +203,13 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentHelper
 
   useEffect(() => {
     mountedRef.current = true;
-    const timeout = setTimeout(() => attachEveAgentStore(store), 0);
+    const timeout = setTimeout(() => attachSessionStore(store), 0);
     return () => {
       mountedRef.current = false;
       clearTimeout(timeout);
       // Strict Mode and Fast Refresh replay this cleanup and setup in one synchronous commit.
       queueMicrotask(() => {
-        if (!mountedRef.current) detachEveAgentStore(store);
+        if (!mountedRef.current) detachSessionStore(store);
       });
     };
   }, [store]);

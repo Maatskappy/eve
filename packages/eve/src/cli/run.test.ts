@@ -1011,7 +1011,7 @@ describe("eve acp", () => {
       options: {
         auth: { vercelOidc: { token: "oidc-token" } } as const,
         headers: { "x-vercel-protection-bypass": "bypass" },
-        host: "https://agent.example.com/",
+        baseUrl: "https://agent.example.com/",
       },
       lastOidcTokenFailure: () => undefined,
     }));

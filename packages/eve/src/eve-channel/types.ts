@@ -93,7 +93,7 @@ export type EveMessageResultOrPromise = EveMessageResult | Promise<EveMessageRes
 
 /**
  * Default `onMessage` auth projection: returns {@link EveHandle.caller} unchanged as the
- * runtime session auth when {@link EveChannelInput.onMessage} is omitted. Call it from a custom `onMessage` to inherit the default while adding `context`.
+ * runtime session auth when {@link EveChannelConfig.onMessage} is omitted. Call it from a custom `onMessage` to inherit the default while adding `context`.
  */
 export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | null {
   return ctx.eve.caller;
@@ -103,7 +103,7 @@ export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | nul
  * Configuration for {@link eveChannel}. Only {@link auth} is required;
  * `uploadPolicy`, `onMessage`, and `events` refine the default HTTP behavior.
  */
-export interface EveChannelInput {
+export interface EveChannelConfig {
   /**
    * Route auth policy: a single {@link AuthFn} or an ordered array walked by {@link routeAuth}.
    * The first entry returning a {@link SessionAuthContext} wins; `null` / `undefined` skips to

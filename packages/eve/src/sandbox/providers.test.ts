@@ -25,6 +25,22 @@ describe("sandbox providers", () => {
     expect("dockerfile" in VercelSandbox).toBe(false);
   });
 
+  it("rejects SDK-specific options on the default fallback with migration guidance", () => {
+    const provider = defineDefaultSandboxProvider({
+      isDeployedOnVercel: () => true,
+      isDockerAvailable: () => false,
+      isMicrosandboxSupported: () => false,
+    });
+    expect(() =>
+      provider.environment({
+        justBash: {
+          // @ts-expect-error SDK customization belongs to the explicit provider.
+          customCommands: [],
+        },
+      }),
+    ).toThrow("Use JustBashSandbox.environment()");
+  });
+
   it("returns runtime sandboxes from open", () => {
     const environment = DockerSandbox.environment({});
     expectTypeOf(environment.open).returns.toEqualTypeOf<

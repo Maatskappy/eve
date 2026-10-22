@@ -42,7 +42,6 @@ export {
   type LinearEventContext,
   type LinearHandle,
   type LinearInboundResult,
-  type LinearInboundResultOrPromise,
   type LinearInstrumentationMetadata,
   type LinearReceiveTarget,
   type LinearSessionContext,

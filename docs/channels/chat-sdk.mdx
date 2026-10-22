@@ -111,14 +111,14 @@ bot.onNewMention(async (thread, message) => {
 
 `options` accepts `thread` and `adapterName`, plus the channel send options `auth`, `context`, `outputSchema`, `title`, `callback`, `turnPolicy`, and `idempotencyKey`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn. `auth` defaults to `null`.
 
-To answer pending input requests from a handler you render yourself, call `respond(answers, { thread, auth?, context? })`. Like a channel's `respond()`, it never creates a session. This example answers a custom button whose `value` carries the eve request id:
+To answer pending input requests from a handler you render yourself, call `respond(answers, { thread, auth?, context? })`. Like a channel's `respond()`, it never creates a session. This example answers a custom button whose `value` carries the interaction id:
 
 ```ts
 export const { bot, channel, send, respond } = chatSdkChannel({/* ... */});
 
 bot.onAction("approve_deploy", async (event) => {
   if (!event.thread || !event.value) return;
-  await respond([{ requestId: event.value, optionId: "approve" }], { thread: event.thread });
+  await respond([{ interactionId: event.value, optionId: "approve" }], { thread: event.thread });
 });
 ```
 

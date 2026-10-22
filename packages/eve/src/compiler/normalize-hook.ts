@@ -36,6 +36,12 @@ export async function compileHookEntry(
     );
     return [name];
   });
+  if (loaded.prewarm !== undefined) {
+    expectFunction(
+      loaded.prewarm,
+      `Expected the hook export "${source.exportName ?? "default"}" from "${source.logicalPath}" to provide a function for prewarm.`,
+    );
+  }
 
   return {
     eventNames,

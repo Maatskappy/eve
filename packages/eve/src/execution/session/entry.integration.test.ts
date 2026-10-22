@@ -19,6 +19,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { defineSkill } from "#public/definitions/skill.js";
 import { sessions } from "#public/server/index.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#internal/testing/event-id.js";
@@ -49,6 +50,224 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it.each([false, true])(
+    "prewarms before the first turn and reuses preparation (initial message: %s)",
+    async (initialMessage) => {
+      const ready = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const prepared: string[] = [];
+      const read: (string | null)[] = [];
+      let starts = 0;
+      const logs = captureConsoleOutput();
+      const runtime = await createTestRuntime({
+        modules: [
+          {
+            logicalPath: "hooks/prepare.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                async prewarm(ctx) {
+                  prepared.push(ctx.session.id);
+                  await ctx.preload("sandbox", async (sandbox) => {
+                    await sandbox.writeTextFile({ path: "prepared.txt", content: ctx.session.id });
+                  });
+                  ready.resolve();
+                  await release.promise;
+                  throw new Error("optional warm-up failed after acquiring its resource");
+                },
+                events: {
+                  "session.started": () => {
+                    starts += 1;
+                  },
+                  async "turn.started"(_event, ctx) {
+                    const sandbox = await ctx.getSandbox();
+                    read.push(await sandbox.readTextFile({ path: "prepared.txt" }));
+                  },
+                },
+              }),
+            }),
+          },
+          {
+            logicalPath: "hooks/verify-preparation.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                async prewarm(ctx) {
+                  await ctx.preload("sandbox", async (sandbox) => {
+                    read.push(await sandbox.readTextFile({ path: "prepared.txt" }));
+                  });
+                },
+              }),
+            }),
+          },
+        ],
+      });
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: initialMessage ? { message: "Greet Alice briefly." } : {},
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await withTimeout(ready.promise, "prewarm callback");
+          expect(starts).toBe(0);
+          const sessionRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+          expect(await sessionRuntime.getStreamTailIndex(run.runId)).toBe(-1);
+          if (!initialMessage) {
+            await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+              kind: "send",
+              payload: { message: "Greet Alice briefly." },
+            });
+          }
+          release.resolve();
+          const first = await stream.nextTurn();
+          expectSingleTurn(first, "turn_0");
+          await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+            kind: "send",
+            payload: { message: "Greet Bob briefly." },
+          });
+          expectSingleTurn(await stream.nextTurn(), "turn_1");
+          expect(prepared).toEqual([run.runId]);
+          expect(read).toEqual([run.runId, run.runId, run.runId]);
+          expect(starts).toBe(1);
+          expect(
+            runtime.sandboxEvents.filter((event) => event === `start:${run.runId}`),
+          ).toHaveLength(1);
+        } finally {
+          release.resolve();
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+      expect(logs.lines.some((line) => line.includes("prewarm hook failed"))).toBe(true);
+    },
+  );
+
+  it("aborts preparation and cleans up a sandbox reset before any message", async () => {
+    const ready = Promise.withResolvers<void>();
+    let aborted = false;
+    const runtime = await createTestRuntime({
+      modules: [
+        {
+          logicalPath: "hooks/prepare.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              async prewarm(ctx) {
+                await ctx.preload("sandbox");
+                ready.resolve();
+                await new Promise<void>((resolve) => {
+                  ctx.abortSignal.addEventListener(
+                    "abort",
+                    () => {
+                      aborted = true;
+                      resolve();
+                    },
+                    { once: true },
+                  );
+                });
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: {},
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      let completed = false;
+      try {
+        await withTimeout(ready.promise, "prewarm sandbox startup");
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "reset",
+        });
+        await withTimeout(run.returnValue, "reset prewarmed session");
+        completed = true;
+        expect(aborted).toBe(true);
+        expect(runtime.sandboxCleanups).toContain(run.runId);
+      } finally {
+        if (!completed) await run.cancel();
+      }
+    });
+  });
+
+  it("does not start a sandbox for a model-only turn with packaged dynamic skills", async () => {
+    const references: (string | null)[] = [];
+    const runtime = await createTestRuntime({
+      modules: [
+        {
+          logicalPath: "skills/research.ts",
+          loadNamespace: async () => ({
+            default: defineDynamic({
+              events: {
+                "session.started": () =>
+                  defineSkill({
+                    description: "A research procedure with supporting references.",
+                    markdown: "Read the supporting reference when research is requested.",
+                    files: { "references/checklist.md": "Collect sources and summarize evidence." },
+                  }),
+              },
+            }),
+          }),
+        },
+        {
+          logicalPath: "tools/read_reference.ts",
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Read the research procedure's supporting reference.",
+              inputSchema: {},
+              approval: () => "not-applicable",
+              async execute(_input, ctx) {
+                const sandbox = await ctx.getSandbox();
+                const content = await sandbox.readTextFile({
+                  path: "/workspace/skills/research/references/checklist.md",
+                });
+                references.push(content);
+                return content;
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Greet Alice briefly." },
+          serializedContext: buildSerializedContext({ channelKind: "http" }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const first = await stream.nextTurn();
+        expectSingleTurn(first, "turn_0");
+        expect(filterEventsByType(first, "step.started")).toHaveLength(1);
+        expect(runtime.sandboxEvents).toEqual([]);
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "send",
+          payload: { message: "Use read_reference exactly once." },
+        });
+        expectSingleTurn(await stream.nextTurn(), "turn_1");
+        expect(references).toEqual(["Collect sources and summarize evidence."]);
+        expect(runtime.sandboxEvents.filter((event) => event.startsWith("start:"))).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("preserves scheduled provenance in the first turn so unattended tools need no approval", async () => {
     const executions: unknown[] = [];
     const runtime = await createTestRuntime({

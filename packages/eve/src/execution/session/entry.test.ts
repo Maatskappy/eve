@@ -88,6 +88,7 @@ function createInbox() {
   return {
     claimSessionHook: vi.fn(async () => {}),
     dispose: vi.fn(async () => {}),
+    onInterrupt: vi.fn(() => () => {}),
   };
 }
 

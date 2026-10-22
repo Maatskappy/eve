@@ -368,6 +368,8 @@ export interface DurableDynamicSkillMetadata {
    * supporting files, which are the only packages written to the sandbox.
    */
   readonly revision?: string;
+  /** Supporting files encoded as base64, retained for lazy writes and sandbox recreation. */
+  readonly files?: Readonly<Record<string, string>>;
 }
 
 export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
@@ -382,9 +384,8 @@ export const DynamicSkillManifestKey = new ContextKey<DynamicSkillManifest>(
 );
 
 /**
- * Durable map from dynamic skill name to the serialized sandbox session state
- * that holds its current manifest revision. Refreshes skip writes when the
- * revision and sandbox are unchanged; deleting the sandbox clears it.
+ * Durable map from dynamic skill name to its sandbox identity and package revision.
+ * Sandbox access skips writes when both match; deleting the sandbox clears it.
  */
 export const DynamicSkillSandboxKey = new ContextKey<Readonly<Record<string, string>>>(
   "eve.dynamicSkillSandbox",

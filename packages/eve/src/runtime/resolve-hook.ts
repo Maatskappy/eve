@@ -2,7 +2,7 @@ import type { CompiledHookDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "../internal/authored-module.js";
 import type { MessageStreamEvent } from "../protocol/message.js";
-import type { StreamEventHook } from "../public/definitions/hook.js";
+import type { PrewarmHook, StreamEventHook } from "../public/definitions/hook.js";
 import { toErrorMessage } from "../shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "./resolve-helpers.js";
 import type { ResolvedHookDefinition } from "./types.js";
@@ -11,7 +11,7 @@ import type { ResolvedHookDefinition } from "./types.js";
  * Resolves one compiled authored hook into a runtime-owned definition
  * with live handlers reattached from the authored module.
  *
- * The authored shape is `{ events?: { ... } }`.
+ * The authored shape is `{ prewarm?, events?: { ... } }`.
  * Each declared handler must be a function. Any other shape raises a
  * {@link ResolveAgentError} so typos surface at resolve time instead of
  * at first dispatch call.
@@ -53,6 +53,13 @@ export async function resolveHookDefinition(
 
     return {
       events,
+      prewarm:
+        resolvedRecord.prewarm === undefined
+          ? undefined
+          : (expectFunction(
+              resolvedRecord.prewarm,
+              describe(definition, "to provide a function for prewarm"),
+            ) as PrewarmHook),
       exportName: definition.exportName,
       logicalPath: definition.logicalPath,
       slug: definition.slug,

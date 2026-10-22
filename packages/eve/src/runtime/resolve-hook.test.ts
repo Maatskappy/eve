@@ -87,4 +87,13 @@ describe("resolveHookDefinition", () => {
       /events\.session\.started/,
     );
   });
+
+  it("rejects a non-function prewarm callback", async () => {
+    const definition = buildDefinition({ slug: "broken-prewarm" });
+    const moduleMap = buildModuleMap(definition.sourceId, { default: { prewarm: true } });
+
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      /function for prewarm/,
+    );
+  });
 });

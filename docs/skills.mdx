@@ -11,6 +11,17 @@ eve scans the files under `agent/skills/` and lists each one's name and descript
 
 Listing skills and loading their instructions do not require a sandbox: loading returns static instructions from the compiled agent and dynamic instructions from session state. Only access to supporting package files requires a sandbox. Builds may also prewarm sandbox templates that contain static package files. Supporting files are available under `$HOME/.agents/skills/<skill>/`, with `/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable. Sibling references inside `SKILL.md`, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
 
+Resolving a dynamic skill with supporting files does not start a sandbox or write
+files before the first model call. eve retains the package in session state and
+synchronizes its files when a tool or hook first accesses the sandbox, before
+returning the sandbox. Unchanged packages are not rewritten; changed packages
+replace their previous directory on access, and withdrawn packages are removed
+then. Files are restored after sandbox recreation without requiring the skill's
+resolver to run again. You can opt into earlier sandbox startup with a
+[prewarm hook](./guides/hooks#prepare-a-session-early), but it does not evaluate
+message-dependent skills before their normal lifecycle boundary or insert skill
+instructions into the prompt.
+
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 
 ```md

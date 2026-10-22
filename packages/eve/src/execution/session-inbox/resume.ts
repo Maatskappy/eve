@@ -1,4 +1,5 @@
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
+import type { SandboxReadinessRequest } from "#execution/sandbox/readiness-types.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type {
   DeliverHookPayload,
@@ -47,7 +48,12 @@ export interface ResumedSessionInboxHook {
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | SessionFailurePayload,
+  command:
+    | DeliverHookPayload
+    | SessionCommand
+    | SessionTimeoutHookPayload
+    | SessionFailurePayload
+    | SandboxReadinessRequest,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
@@ -59,7 +65,7 @@ export async function resumeSessionInbox(
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
-      if (command.kind === "session-failure") throw error;
+      if (command.kind === "session-failure" || command.kind === "sandbox-readiness") throw error;
       return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
     }
     let identity: Promise<string> | undefined;

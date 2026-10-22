@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import type { ModelMessage } from "ai";
 
 import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
@@ -174,5 +175,10 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
+  if (Buffer.byteLength(JSON.stringify(newManifest)) > 16 * 1024 * 1024) {
+    throw new Error(
+      "Dynamic skill session state exceeds 16 MiB after file encoding. Reduce dynamic packages or put larger files in a sandbox snapshot or Drive.",
+    );
+  }
   ctx.set(DynamicSkillManifestKey, newManifest);
 }

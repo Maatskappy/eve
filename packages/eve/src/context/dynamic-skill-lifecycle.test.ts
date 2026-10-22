@@ -1,8 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
-import { withDynamicSkillFiles } from "#context/dynamic-skill-files.js";
+import {
+  updateSandboxSkillContributors,
+  withDynamicSkillFiles,
+} from "#context/dynamic-skill-files.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { createSkillLoader, sessionSkills } from "#execution/catalog/skills.js";
 import {
@@ -12,6 +15,8 @@ import {
   DynamicSkillSandboxKey,
   SessionIdKey,
   SandboxKey,
+  SandboxSkillContributorsKey,
+  type DynamicSkillManifest,
 } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import {
@@ -44,6 +49,15 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const SKILL_ROOT = "/home/agent/.agents/skills";
+
+const contributors = vi.hoisted(() => ({ statuses: new Map<string, string>() }));
+vi.mock("#internal/workflow/runtime.js", async (original) => ({
+  ...(await original<typeof import("#internal/workflow/runtime.js")>()),
+  getWorld: async () => ({
+    runs: { get: async (id: string) => ({ status: contributors.statuses.get(id) ?? "running" }) },
+  }),
+}));
+beforeEach(() => contributors.statuses.clear());
 
 function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledBundle {
   return {
@@ -192,6 +206,24 @@ function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
 }
 
 describe("dispatchDynamicSkillEvent", () => {
+  it("bounds retained package state across resolvers without committing an oversized update", async () => {
+    const { ctx, get } = createCtx();
+    const files = { "data.bin": new Uint8Array(6 * 1024 * 1024) };
+    await dispatch(
+      ctx,
+      createResolver("first", () => makeSkill("First", "First", files)),
+    );
+    const saved = ctx.get(DynamicSkillManifestKey);
+    await expect(
+      dispatch(
+        ctx,
+        createResolver("second", () => makeSkill("Second", "Second", files)),
+      ),
+    ).rejects.toThrow("Dynamic skill session state exceeds 16 MiB");
+    expect(ctx.get(DynamicSkillManifestKey)).toBe(saved);
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("stores SKILL.md as authored, including frontmatter", async () => {
     const { ctx } = createCtx();
     await dispatch(
@@ -364,6 +396,70 @@ describe("dispatchDynamicSkillEvent", () => {
 });
 
 describe("dynamic skill supporting files", () => {
+  it.each(["withdrawn", "relayed withdrawal", "ended"])(
+    "keeps shared packages outside the catalog and cleans up only their own files (%s)",
+    async (ending) => {
+      const owner = createCtx();
+      const child = createCtx();
+      const relay = createCtx();
+      const contribute = (manifest: DynamicSkillManifest) => {
+        if (ending === "relayed withdrawal") {
+          updateSandboxSkillContributors(relay.ctx, { child: manifest });
+          updateSandboxSkillContributors(owner.ctx, relay.ctx.require(SandboxSkillContributorsKey));
+        } else updateSandboxSkillContributors(owner.ctx, { child: manifest });
+      };
+      await dispatch(
+        owner.ctx,
+        createResolver("policy", () => makeSkill("Policy", "Policy", { "rules.md": "Owner" })),
+      );
+      await dispatch(
+        child.ctx,
+        createResolver("research", () =>
+          makeSkill("Research", "Research", { "notes.md": "Child" }),
+        ),
+      );
+      contribute(child.ctx.require(DynamicSkillManifestKey));
+      expect([...sessionSkills(owner.ctx).keys()]).toEqual(["policy"]);
+      expect(owner.get).not.toHaveBeenCalled();
+      await owner.access.get();
+      expect(owner.sandbox.files.get(`${SKILL_ROOT}/research/notes.md`)).toBe("Child");
+      if (ending === "ended") contributors.statuses.set("child", "completed");
+      else contribute({});
+      await owner.access.get();
+      expect(owner.sandbox.files.has(`${SKILL_ROOT}/research/notes.md`)).toBe(false);
+      expect(owner.sandbox.files.get(`${SKILL_ROOT}/policy/rules.md`)).toBe("Owner");
+    },
+  );
+
+  it.each([false, true])(
+    "shares identical packages and rejects conflicting contributors (different: %s)",
+    async (different) => {
+      const owner = createCtx();
+      const child = createCtx();
+      await dispatch(
+        owner.ctx,
+        createResolver("policy", () => makeSkill("Policy", "Policy", { "rules.md": "Owner" })),
+      );
+      await dispatch(
+        child.ctx,
+        createResolver("policy", () =>
+          makeSkill("Policy", "Policy", { "rules.md": different ? "Child" : "Owner" }),
+        ),
+      );
+      const update = () =>
+        updateSandboxSkillContributors(owner.ctx, {
+          child: child.ctx.require(DynamicSkillManifestKey),
+        });
+      if (different) {
+        expect(update).toThrow("conflicting package revisions");
+        expect(owner.ctx.get(SandboxSkillContributorsKey)).toBeUndefined();
+      } else update();
+      await owner.access.get();
+      expect(owner.sandbox.files.get(`${SKILL_ROOT}/policy/rules.md`)).toBe("Owner");
+      expect(owner.sandbox.writes).toHaveLength(2);
+    },
+  );
+
   it.each([false, true])(
     "removes pre-upgrade installed files for a later caller (cleanup retries: %s)",
     async (retry) => {
@@ -622,22 +718,43 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
   });
 
-  it("keeps the desired package after a failed write and retries on the next access", async () => {
+  it.each([
+    ["remove", "retry"],
+    ["write", "retry"],
+    ["remove", "withdraw"],
+    ["write", "withdraw"],
+  ])("retains cleanup ownership after a failed %s followed by %s", async (failure, next) => {
     const { access, ctx, sandbox } = createCtx();
     let content = "A";
+    let enabled = true;
     const resolver = createResolver("policy", () =>
-      makeSkill("Policy", "# Policy", { "a.md": content }),
+      enabled ? makeSkill("Policy", "# Policy", { "a.md": content }) : null,
     );
     await dispatch(ctx, resolver);
     await access.get();
 
     content = "B";
     await dispatch(ctx, resolver);
-    vi.spyOn(sandbox.session, "writeBinaryFile").mockRejectedValueOnce(new Error("disk full"));
-    await expect(access.get()).rejects.toThrow("disk full");
-    expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+    if (failure === "remove")
+      vi.spyOn(sandbox.session, "removePath").mockRejectedValueOnce(new Error("interrupted"));
+    else {
+      const write = sandbox.session.writeBinaryFile.bind(sandbox.session);
+      vi.spyOn(sandbox.session, "writeBinaryFile").mockImplementationOnce(async (input) => {
+        await write(input);
+        throw new Error("interrupted");
+      });
+    }
+    await expect(access.get()).rejects.toThrow("interrupted");
 
+    if (next === "withdraw") {
+      enabled = false;
+      await dispatch(ctx, resolver);
+    }
     await access.get();
-    expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("B");
+    if (next === "withdraw") {
+      expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(false);
+      expect(sandbox.files.has(`${SKILL_ROOT}/policy/SKILL.md`)).toBe(false);
+      expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+    } else expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("B");
   });
 });

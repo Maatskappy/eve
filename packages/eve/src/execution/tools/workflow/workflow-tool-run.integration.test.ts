@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hydrateStepArguments } from "#compiled/@workflow/core/serialization.js";
-import { getWorld } from "#internal/workflow/runtime.js";
+import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import {
   captureTurnEvents,
@@ -9,7 +9,14 @@ import {
   readFirstTurnReply,
 } from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
 import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
@@ -23,6 +30,7 @@ import {
   reportingDeployWorkflow,
   returnAskAnswerWorkflow,
   sandboxParallelPrepareWorkflow,
+  sandboxSkillWorkflow,
   sandboxStepRuns,
   sandboxPrepareWorkflow,
   stepReferenceWorkflow,
@@ -30,6 +38,8 @@ import {
 } from "#internal/testing/workflow-tool-fixtures.js";
 import type { InputRequestedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { defineSkill } from "#public/definitions/skill.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -38,6 +48,118 @@ import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-r
 
 describe("workflow tools", () => {
   afterEach(() => vi.unstubAllEnvs());
+  it.each(["owner", "child", "handoff"])(
+    "prepares packaged skills through their owner for parallel steps (%s)",
+    async (mode) => {
+      const delegated = mode !== "owner";
+      const readByParent: (string | null)[] = [];
+      const children = new Set<string>();
+      const runtime = await createWorkflowToolRuntime({
+        agentName: "workflow-shared-skill-readiness",
+        execute: sandboxSkillWorkflow,
+        toolName: "deploy_service",
+        modules: [
+          {
+            logicalPath: "skills/policy.ts",
+            loadNamespace: async () => ({
+              default: defineDynamic({
+                events: {
+                  "session.started": (_event, ctx) =>
+                    ctx.channel.kind === "subagent"
+                      ? null
+                      : defineSkill({
+                          description: "A policy with a supporting reference.",
+                          markdown: "Read reference.md when needed.",
+                          files: { "reference.md": "source-reference" },
+                        }),
+                },
+              }),
+            }),
+          },
+          {
+            logicalPath: "hooks/read-shared-file.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  async "message.received"(event, ctx) {
+                    if (ctx.channel.kind === "subagent") children.add(ctx.session.id);
+                    if (event.data.message !== "Alice checks the shared skill.") return;
+                    const sandbox = await ctx.getSandbox();
+                    readByParent.push(
+                      await sandbox.readTextFile({ path: "/workspace/skills/policy/reference.md" }),
+                    );
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+      });
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: {
+              message: `${delegated ? "Delegate to a subagent: " : ""}Run deploy_service with service "api"`,
+            },
+            serializedContext: buildWorkflowToolSerializedContext({
+              continuationToken: `schedule:shared-skill-readiness-${mode}`,
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          const first = await stream.nextTurn();
+          const reply = String(filterEventsByType(first, "message.completed").at(-1)?.data.message);
+          expect(reply).toContain("source-reference");
+          expect(reply).toContain("edited-by-step");
+          if (mode === "handoff") {
+            expect(children.size).toBe(1);
+            const [childId] = children;
+            const childStream = captureTurnEvents(getRun(childId!));
+            try {
+              await childStream.nextTurn();
+              await waitForParkedTurnStep(childId!);
+              const workflowRuntime = createWorkflowRuntime({
+                compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+              });
+              await workflowRuntime.dispatchSession({
+                sessionId: childId!,
+                command: handoffFollowUp(
+                  "dpl_shared_successor",
+                  'Run deploy_service with service "api"',
+                  "child-handoff",
+                ),
+              });
+              const resumed = await childStream.nextTurn();
+              expect(
+                String(filterEventsByType(resumed, "message.completed").at(-1)?.data.message),
+              ).toContain('"first":["edited-by-step","edited-by-step"]');
+              const owner = await waitForCommandHookOwner(
+                sessionInboxHookToken(sessionCommandHookToken(childId!)),
+              );
+              expect(owner.runId).not.toBe(childId);
+            } finally {
+              childStream.dispose();
+            }
+          }
+          await resumeSessionInbox(
+            { sessionId: run.runId },
+            { kind: "send", payload: { message: "Alice checks the shared skill." } },
+          );
+          await stream.nextTurn();
+          expect(readByParent).toEqual(["edited-by-step"]);
+          expect(runtime.sandboxEvents.filter((event) => event.startsWith("start:"))).toHaveLength(
+            1,
+          );
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+  );
   it("invokes restored step references with bound arguments and receivers", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-step-reference",

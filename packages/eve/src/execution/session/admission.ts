@@ -2,13 +2,16 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
-import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import {
+  isWorkflowMessage,
+  type SessionInboxPayload,
+  type SessionOwnerMessage,
+} from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
 } from "#execution/session-inbox/protocol.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
-import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
@@ -16,7 +19,7 @@ type SessionAdmission =
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
-  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
+  | { readonly kind: "workflow"; readonly message: SessionOwnerMessage };
 
 /**
  * Decodes and admits one inbox payload. This boundary never decides whether a
@@ -32,7 +35,8 @@ export async function admitSessionInboxPayload(
   if (value.kind === "session-failure") throw new Error(value.error);
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
-  if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
+  if (isWorkflowMessage(value) || value.kind === "sandbox-readiness")
+    return { kind: "workflow", message: value };
   if (value.kind === "authorization-callback") {
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };

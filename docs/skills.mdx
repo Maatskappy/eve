@@ -16,11 +16,29 @@ files before the first model call. eve retains the package in session state and
 synchronizes its files when a tool or hook first accesses the sandbox, before
 returning the sandbox. Unchanged packages are not rewritten; changed packages
 replace their previous directory on access, and withdrawn packages are removed
-then. Files are restored after sandbox recreation without requiring the skill's
+then. A skill that keeps its name but stops returning supporting files leaves
+already-written files in place. Files are restored after sandbox recreation without requiring the skill's
 resolver to run again. You can opt into earlier sandbox startup with a
 [prewarm hook](./guides/hooks#prepare-a-session-early), but it does not evaluate
 message-dependent skills before their normal lifecycle boundary or insert skill
 instructions into the prompt.
+
+Dynamic packages are retained in durable workflow state, including base64-encoded
+supporting files. Keep the total serialized dynamic skill state per session within
+16 MiB; larger updates are rejected. Use sandbox snapshots or Drives for larger
+file sets.
+
+When a workflow step or child session shares a sandbox, its session owner prepares
+the files before lending access. Borrowers do not independently rewrite packages.
+Parent packages can therefore be ready for a child's filesystem access without
+appearing in the child's skill catalog. Catalog scoping does not isolate files in
+a shared sandbox. Shared dynamic packages with the same name
+must have the same revision; use distinct names or independent sandboxes when
+their contents differ. During preparation, the owner discards contributions from
+ended sessions so they cannot retain withdrawn packages. Contributions are limited
+to 256 sessions and 16 MiB of serialized package state. Borrowed readiness waits
+are bounded to 60 seconds and
+honor the caller's cancellation signal where one is available.
 
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 

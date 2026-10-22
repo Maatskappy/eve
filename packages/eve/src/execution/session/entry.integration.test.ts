@@ -58,6 +58,7 @@ describe("workflowEntry integration", () => {
       const prepared: string[] = [];
       const read: (string | null)[] = [];
       let starts = 0;
+      let prewarmInitiator: unknown = "not-run";
       const logs = captureConsoleOutput();
       const runtime = await createTestRuntime({
         modules: [
@@ -66,6 +67,7 @@ describe("workflowEntry integration", () => {
             loadNamespace: async () => ({
               default: defineHook({
                 async prewarm(ctx) {
+                  prewarmInitiator = ctx.session.auth.initiator;
                   prepared.push(ctx.session.id);
                   await ctx.preload("sandbox", async (sandbox) => {
                     await sandbox.writeTextFile({ path: "prepared.txt", content: ctx.session.id });
@@ -106,13 +108,22 @@ describe("workflowEntry integration", () => {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
             input: initialMessage ? { message: "Greet Alice briefly." } : {},
-            serializedContext: buildSerializedContext({ channelKind: "http" }),
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              auth: {
+                attributes: {},
+                authenticator: "test",
+                principalId: "mount",
+                principalType: "user",
+              },
+            }),
           },
         ]);
         const stream = captureTurnEvents(run);
         try {
           await withTimeout(ready.promise, "prewarm callback");
           expect(starts).toBe(0);
+          expect(prewarmInitiator).toBeNull();
           const sessionRuntime = createWorkflowRuntime({
             compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
           });

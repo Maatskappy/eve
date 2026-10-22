@@ -38,7 +38,10 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   EVE_SESSION_ATTRIBUTE,
+  EVE_SANDBOX_OWNER_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
+  readParentSessionId,
+  readSharedSandboxOwnerSessionId,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { isRetiredSandboxSessionState } from "#sandbox/state.js";
@@ -219,7 +222,7 @@ export async function prepareSuccessorStep(input: {
   if (input.source !== undefined && !(await holdsEveryAddress(input.source))) {
     return { kind: "source-gone" };
   }
-  await recordSessionOwner(input.sessionId);
+  await recordSessionOwner(input.sessionId, checkpoint.serializedContext);
   // Owners on releases before version 3 release their addresses first. This
   // line shows when none remain, which is when that compatibility can go.
   if ((input.handoffVersion ?? 1) < SESSION_HANDOFF_VERSION) {
@@ -302,17 +305,25 @@ export async function reportSessionHandoffRetainedStep(input: {
  * previous owner's. Unlike observability attributes, a failed write fails the
  * boot.
  */
-export async function recordSessionOwnerStep(input: { readonly sessionId: string }): Promise<void> {
+export async function recordSessionOwnerStep(input: {
+  readonly sessionId: string;
+  readonly serializedContext: Record<string, unknown>;
+}): Promise<void> {
   "use step";
-  await recordSessionOwner(input.sessionId);
+  await recordSessionOwner(input.sessionId, input.serializedContext);
 }
 
-async function recordSessionOwner(sessionId: string): Promise<void> {
+async function recordSessionOwner(
+  sessionId: string,
+  serializedContext: Record<string, unknown>,
+): Promise<void> {
   const { setAttributes } = await import("#compiled/@workflow/core/index.js");
   await setAttributes(
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
       [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+      "$eve.parent": readParentSessionId(serializedContext),
+      [EVE_SANDBOX_OWNER_ATTRIBUTE]: readSharedSandboxOwnerSessionId(serializedContext),
     },
     { allowReservedAttributes: true },
   );

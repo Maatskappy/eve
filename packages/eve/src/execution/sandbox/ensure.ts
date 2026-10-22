@@ -57,6 +57,8 @@ interface EnsureSandboxAccessInput {
    * session's own.
    */
   readonly borrowed?: boolean;
+  /** A borrower must ask the session owner to recreate and prepare a missing sandbox. */
+  readonly resumeOnly?: boolean;
 }
 
 /** The access `ensureSandboxAccess` builds, with what the opener may do beyond the sandbox API. */
@@ -280,6 +282,7 @@ export async function ensureSandboxAccess(
         return await resumePersisted(context);
       } catch (error) {
         if (!(error instanceof SandboxSessionGoneError)) throw error;
+        if (input.resumeOnly === true) throw error;
         log.warn("session sandbox is gone, starting a fresh one", {
           error,
           providerName: persisted.providerName,
@@ -287,6 +290,10 @@ export async function ensureSandboxAccess(
         });
         persisted = null;
       }
+    }
+
+    if (input.resumeOnly === true) {
+      throw new SandboxSessionGoneError("The acknowledged sandbox is no longer available.");
     }
 
     // Apps hosted in one process can reuse a node id and a tool session id.

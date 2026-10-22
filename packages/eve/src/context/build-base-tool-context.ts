@@ -16,8 +16,8 @@ export function buildBaseToolContext(input: {
   readonly options: Pick<ToolExecuteOptions, "abortSignal" | "toolCallId">;
   readonly toolName: string;
 }): BaseToolContext {
-  const callbackContext = buildCallbackContext();
   const signal = input.options.abortSignal ?? new AbortController().signal;
+  const callbackContext = buildCallbackContext(signal);
 
   const getSandbox = (async (environment?: SandboxEnvironment) =>
     bindSandboxAbortSignal(

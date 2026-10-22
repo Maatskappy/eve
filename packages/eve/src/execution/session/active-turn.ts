@@ -11,12 +11,9 @@ import {
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
-import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import type { SessionInboxPayload, SessionOwnerMessage } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
-import {
-  runMessageBatchBudget,
-  type WorkflowToolRunMessage,
-} from "#execution/tools/workflow/messages.js";
+import { runMessageBatchBudget } from "#execution/tools/workflow/messages.js";
 import {
   isAppliedRunMessage,
   takeLeadingAppliedRunMessages,
@@ -30,7 +27,7 @@ import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
-  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
+  | { readonly kind: "workflow"; readonly message: SessionOwnerMessage }
   /** A steering message that answered no pending request arrived during the wait. */
   | { readonly kind: "steering" }
   /** An `eve__task_wait` call's timeout passed. */
@@ -159,8 +156,8 @@ export class ActiveTurn {
    * Removes the admitted run messages the session applies at once instead of
    * in a runtime wait, or only those of `kind`.
    */
-  takeBoundaryMessages(kind?: "agent-started"): WorkflowToolRunMessage[] {
-    const taken: WorkflowToolRunMessage[] = [];
+  takeBoundaryMessages(kind?: "agent-started"): SessionOwnerMessage[] {
+    const taken: SessionOwnerMessage[] = [];
     const kept: RuntimeEvent[] = [];
     for (const event of this.runtimeResults) {
       const message = asBoundaryMessage(event);
@@ -333,8 +330,9 @@ export class ActiveTurn {
   }
 }
 
-function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {
+function asBoundaryMessage(event: RuntimeEvent): SessionOwnerMessage | undefined {
   if (event === "cancelled" || event.kind !== "workflow") return undefined;
+  if (event.message.kind === "sandbox-readiness") return event.message;
   // Tasks run beside the turn, so everything their runs send, such as a
   // question, reaches the session at the next boundary rather than at turn end.
   if (event.message.from.taskId !== undefined) return event.message;

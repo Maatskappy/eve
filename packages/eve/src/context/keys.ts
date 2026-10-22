@@ -391,6 +391,11 @@ export const DynamicSkillSandboxKey = new ContextKey<Readonly<Record<string, str
   "eve.dynamicSkillSandbox",
 );
 
+/** Package contributions to a shared sandbox, owned separately from the model-facing catalog. */
+export const SandboxSkillContributorsKey = new ContextKey<
+  Readonly<Record<string, DynamicSkillManifest>>
+>("eve.sandboxSkillContributors");
+
 // ---------------------------------------------------------------------------
 // Dynamic instruction keys
 // ---------------------------------------------------------------------------

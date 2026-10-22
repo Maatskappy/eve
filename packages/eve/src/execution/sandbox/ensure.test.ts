@@ -204,14 +204,19 @@ describe("ensureSandboxAccess", () => {
   });
 
   // https://github.com/vercel/eve/issues/5113
-  it("starts a fresh sandbox when the persisted one is gone", async () => {
+  it("changes sandbox identity on recreation even when the provider reuses its native key", async () => {
     const setup = vi.fn();
     const value = fixture(setup);
     value.create.mockRejectedValueOnce(
       new SandboxSessionGoneError('docker session "ses_1" is no longer available to resume.'),
     );
     const { access, sandbox } = await open(value.registry, "session-1", {
-      session: { providerName: "test", state: null, stateProtocolVersion: 1 },
+      session: {
+        generation: "prior-instance",
+        providerName: "test",
+        state: { key: "session-1" },
+        stateProtocolVersion: 1,
+      },
     });
     expect(sandbox).toBeTruthy();
     expect(setup).toHaveBeenCalledOnce();
@@ -224,6 +229,7 @@ describe("ensureSandboxAccess", () => {
         stateProtocolVersion: 1,
       },
     });
+    expect((await access.captureState()).session?.generation).not.toBe("prior-instance");
   });
 
   it("starts a fresh sandbox for a session saved with the removed microsandbox provider", async () => {
@@ -242,6 +248,22 @@ describe("ensureSandboxAccess", () => {
         stateProtocolVersion: 1,
       },
     });
+  });
+
+  it("does not recreate a missing sandbox from a readiness borrower", async () => {
+    const value = fixture();
+    const gone = new SandboxSessionGoneError("The acknowledged sandbox is gone.");
+    value.create.mockRejectedValueOnce(gone);
+    const access = await ensureSandboxAccess({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      nodeId: "__root__",
+      registry: value.registry,
+      sessionId: "session-1",
+      resumeOnly: true,
+      state: { session: { providerName: "test", state: null, stateProtocolVersion: 1 } },
+    });
+    await expect(access.get()).rejects.toBe(gone);
+    expect(value.start).not.toHaveBeenCalled();
   });
 
   it("keeps the persisted sandbox when resume fails for another reason", async () => {

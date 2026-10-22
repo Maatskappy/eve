@@ -62,6 +62,28 @@ export async function sandboxParallelPrepareWorkflow(input: DeployInput, ctx: Wo
   return await readSandboxFilesStep(ctx);
 }
 
+export async function sandboxSkillWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const first = await Promise.all([readSharedSkillStep(ctx), readSharedSkillStep(ctx)]);
+  await editSharedSkillStep(ctx);
+  return { first, after: await readSharedSkillStep(ctx) };
+}
+
+async function readSharedSkillStep(ctx: WorkflowStepToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  return await sandbox.readTextFile({ path: "/workspace/skills/policy/reference.md" });
+}
+
+async function editSharedSkillStep(ctx: WorkflowStepToolContext) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({
+    path: "/workspace/skills/policy/reference.md",
+    content: "edited-by-step",
+  });
+}
+
 const STEP_RUNS = Symbol.for("eve.test.sandbox-step-runs");
 
 /**

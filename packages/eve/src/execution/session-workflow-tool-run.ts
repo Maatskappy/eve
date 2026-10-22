@@ -13,7 +13,11 @@ import {
   withdrawWorkflowToolRunQuestionStep,
 } from "#execution/tools/workflow/withdraw-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import {
+  isWorkflowMessage,
+  type SessionInboxReader,
+  type SessionOwnerMessage,
+} from "#execution/session-inbox/inbox.js";
 import { isTaskRunMessage } from "#execution/tasks/session.js";
 import {
   workflowToolRunOutcomeToToolResult,
@@ -32,7 +36,8 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
-export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is AppliedRunMessage {
+export function isAppliedRunMessage(message: SessionOwnerMessage): message is AppliedRunMessage {
+  if (message.kind === "sandbox-readiness") return false;
   return message.kind === "agent-started" || message.kind === "report" || isTaskRunMessage(message);
 }
 

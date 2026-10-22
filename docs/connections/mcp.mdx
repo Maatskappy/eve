@@ -141,7 +141,7 @@ export default defineMcpClientConnection({
   url: "https://mcp.example.com/mcp",
   description: "Social publishing: draft, schedule, and manage posts.",
   auth: {
-    credentialOwner: "app",
+    principalType: "app",
     getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }),
   },
   approval: ({ toolName, toolInput }) => {

@@ -39,7 +39,7 @@ export default selfModification({
 });
 ```
 
-Mounts that import `eve/self-modification` still work; that specifier is an alias for `eve/self-modification/local`. Neither specifier accepts a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/self-modification/remote` mount.
+The bare `eve/self-modification` entry is removed. Mount `eve/self-modification/local` for development or `eve/self-modification/remote` for deployed source changes. The local mount does not accept a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/self-modification/remote` mount.
 
 ## Propose changes from a deployed agent
 

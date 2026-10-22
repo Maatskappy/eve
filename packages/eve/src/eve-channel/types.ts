@@ -1,4 +1,5 @@
 import type { MessageContent } from "#shared/message-content.js";
+import type { ChannelCorsOptions } from "#channel/cors.js";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
@@ -11,7 +12,6 @@ import type {
   Channel,
   ChannelContinuationOps,
   ChannelEvents,
-  ChannelMethod,
 } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
@@ -28,25 +28,8 @@ export type EveEventContext = ChannelContinuationOps;
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
 
-export interface EveChannelCorsOptions {
-  /**
-   * Allowed request origin. Pass a single origin string, an exact-origin list,
-   * `"null"`, or `"*"`. Omit for `"*"`.
-   */
-  readonly origin?: "*" | "null" | string | readonly string[];
-  /** Methods emitted on preflight responses. Omit for `"*"`. */
-  readonly methods?: "*" | readonly ChannelMethod[];
-  /** Request headers emitted on preflight responses. Omit for `"*"`. */
-  readonly allowedHeaders?: "*" | readonly string[];
-  /** Response headers exposed to browser callers. Omit for `"*"`. */
-  readonly exposedHeaders?: "*" | readonly string[];
-  /** Whether to emit `access-control-allow-credentials: true`. */
-  readonly credentials?: boolean;
-  /** Max age, in seconds, emitted on preflight responses. */
-  readonly maxAge?: number | false;
-  /** Preflight response status code. Defaults to 204. */
-  readonly preflightStatus?: number;
-}
+/** Serializable CORS options shared with custom channels. */
+export type EveChannelCorsOptions = ChannelCorsOptions;
 
 /**
  * Higher-level CORS policy for the default eve HTTP channel. Pass `true` for

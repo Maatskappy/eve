@@ -84,9 +84,10 @@ const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 
 /** How one attempt differs from the step's first: what recovery and retries change. */
 export interface ModelCallOptions {
+  readonly attachmentsAsPaths?: boolean;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
+  readonly retryReason?: "empty-response" | "request-rejected";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
 }
@@ -316,7 +317,9 @@ export class ModelCaller {
     );
     generation.begin();
     // Hydrate `eve-sandbox:` file refs for this call only; history keeps the refs.
-    this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages);
+    this.modelMessages = await hydrateSandboxAttachments(this.request.nonSystemMessages, {
+      pathsOnly: options.attachmentsAsPaths,
+    });
     if (this.profile.filesOutsideToolResults) {
       this.modelMessages = moveToolResultFilesToUserMessages(this.modelMessages);
     }

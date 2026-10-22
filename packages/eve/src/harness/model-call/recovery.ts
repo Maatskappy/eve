@@ -1,19 +1,23 @@
 import { createLogger } from "#internal/logging.js";
 import {
   EmptyModelResponseError,
+  extractUpstreamRejectionMessage,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  isRequestContentRejection,
 } from "#harness/model-call/errors.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("harness.tool-loop");
 /** How a recovery reissues the call. */
 type RecoveryCall = (options: {
+  readonly attachmentsAsPaths?: boolean;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
+  readonly retryReason?: "empty-response" | "request-rejected";
   readonly suppressStepStartedEmission?: boolean;
   readonly trailingUserNote?: string;
 }) => Promise<HarnessStepResult>;
@@ -29,6 +33,12 @@ type RecoveryCall = (options: {
  * 2. The response was empty (see {@link EmptyModelResponseError}), including the first
  *    recovery's: the call is reissued with {@link EMPTY_RESPONSE_NUDGE}, repeating what the first
  *    recovery removed.
+ * 3. The provider rejected the request's content (see {@link isRequestContentRejection}),
+ *    including an earlier recovery's: the call is reissued with every attachment shown as its
+ *    sandbox path and a note carrying the provider's error, so the model can decide how to
+ *    continue instead of the turn failing. Attachments are the conversation content eve controls
+ *    that providers most often reject, and the same rejection would otherwise fail every later
+ *    call in the session.
  *
  * Each reissue goes through `call` so it gets fresh step hooks: the failed attempt's one-shot
  * `stepResult` already resolved. Returns the error that remains when nothing recovered.
@@ -81,6 +91,27 @@ export async function recoverModelCall(input: {
       error = retryError;
     }
   }
+
+  if (isRequestContentRejection(error)) {
+    const message = extractUpstreamRejectionMessage(error)?.message ?? toErrorMessage(error);
+    log.warn("model provider rejected the request; reissuing once with attachments as paths", {
+      ...diagnostics,
+      message,
+    });
+    try {
+      return {
+        result: await input.call({
+          ...options,
+          attachmentsAsPaths: true,
+          retryReason: "request-rejected",
+          suppressStepStartedEmission: true,
+          trailingUserNote: buildRejectedRequestNote(message),
+        }),
+      };
+    } catch (retryError) {
+      error = retryError;
+    }
+  }
   return { error };
 }
 
@@ -96,6 +127,17 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
     `The following ${noun} not available with the current model and ` +
     `has been removed: ${list}. Proceed using the remaining tools or your ` +
     `training knowledge.`
+  );
+}
+
+/** Wire-only note the request-rejected reissue appends, carrying the provider's error. */
+function buildRejectedRequestNote(message: string): string {
+  return (
+    `The model provider rejected the previous request with this error: ${JSON.stringify(message)}. ` +
+    "For this request, files attached in the conversation are shown only as their sandbox paths. " +
+    "Continue the current user request, working around the error where you can. If it blocks " +
+    "the request, tell the user what failed. Do not repeat writes or other side effects that " +
+    "already completed."
   );
 }
 

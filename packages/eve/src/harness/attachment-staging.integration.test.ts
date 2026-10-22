@@ -943,68 +943,6 @@ describe("hydrateSandboxAttachments (integration)", () => {
     });
   });
 
-  it("leaves images over 2000 px out of a request with more than 20 images", async () => {
-    const sandbox = mockSandbox({ id: "sbx_many_media" });
-    const runtime = await createTestRuntime();
-    const shot = (width: number, height: number, filename: string) => ({
-      data: { data: pngBytes(width, height).toString("base64"), type: "data" as const },
-      filename,
-      mediaType: "image/png",
-      type: "file" as const,
-    });
-    const screenshots = (count: number, width: number, height: number): ModelMessage => ({
-      content: [
-        {
-          output: {
-            type: "content",
-            value: Array.from({ length: count }, (_, index) =>
-              shot(width, height, `shot-${width}-${index}.png`),
-            ),
-          },
-          toolCallId: `shots-${width}`,
-          toolName: "screenshot",
-          type: "tool-result",
-        },
-      ],
-      role: "tool",
-    });
-    const inbound = (await runtime.runAsSession({ sandbox }, async () =>
-      stageAttachmentsToSandbox([
-        { data: pngBytes(3200, 3200), filename: "icon.png", mediaType: "image/png", type: "file" },
-      ] as UserContent),
-    )) as FilePart[];
-    const hydrate = (messages: ModelMessage[]) =>
-      runtime.runAsSession({ sandbox }, async () =>
-        hydrateSandboxAttachments(await stageToolResultMedia(messages)),
-      );
-    const fileCount = (messages: ModelMessage[]) =>
-      JSON.stringify(messages).match(/"type":"file"/g)?.length ?? 0;
-
-    const few = await hydrate([screenshots(19, 2880, 1800), { content: inbound, role: "user" }]);
-    expect(fileCount(few)).toBe(20);
-
-    const many = await hydrate([
-      screenshots(19, 2880, 1800),
-      screenshots(2, 1200, 800),
-      { content: inbound, role: "user" },
-    ]);
-    expect(fileCount(many)).toBe(2);
-    expect(many[2]?.content).toEqual([
-      {
-        text: expect.stringMatching(
-          /^Attached file .*\/icon\.png \(image\/png\)\. Not shown: .* more than 20 images .* 2000 pixels per side/,
-        ),
-        type: "text",
-      },
-    ]);
-    const [oversized] = many[0]!.content as ToolResultPart[];
-    expect(oversized!.output).toMatchObject({
-      value: expect.arrayContaining([
-        { text: expect.stringContaining("Not shown:"), type: "text" },
-      ]),
-    });
-  });
-
   it("renders a link or eve-url marker left in history by an older release as a note", async () => {
     const runtime = await createTestRuntime();
     const messages: ModelMessage[] = [

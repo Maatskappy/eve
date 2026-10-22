@@ -4918,6 +4918,8 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(createTestSession(), { message: "Hi" });
 
     expect(result.next).toEqual({ done: true, output: "" });
+    // The request-rejected recovery reissues once; the same rejection then fails the turn.
+    expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
 
     const types = events.map((e) => e.type);
     expect(types).toContain("step.failed");
@@ -5550,6 +5552,111 @@ describe("createToolLoopHarness", () => {
           message: "model call failed — parking session for retry by the user",
         }),
       );
+    });
+  });
+
+  describe("rejected request recovery", () => {
+    const rejection =
+      "messages.1.content.1.image.source.base64.data: At least one of the image dimensions exceed max allowed size";
+
+    function createRejectedRequestError(): Error {
+      const body = { error: { message: rejection, type: "invalid_request_error" } };
+      const upstream = Object.assign(new Error("[object Object]"), {
+        data: body,
+        isRetryable: false,
+        name: "AI_APICallError",
+        responseBody: JSON.stringify(body),
+        statusCode: 400,
+      });
+      return Object.assign(new Error("Invalid request", { cause: upstream }), {
+        isRetryable: false,
+        name: "GatewayInvalidRequestError",
+        statusCode: 400,
+        type: "invalid_request_error",
+      });
+    }
+
+    afterEach(() => {
+      vi.mocked(ToolLoopAgent).mockReset();
+    });
+
+    it("reissues once with attachments as paths and the provider's error, then continues the turn", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Recovered.", role: "assistant" }] },
+        text: "Recovered.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const succeed = vi.mocked(ToolLoopAgent).getMockImplementation();
+      setupMockAgentError(createRejectedRequestError());
+      const reject = vi.mocked(ToolLoopAgent).getMockImplementation();
+      vi.mocked(ToolLoopAgent).mockImplementation(succeed!);
+      vi.mocked(ToolLoopAgent).mockImplementationOnce(reject!);
+
+      const sandbox = mockSandbox({ id: "sbx_rejected_request" });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit));
+      const userContent: UserContent = [
+        { text: "make this square", type: "text" },
+        { data: pngBytes(64, 64), filename: "icon.png", mediaType: "image/png", type: "file" },
+      ];
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: userContent }),
+      );
+
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
+      expect(result.session.history).toContainEqual({ content: "Recovered.", role: "assistant" });
+      const types = events.map((event) => event.type);
+      expect(types).not.toContain("turn.failed");
+      expect(types).not.toContain("step.failed");
+      expect(vi.mocked(ToolLoopAgent).mock.calls[1]?.[0].runtimeContext).toMatchObject({
+        "eve.retry.reason": "request-rejected",
+      });
+
+      const streamMessages = (index: number) =>
+        (
+          vi.mocked(ToolLoopAgent).mock.results[index]!.value as {
+            stream: ReturnType<typeof vi.fn>;
+          }
+        ).stream.mock.calls[0]?.[0]?.messages as Array<{ content: unknown; role: string }>;
+      const hasFilePart = (messages: Array<{ content: unknown }>) =>
+        messages.some(
+          (message) =>
+            Array.isArray(message.content) &&
+            message.content.some((part: { type?: string }) => part.type === "file"),
+        );
+      expect(hasFilePart(streamMessages(0))).toBe(true);
+      const reissue = streamMessages(1);
+      expect(hasFilePart(reissue)).toBe(false);
+      expect(JSON.stringify(reissue[0]?.content)).toMatch(
+        /Attached file .*icon\.png \(image\/png\)/,
+      );
+      expect(reissue.at(-1)).toMatchObject({
+        content: expect.stringContaining(rejection),
+        kind: "execution.retry",
+        role: "user",
+      });
+      expect(JSON.stringify(result.session.history)).not.toContain(rejection);
+    });
+
+    it("does not reissue a credential or configuration failure", async () => {
+      setupMockAgentError(
+        Object.assign(new Error("AI Gateway authentication failed: Invalid API key."), {
+          name: "GatewayAuthenticationError",
+          statusCode: 401,
+          type: "authentication_error",
+        }),
+      );
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit));
+
+      await runStep(createTestSession(), { message: "Hi" });
+
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
     });
   });
 

@@ -88,6 +88,23 @@ export function extractUpstreamRejectionMessage(error: unknown): UpstreamRejecti
   return null;
 }
 
+/**
+ * The provider rejected what the request contains (400, 413, 422), not the
+ * caller's credentials, budget, or capacity. Something in the conversation,
+ * such as an attachment the provider won't accept, then fails every later
+ * call the same way, so the request has to change before it can succeed.
+ */
+export function isRequestContentRejection(error: unknown): boolean {
+  if (isTurnCancellation(error) || hasRetryableFlag(error)) return false;
+  // Catalog shapes carry their own judgment; unsupported provider tools have their own recovery.
+  if (summarizeKnownError(error) !== null) return false;
+  if (extractUnsupportedProviderToolTypes(error).length > 0) return false;
+  const { statusCode, upstreamStatusCode } = readModelCallErrorSignals(error);
+  return [statusCode, upstreamStatusCode].some(
+    (status) => status === 400 || status === 413 || status === 422,
+  );
+}
+
 function upstreamRejectionName(signals: ModelCallErrorSignals): string {
   return isGatewayErrorSignal(signals)
     ? "AI Gateway model request rejected"

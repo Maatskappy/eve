@@ -32,10 +32,8 @@ import type {
   SessionStepState,
 } from "#execution/publish-session-events.js";
 import { commitSessionStep } from "#execution/publish-session-events.js";
-import {
-  withSessionStateDelta,
-  type SessionStateTransition,
-} from "#execution/session/state-delta.js";
+import { type SessionStateTransition } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type {
   WorkflowToolRunControlMessage,
   WorkflowToolRunMessage,

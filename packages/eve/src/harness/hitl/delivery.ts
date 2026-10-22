@@ -160,8 +160,12 @@ function typedAnswers(
   return answers.map((answer, index) => ({
     ...answer,
     deliveryId,
-    responseId: `response_${deliveryId}_typed_${String(index)}`,
+    responseId: typedResponseId(deliveryId, index),
   }));
+}
+
+export function typedResponseId(deliveryId: string, index: number): string {
+  return `response_${deliveryId}_typed_${String(index)}`;
 }
 
 export function isEmptyInput(input: HarnessStepInput): boolean {

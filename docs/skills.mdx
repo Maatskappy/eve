@@ -16,7 +16,8 @@ files before the first model call. eve retains the package in session state and
 synchronizes its files when a tool or hook first accesses the sandbox, before
 returning the sandbox. Unchanged packages are not rewritten; changed packages
 replace their previous directory on access, and withdrawn packages are removed
-then. Files are restored after sandbox recreation without requiring the skill's
+then. A skill that keeps its name but stops returning supporting files leaves
+already-written files in place. Files are restored after sandbox recreation without requiring the skill's
 resolver to run again. You can opt into earlier sandbox startup with a
 [prewarm hook](./guides/hooks#prepare-a-session-early), but it does not evaluate
 message-dependent skills before their normal lifecycle boundary or insert skill

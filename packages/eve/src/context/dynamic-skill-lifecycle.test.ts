@@ -401,27 +401,32 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.writes).toHaveLength(6);
   });
 
-  it("removes files when a package is withdrawn or loses its supporting files", async () => {
-    const { access, ctx, sandbox } = createCtx();
-    let result: SkillPackageDefinition | null = makeSkill("Policy", "# Policy", { "a.md": "A" });
-    const resolver = createResolver("policy", () => result);
+  it.each([false, true])(
+    "removes withdrawn files on access (previously markdown-only: %s)",
+    async (markdownOnly) => {
+      const { access, ctx, sandbox } = createCtx();
+      let result: SkillPackageDefinition | null = makeSkill("Policy", "# Policy", { "a.md": "A" });
+      const resolver = createResolver("policy", () => result);
 
-    await dispatch(ctx, resolver);
-    await access.get();
-    result = makeSkill("Policy", "# Inline policy");
-    await dispatch(ctx, resolver);
-    expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(true);
-    await access.get();
+      await dispatch(ctx, resolver);
+      await access.get();
+      if (markdownOnly) {
+        result = makeSkill("Policy", "# Inline policy");
+        await dispatch(ctx, resolver);
+        await access.get();
+        expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("A");
+        expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
+      }
+      result = null;
+      await dispatch(ctx, resolver);
+      expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(true);
+      await access.get();
 
-    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`, `${SKILL_ROOT}/policy`]);
-    expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(false);
-    expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
-
-    result = null;
-    await dispatch(ctx, resolver);
-    await access.get();
-    expect(sandbox.removedPaths).toHaveLength(2);
-  });
+      expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`, `${SKILL_ROOT}/policy`]);
+      expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(false);
+      expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+    },
+  );
 
   it("does not remove withdrawn files from a sandbox that never received them", async () => {
     const { access, ctx, get, sandbox, state } = createCtx();

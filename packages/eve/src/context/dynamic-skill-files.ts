@@ -52,11 +52,10 @@ async function synchronize(
   sandbox: SandboxSession,
   manifest: DynamicSkillManifest | undefined,
 ): Promise<void> {
+  const skills = Object.values(manifest ?? {}).flat();
+  const kept = new Set(skills.map((skill) => skill.name));
   const desired = new Map(
-    Object.values(manifest ?? {})
-      .flat()
-      .filter((skill) => skill.files !== undefined)
-      .map((skill) => [skill.name, skill]),
+    skills.filter((skill) => skill.files !== undefined).map((skill) => [skill.name, skill]),
   );
   const written = { ...ctx.get(DynamicSkillSandboxKey) };
   if (desired.size === 0 && Object.keys(written).length === 0) return;
@@ -64,7 +63,8 @@ async function synchronize(
   const identity = state.session === null ? null : JSON.stringify(state.session);
 
   for (const [name, marker] of Object.entries(written)) {
-    if (desired.has(name)) continue;
+    // A markdown-only result may rely on files supplied by a snapshot or Drive.
+    if (kept.has(name)) continue;
     if (identity !== null && marker.startsWith(`${identity}#`)) {
       await removeSkillPackageFromSandbox({ name, sandbox });
     }

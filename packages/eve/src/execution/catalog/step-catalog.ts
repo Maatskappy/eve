@@ -1,4 +1,3 @@
-import { connectionEventManagementEntry } from "./connection-event-management.js";
 /**
  * The step's catalog: one table of every entry a model step can reach. Direct
  * entries go into the model's tool list next to the catalog tools the session
@@ -41,6 +40,7 @@ import { isObject } from "#shared/guards.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
 
+import { connectionEventManagementEntry } from "./connection-event-management.js";
 import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
 import { closestNames } from "./rank.js";
 import { createSearchTool } from "./search.js";
@@ -176,6 +176,9 @@ export function buildStepCatalog(input: {
   const toolEntry = (name: string): HarnessToolDefinition | undefined =>
     entries.get(name) ??
     advertised.get(name) ??
+    (input.session.rootSessionId === undefined
+      ? connectionEventManagementEntry(name)
+      : undefined) ??
     (registry === undefined ? undefined : connectionEntryNamed(name, registry, connections));
   const describe = (definition: HarnessToolDefinition) => describeEntry(definition, input.endsTurn);
   const catalog: StepCatalog = {
@@ -305,7 +308,7 @@ function connectionEntryNamed(
       return connectionEntry(registry, connection, name.slice(prefix.length));
     }
   }
-  return connectionEventManagementEntry(name);
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

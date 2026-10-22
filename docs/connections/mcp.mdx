@@ -349,13 +349,21 @@ Each watch saves its resolver identity and trusted resolution context. Before su
 a reconstructed `session.started` event, including after a cold start.
 Original fields such as `predecessor` are not replayed. The callback still runs
 as the watch creator, even if someone else later speaks in the conversation.
-A changed account, connector, endpoint, or missing result retires the watch
+When a delivery triggers resolution, a changed account, connector, endpoint, or
+missing result retires the watch
 without running another account's callback. A thrown lookup retries instead.
 
-Dynamic subscribe results include `management.get` and `management.stop`, the
-qualified action names to call through `eve__tool` with `{ id }`. Keep these
-names and the returned watch ID. They remain callable by the creator after the
-connection leaves the catalog; eve does not add a separate watch-listing API.
+Dynamic subscribe results include `management.get` (`eve__event_watch_get`) and
+`management.stop` (`eve__event_watch_stop`). Call them through `eve__tool` with
+`{ id }`, using the returned eve watch ID. These are creator-authorized watch
+management operations, independent of the current connection's discovery, auth,
+`tools` filter, and approval callbacks. They remain available when an account is
+removed or another connection reuses its name. Existing connection actions keep
+their normal approval and filtering. eve does not add a watch-listing API.
+Stop existing watches before deleting the last dynamic resolver from a deployment,
+since that also removes its receiver route. Returning `null` instead keeps the
+route available to retire watches when deliveries arrive.
+
 The watch records stopping before upstream cleanup and rejects subsequent
 deliveries while cleanup retries. A callback already running may finish.
 

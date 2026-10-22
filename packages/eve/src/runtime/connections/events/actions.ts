@@ -1,3 +1,7 @@
+import {
+  EVENT_WATCH_GET_TOOL_NAME,
+  EVENT_WATCH_STOP_TOOL_NAME,
+} from "#protocol/event-watch-tools.js";
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -282,8 +286,8 @@ export class ConnectionEventActions {
         : {
             ...result,
             management: {
-              get: `${binding.connectionName}__${GET}`,
-              stop: `${binding.connectionName}__${STOP}`,
+              get: EVENT_WATCH_GET_TOOL_NAME,
+              stop: EVENT_WATCH_STOP_TOOL_NAME,
             },
           };
     });

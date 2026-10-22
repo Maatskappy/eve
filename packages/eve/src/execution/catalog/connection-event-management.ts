@@ -1,23 +1,25 @@
 import { getSubscription } from "#compiled/@vercel/connect-events/index.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
+import {
+  EVENT_WATCH_GET_TOOL_NAME,
+  EVENT_WATCH_STOP_TOOL_NAME,
+} from "#protocol/event-watch-tools.js";
 import { principalOf } from "#execution/session/principal.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineJsonSchema } from "#tools/schema.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
 
-/** A removed dynamic connection keeps only get/stop, authorized against its saved watch. */
+/** Creator-authorized housekeeping, independent of the current connection catalog. */
 export function connectionEventManagementEntry(name: string): HarnessToolDefinition | undefined {
-  const match = /^(.*)__(events_get_subscription|events_unsubscribe)$/.exec(name);
-  if (match === null) return undefined;
-  const [, connectionName, operation] = match;
+  if (name !== EVENT_WATCH_GET_TOOL_NAME && name !== EVENT_WATCH_STOP_TOOL_NAME) return undefined;
   return {
     name,
     deferred: true,
     rootOnly: true,
     description:
-      "Inspect or stop an existing event watch after its dynamic connection was removed.",
+      "Inspect or stop a dynamic event watch owned by the current caller, using its saved watch id.",
     inputSchema: defineJsonSchema({
       type: "object",
       additionalProperties: false,
@@ -34,11 +36,11 @@ export function connectionEventManagementEntry(name: string): HarnessToolDefinit
         ctx.require(BundleKey).nodeId !== undefined ||
         watch === undefined ||
         watch.owner.resolution === undefined ||
-        watch.owner.connectionName !== connectionName ||
         watch.owner.executionPrincipal !== principalOf(ctx.get(AuthKey))
       )
         throw new Error("Unknown subscription for this caller and account.");
-      if (operation === "events_unsubscribe") {
+      const connectionName = watch.owner.connectionName;
+      if (name === EVENT_WATCH_STOP_TOOL_NAME) {
         if (!(await retireConnectionEventOwner(id)))
           throw new Error("Unknown subscription for this caller and account.");
         return { id, status: "stopping" };

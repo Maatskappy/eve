@@ -1169,19 +1169,40 @@ it("retries a failed account lookup without retiring the watch", async () => {
 it("keeps removed-watch management available only to its creator", async () => {
   const definition = eventDefinition();
   await dynamicWatch(() => definition);
-  const { id } = await watch();
-  const stop = connectionEventManagementEntry("issues__events_unsubscribe")!;
+  const result = await watch();
+  const { id } = result;
+  expect(result).toMatchObject({
+    management: {
+      get: "eve__event_watch_get",
+      stop: "eve__event_watch_stop",
+    },
+  });
+  const stop = connectionEventManagementEntry("eve__event_watch_stop")!;
+  const get = connectionEventManagementEntry("eve__event_watch_get")!;
+  savedGet.mockResolvedValue(handlers.get(id)!.subscription);
   setUser("bob");
   await expect(
     contextStorage.run(ctx, () => stop.execute!({ id }, { toolCallId: "stop" } as never)),
   ).rejects.toThrow("Unknown subscription");
+  await expect(
+    contextStorage.run(ctx, () => get.execute!({ id }, { toolCallId: "get", messages: [] })),
+  ).rejects.toThrow("Unknown subscription");
+  expect(savedGet).not.toHaveBeenCalled();
   expect(retired.size).toBe(0);
   setUser("alice");
+  expect(
+    await contextStorage.run(ctx, () => get.execute!({ id }, { toolCallId: "get", messages: [] })),
+  ).toMatchObject({ id, subscriptionId: result.subscriptionId });
+  expect(savedGet).toHaveBeenCalledWith(
+    initial.binding!.connector,
+    { id: result.subscriptionId },
+    { timeout: 30_000 },
+  );
   expect(
     await contextStorage.run(ctx, () => stop.execute!({ id }, { toolCallId: "stop" } as never)),
   ).toEqual({ id, status: "stopping" });
   expect(retired.has(id)).toBe(true);
-  expect(connectionEventManagementEntry("issues__events_subscribe_unknown")).toBeUndefined();
+  expect(connectionEventManagementEntry("eve__event_watch_subscribe")).toBeUndefined();
 });
 
 it("does not execute queued delivery after stopping is durable", async () => {

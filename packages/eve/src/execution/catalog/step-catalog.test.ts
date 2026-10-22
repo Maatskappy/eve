@@ -738,22 +738,39 @@ describe("buildStepCatalog", () => {
   });
 });
 
-it("keeps previously offered management names callable after a connection leaves the catalog", () => {
+it.each([false, true])(
+  "keeps saved-watch management callable with a replacement connection: %s",
+  (replacement) => {
+    const { catalog } = catalogContext({
+      connections: replacement ? [fakeConnection({ name: "issues", tools: [] })] : [],
+      offered: { connections: true, tools: true, searchableSkills: false, skills: false },
+    });
+    const call = catalog.resolve({
+      toolCallId: "stop",
+      toolName: CALL_TOOL_NAME,
+      input: { name: "eve__event_watch_stop", input: { id: "a".repeat(64) } },
+    });
+    expect(call?.definition.name).toBe("eve__event_watch_stop");
+    expect(
+      catalog.resolve({
+        toolCallId: "subscribe",
+        toolName: CALL_TOOL_NAME,
+        input: { name: "eve__event_watch_subscribe", input: {} },
+      }),
+    ).toBeUndefined();
+  },
+);
+
+it("does not expose saved-watch management in a subagent", () => {
   const { catalog } = catalogContext({
-    connections: [],
+    session: CHILD,
     offered: { connections: true, tools: true, searchableSkills: false, skills: false },
   });
-  const call = catalog.resolve({
-    toolCallId: "stop",
-    toolName: CALL_TOOL_NAME,
-    input: { name: "issues__events_unsubscribe", input: { id: "a".repeat(64) } },
-  });
-  expect(call?.definition.name).toBe("issues__events_unsubscribe");
   expect(
     catalog.resolve({
-      toolCallId: "subscribe",
+      toolCallId: "stop",
       toolName: CALL_TOOL_NAME,
-      input: { name: "issues__events_subscribe_event", input: {} },
+      input: { name: "eve__event_watch_stop", input: { id: "a".repeat(64) } },
     }),
   ).toBeUndefined();
 });

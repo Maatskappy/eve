@@ -1,3 +1,5 @@
+import { createLogger } from "#internal/logging.js";
+import { connectionEventAttributes } from "#tracing/eve/connection-events.js";
 import { sessionStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { resolveDynamicConnectionResult } from "#runtime/resolve-dynamic-connection.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -33,12 +35,21 @@ export async function resolveBinding(ctx: AlsContext, binding: EventBinding) {
       ? agent.connections
       : resolver === undefined
         ? []
-        : await resolveDynamicConnectionResult({
-            resolver,
-            context: structuredClone(saved.context),
-            event: sessionStartedForResolvers(saved.runtime),
-            nodeId: ctx.require(BundleKey).nodeId,
-          });
+        : await withConnectionEventSpan(
+            {
+              ctx,
+              connectionName: binding.connectionName,
+              bindingId: binding.id,
+              operation: "resolve",
+            },
+            () =>
+              resolveDynamicConnectionResult({
+                resolver,
+                context: structuredClone(saved.context),
+                event: sessionStartedForResolvers(saved.runtime),
+                nodeId: ctx.require(BundleKey).nodeId,
+              }),
+          );
   const connection = connections.find(
     (candidate) => candidate.connectionName === binding.connectionName,
   );
@@ -87,7 +98,20 @@ export async function dispatchConnectionEventStep(input: {
   if (!accepts(input.binding, input.payload)) return;
   const resolved = await resolveBinding(ctx, input.binding);
   if (resolved === undefined) {
-    if (input.binding.resolution !== undefined) await retireConnectionEventOwner(input.binding.id);
+    if (input.binding.resolution !== undefined) {
+      createLogger("connection.events").info(
+        "Dynamic event watch no longer resolves to its saved account.",
+        {
+          ...connectionEventAttributes({
+            connectionName: input.binding.connectionName,
+            bindingId: input.binding.id,
+            subscriptionId: delivery.subscriptionId,
+          }),
+          reason: "binding_unavailable",
+        },
+      );
+      await retireConnectionEventOwner(input.binding.id);
+    }
     return;
   }
   const { binding, connection } = resolved;

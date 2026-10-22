@@ -399,6 +399,9 @@ async function runSessionLoop(
       const transferred = await tryCompactionHandoff();
       if (transferred !== undefined) return transferred;
 
+      // Registered while parked, so the next turn's first step is not held
+      // behind its abort hooks.
+      turnControl ??= createTurnControl();
       const next = await nextParkedActivity();
 
       switch (next.kind) {
@@ -431,7 +434,6 @@ async function runSessionLoop(
       }
     }
   } finally {
-    turnControl?.dispose();
     await sessionTimeout?.dispose();
   }
 }

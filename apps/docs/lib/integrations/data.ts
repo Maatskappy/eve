@@ -170,6 +170,51 @@ interface ConnectionPresentation extends Omit<Presentation, "badge">, Connection
 }
 
 const channelPresentations: Record<string, ChannelPresentation> = {
+  "assistant-ui": {
+    logo: "assistant-ui",
+    docsHref: "https://www.assistant-ui.com/docs/runtimes/eve/quickstart",
+    keywords: ["chat", "ui", "react", "components", "shadcn", "frontend", "hitl", "generative ui"],
+    install: `Create an assistant-ui app with the eve template:
+
+\`\`\`bash
+npx create-assistant-ui@latest -t eve my-app
+\`\`\`
+
+To add the adapter to an existing Next.js app, install it with the eve framework:
+
+\`\`\`bash
+npm install @assistant-ui/eve @assistant-ui/next @assistant-ui/react eve
+\`\`\``,
+    quickStart: `Mount eve and assistant-ui in \`next.config.ts\`, then create the runtime in a client component:
+
+\`\`\`ts
+import { withAui } from "@assistant-ui/next";
+import { withEve } from "eve/next";
+
+export default withEve(withAui({}));
+\`\`\`
+
+\`\`\`tsx
+"use client";
+
+import { useEveAgentRuntime } from "@assistant-ui/eve";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+
+export default function Home() {
+  const runtime = useEveAgentRuntime();
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <Thread />
+    </AssistantRuntimeProvider>
+  );
+}
+\`\`\`
+
+The [assistant-ui eve quickstart](https://www.assistant-ui.com/docs/runtimes/eve/quickstart) covers installing the thread components and optional renderers for questions and connector authorization.`,
+    configure: `The adapter uses eve's native HTTP channel and its existing session routes; it does not add a server channel or its own authentication. Configure the eve channel to authenticate browser users before production. The default eve policy rejects production browser traffic until you replace it with your application's auth policy. See the [eve channel docs](/docs/channels/eve#authentication) and the [assistant-ui eve runtime docs](https://www.assistant-ui.com/docs/runtimes/eve/overview) for session, approval, and authorization rendering details.`,
+  },
   slack: {
     logo: "slack",
     docsHref: "/docs/channels/slack",

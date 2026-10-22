@@ -1,5 +1,5 @@
-import { shellQuote } from "./shell.ts";
-import { resolveInWorkspace, type WorkspaceSandbox } from "./workspace-root.ts";
+import { shellQuote } from "#execution/sandbox/shell-quote.js";
+import { resolveInWorkspace, type WorkspaceSandbox } from "#execution/sandbox/workspace-root.js";
 
 const DEFAULT_GREP_LIMIT = 50;
 export const MAX_GREP_LIMIT = 200;
@@ -32,7 +32,7 @@ export interface GrepSearchResult {
   readonly truncated: boolean;
 }
 
-interface GrepToolInput {
+export interface GrepToolInput {
   readonly context?: number;
   readonly glob?: string;
   readonly ignoreCase?: boolean;
@@ -75,6 +75,15 @@ export async function executeGrepSearch(
   sandbox: WorkspaceSandbox,
   abortSignal?: AbortSignal,
 ): Promise<GrepSearchResult> {
+  if (
+    input.path === "$HOME" ||
+    input.path?.startsWith("$HOME/") ||
+    input.path?.startsWith("${HOME}/")
+  ) {
+    throw new Error(
+      "grep is limited to the sandbox workspace; $HOME paths are not supported. Choose a workspace path or use read_file/glob for home-scoped files.",
+    );
+  }
   const path = assertNoParentSegments(sandbox.resolvePath(input.path ?? ""), input.path);
   const { path: searchRealPath } = await resolveInWorkspace(
     sandbox,
@@ -99,7 +108,9 @@ export async function executeGrepSearch(
   const commandOutput = truncateUtf8(result.stdout, MAX_GREP_COMMAND_BYTES);
   const commandTruncated = commandOutput.truncated;
   if (
-    (result.exitCode !== 0 && result.exitCode !== 1) ||
+    (result.exitCode !== 0 &&
+      result.exitCode !== 1 &&
+      !(result.exitCode === 141 && commandTruncated)) ||
     (result.exitCode === 1 && result.stderr.trim().length > 0)
   ) {
     const detail = result.stderr.trim() || commandOutput.value.trim() || "no command output";
@@ -109,6 +120,7 @@ export async function executeGrepSearch(
   }
   return processGrepOutput({
     commandTruncated,
+    contextLines: input.context ?? 0,
     limit,
     outputMode,
     path,
@@ -125,16 +137,15 @@ export function buildSearchCommand(input: GrepCommandInput): string {
     "  else",
     `    ${buildPosixGrepCommand(input)}`,
     "  fi",
-    `} 2>&1 | head -c ${MAX_GREP_COMMAND_BYTES + 1}`,
-    "search_status=${PIPESTATUS[0]}",
-    // A producer stopped by the byte cap has already returned all output we will accept.
-    'if [ "$search_status" -eq 141 ]; then exit 0; fi',
-    'exit "$search_status"',
+    // Drain excess diagnostics so truncating stderr cannot SIGPIPE the search.
+    `} 2> >({ head -c ${MAX_GREP_LINE_BYTES}; cat >/dev/null; } >&2) | head -c ${MAX_GREP_COMMAND_BYTES + 1}`,
   ].join("\n");
 }
 
 export function buildRipgrepCommand(input: GrepCommandInput): string {
-  const parts = ["rg", "--color=never", "--hidden", "--glob", shellQuote("!.git/*")];
+  // stdout is piped, so native ripgrep does not add terminal colors. The
+  // virtual just-bash implementation supports these search flags, but not --color.
+  const parts = ["rg", "--hidden", "--glob", shellQuote("!.git/*")];
 
   if (input.ignoreCase) {
     parts.push("--ignore-case");
@@ -151,18 +162,18 @@ export function buildRipgrepCommand(input: GrepCommandInput): string {
       parts.push("--files-with-matches", "--max-count", "1");
       break;
     case "count":
-      parts.push("--count");
+      parts.push("--count", "--with-filename");
       break;
     case "content":
-      parts.push("--line-number", "--with-filename", "--null");
+      parts.push("--line-number", "--with-filename", "--json");
       if (input.contextLines > 0) {
         parts.push("--context", String(input.contextLines));
       }
-      parts.push("--max-count", String(input.limit));
+      parts.push("--max-count", String(input.limit + 1));
       break;
   }
 
-  parts.push("--", shellQuote(input.pattern), shellQuote(input.path));
+  parts.push("-e", shellQuote(input.pattern), shellQuote(input.path));
   return parts.join(" ");
 }
 
@@ -186,14 +197,14 @@ export function buildPosixGrepCommand(input: GrepCommandInput): string {
       parts.push("-l");
       break;
     case "count":
-      parts.push("-c");
+      parts.push("-c", "-H");
       break;
     case "content":
       parts.push("-n", "-H", "-Z");
       if (input.contextLines > 0) {
         parts.push("-C", String(input.contextLines));
       }
-      parts.push("-m", String(input.limit));
+      parts.push("-m", String(input.limit + 1));
       break;
   }
 
@@ -203,6 +214,7 @@ export function buildPosixGrepCommand(input: GrepCommandInput): string {
 
 export function processGrepOutput(input: {
   readonly commandTruncated?: boolean;
+  readonly contextLines?: number;
   readonly limit: number;
   readonly outputMode: GrepOutputMode;
   readonly path: string;
@@ -215,6 +227,7 @@ export function processGrepOutput(input: {
   let contentBytes = 0;
   let matchCount = 0;
   let returnedRows = 0;
+  let previousLocation: { path: string; number: number } | undefined;
   let truncated = input.commandTruncated === true;
 
   const appendLine = (line: string): boolean => {
@@ -240,7 +253,24 @@ export function processGrepOutput(input: {
     let line = rawLine;
     let isMatch = input.outputMode !== "content";
     if (input.outputMode === "content") {
-      const normalized = normalizeContentLine(rawLine);
+      const normalized = normalizeContentLine(
+        rawLine,
+        input.commandTruncated === true && index === rawLines.length - 1,
+      );
+      if (normalized.skip) continue;
+      if ((input.contextLines ?? 0) > 0 && normalized.location !== undefined) {
+        if (
+          previousLocation &&
+          (previousLocation.path !== normalized.location.path ||
+            normalized.location.number > previousLocation.number + 1)
+        ) {
+          if (!appendLine("--")) {
+            truncated = true;
+            break;
+          }
+        }
+        previousLocation = normalized.location;
+      }
       line = normalized.line;
       isMatch = normalized.isMatch;
     }
@@ -289,7 +319,43 @@ export function processGrepOutput(input: {
   };
 }
 
-function normalizeContentLine(line: string): { isMatch: boolean; line: string } {
+interface ContentLine {
+  isMatch: boolean;
+  line: string;
+  skip?: boolean;
+  location?: { path: string; number: number };
+}
+
+function normalizeContentLine(line: string, partial = false): ContentLine {
+  if (line.startsWith("{")) {
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch (error) {
+      if (partial) return partialContentLine(line);
+      throw error;
+    }
+    if (record !== null && typeof record === "object" && "type" in record && "data" in record) {
+      if (record.type !== "match" && record.type !== "context")
+        return { isMatch: false, line: "", skip: true };
+      const data = record.data as {
+        path: { text?: string; bytes?: string };
+        lines: { text?: string; bytes?: string };
+        line_number: number;
+      };
+      const separator = record.type === "match" ? ":" : "-";
+      const content = (
+        data.lines.text ?? Buffer.from(data.lines.bytes ?? "", "base64").toString("utf8")
+      ).replace(/\n$/u, "");
+      const path = data.path.text ?? Buffer.from(data.path.bytes ?? "", "base64").toString("utf8");
+      return {
+        isMatch: record.type === "match",
+        line: `${path}${separator}${data.line_number}${separator}${content}`,
+        location: { path, number: data.line_number },
+      };
+    }
+  }
+
   const separator = line.lastIndexOf("\0");
   if (separator === -1) return { isMatch: false, line };
 
@@ -302,6 +368,39 @@ function normalizeContentLine(line: string): { isMatch: boolean; line: string } 
   return {
     isMatch: kind === ":",
     line: `${path}${kind}${lineNumber}${kind}${content}`,
+  };
+}
+
+// The byte cap can cut a JSON record inside its line text, before rg emits
+// line_number. Keep the confirmed match and a bounded preview without inventing
+// a position or allocating the rest of a minified line.
+function partialContentLine(line: string): ContentLine {
+  const type = /^\s*\{\s*"type"\s*:\s*"(match|context)"/u.exec(line)?.[1];
+  if (type === undefined) return { isMatch: false, line: "", skip: true };
+  const field = (name: "path" | "lines"): string | undefined => {
+    const match = new RegExp(
+      `"${name}"\\s*:\\s*\\{\\s*"(text|bytes)"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`,
+      "u",
+    ).exec(line);
+    if (match === null) return undefined;
+    const raw = match[2]!.slice(0, MAX_GREP_LINE_BYTES);
+    // A cap can split a JSON escape (at most six characters, e.g. \u1234).
+    for (let trim = 0; trim <= 6 && trim <= raw.length; trim += 1) {
+      try {
+        const value: string = JSON.parse(`"${raw.slice(0, raw.length - trim)}"`);
+        return match[1] === "bytes" ? Buffer.from(value, "base64").toString("utf8") : value;
+      } catch {
+        /* Drop only the incomplete trailing escape. */
+      }
+    }
+    return undefined;
+  };
+  const path = field("path") ?? "[path truncated]";
+  const preview = field("lines") ?? "[line preview truncated]";
+  const number = /"line_number"\s*:\s*(\d+)/u.exec(line)?.[1];
+  return {
+    isMatch: type === "match",
+    line: `${path}:${number ?? "[position truncated]"}:${preview}`,
   };
 }
 

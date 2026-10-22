@@ -37,7 +37,7 @@ describe("agentRouter", () => {
       "operated",
     );
     expect(decide).toHaveBeenCalledWith({
-      abortSignal,
+      signal: abortSignal,
       state: { message: "Deploy the service" },
       questions: {
         route: {

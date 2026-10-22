@@ -23,6 +23,9 @@ parentPort?.on("message", async (request: Partial<DevelopmentCompileRequest> | n
     adoptLinuxDockerDaemonAvailability(request.dockerAvailability);
   }
 
+  // While a build runs, only its own work keeps this thread alive. A build that
+  // can never settle then exits the worker and fails, instead of hanging.
+  parentPort?.unref();
   let outcome: DevelopmentCompileOutcome;
 
   try {
@@ -31,13 +34,15 @@ parentPort?.on("message", async (request: Partial<DevelopmentCompileRequest> | n
     outcome = { ok: false, error: serializeError(error) };
   }
 
+  parentPort?.ref();
+  const memory = process.memoryUsage();
   const response: DevelopmentCompileResponse = {
     ...outcome,
     dockerAvailability: peekLinuxDockerDaemonAvailability(),
     heapLimit: getHeapStatistics().heap_size_limit,
-    heapUsed: process.memoryUsage().heapUsed,
     id: request.id ?? 0,
     kind: DEVELOPMENT_COMPILE_MESSAGE_KIND,
+    memoryUsed: memory.heapUsed + memory.external,
   };
   parentPort?.postMessage(response);
 });

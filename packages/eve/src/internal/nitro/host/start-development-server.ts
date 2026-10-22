@@ -18,6 +18,7 @@ import {
   EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
 } from "#protocol/routes.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
+import { terminateDevelopmentCompileWorker } from "#internal/nitro/host/dev-compile.js";
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
@@ -257,6 +258,8 @@ async function closeDevelopmentServerResources(input: {
     }
   };
 
+  // Before the watcher, which waits for an in-flight rebuild to settle.
+  terminateDevelopmentCompileWorker();
   const authoredSourceWatcher = input.authoredSourceWatcher;
   if (authoredSourceWatcher !== undefined) {
     await attempt(() => authoredSourceWatcher.close());

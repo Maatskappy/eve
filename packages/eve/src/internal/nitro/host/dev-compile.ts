@@ -5,7 +5,7 @@ import {
   type DevelopmentGeneration,
   stageDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
-import { toError } from "#shared/errors.js";
+import { toError, toErrorMessage } from "#shared/errors.js";
 
 export type DevelopmentCompileInput = Parameters<typeof compileAgentInWorkspace>[0];
 
@@ -31,7 +31,8 @@ export type DevelopmentCompileOutcome =
 export type DevelopmentCompileResponse = {
   readonly dockerAvailability: boolean | undefined;
   readonly heapLimit: number;
-  readonly heapUsed: number;
+  /** Heap plus memory held outside it by JavaScript objects, such as buffers. */
+  readonly memoryUsed: number;
   readonly id: number;
   readonly kind: typeof DEVELOPMENT_COMPILE_MESSAGE_KIND;
 } & DevelopmentCompileOutcome;
@@ -47,6 +48,7 @@ const MAX_SERIALIZED_CAUSE_DEPTH = 8;
 const WORKER_HEAP_RECYCLE_FRACTION = 0.25;
 
 let compileWorker: Worker | undefined;
+let busyWorker: Worker | undefined;
 let compileQueue: Promise<unknown> = Promise.resolve();
 let dockerAvailability: boolean | undefined;
 let nextRequestId = 0;
@@ -95,7 +97,7 @@ async function compileInWorker(input: DevelopmentCompileInput): Promise<Developm
       kind: DEVELOPMENT_COMPILE_MESSAGE_KIND,
     });
   } catch (error) {
-    await retireCompileWorker(worker);
+    retireCompileWorker(worker);
 
     if ((error as { code?: unknown } | null)?.code === "ERR_WORKER_OUT_OF_MEMORY") {
       throw new Error(
@@ -110,8 +112,8 @@ async function compileInWorker(input: DevelopmentCompileInput): Promise<Developm
   // Provider selection must stay stable for the dev server's lifetime, including across workers.
   dockerAvailability ??= response.dockerAvailability;
 
-  if (response.heapUsed > response.heapLimit * WORKER_HEAP_RECYCLE_FRACTION) {
-    await retireCompileWorker(worker);
+  if (response.memoryUsed > response.heapLimit * WORKER_HEAP_RECYCLE_FRACTION) {
+    retireCompileWorker(worker);
   }
 
   if (!response.ok) {
@@ -130,8 +132,16 @@ function startCompileWorker(): Worker {
     if (compileWorker === worker) compileWorker = undefined;
   };
 
-  // Authored code can still throw from a timer after its build finished; the next build starts fresh.
-  worker.on("error", forget);
+  // Authored code can still throw from a timer after its build finished. A build in progress
+  // reports its own failure; between builds, nothing else would surface it.
+  worker.on("error", (error) => {
+    if (busyWorker !== worker) {
+      console.error(
+        `[eve:dev] agent compiler worker failed between rebuilds: ${toErrorMessage(error)}`,
+      );
+    }
+    forget();
+  });
   worker.once("exit", forget);
   worker.unref();
   return worker;
@@ -147,6 +157,7 @@ function requestCompilation(
       worker.off("error", onError);
       worker.off("exit", onExit);
       worker.unref();
+      busyWorker = undefined;
       finish();
     };
     const onMessage = (message: Partial<DevelopmentCompileResponse> | null) => {
@@ -157,20 +168,32 @@ function requestCompilation(
     const onError = (error: Error) => settle(() => reject(error));
     const onExit = (code: number) =>
       settle(() =>
-        reject(new Error(`The agent compiler worker exited with code ${code} before finishing.`)),
+        reject(
+          new Error(
+            code === 0
+              ? "Compiling the agent stopped before it finished, because it was waiting on work that can never complete. Check authored modules for top-level awaits on promises that never settle."
+              : `The agent compiler worker exited with code ${code} before finishing.`,
+          ),
+        ),
       );
 
     worker.on("message", onMessage);
     worker.on("error", onError);
     worker.on("exit", onExit);
     worker.ref();
+    busyWorker = worker;
     worker.postMessage(request);
   });
 }
 
-async function retireCompileWorker(worker: Worker): Promise<void> {
+/** Stops the compile worker, so a build that never settles cannot block shutdown. */
+export function terminateDevelopmentCompileWorker(): void {
+  if (compileWorker !== undefined) retireCompileWorker(compileWorker);
+}
+
+function retireCompileWorker(worker: Worker): void {
   if (compileWorker === worker) compileWorker = undefined;
-  await worker.terminate();
+  void worker.terminate();
 }
 
 export function serializeError(error: unknown, depth = 0): SerializedError {

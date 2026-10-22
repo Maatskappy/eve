@@ -108,7 +108,11 @@ describe("discordChannel press no session takes", () => {
     };
   };
   const prompt = {
-    body: { components: [], content: "Approve?\n\nNo longer active" },
+    body: {
+      allowed_mentions: { parse: [] },
+      components: [],
+      content: "Approve?\n\nNo longer active",
+    },
     method: "PATCH",
     url: "https://discord.com/api/v10/channels/C01/messages/M01",
   };

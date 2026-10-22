@@ -83,7 +83,7 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
     )
     .join("\n");
   const httpCase = values.vercelBackend
-    ? `      case "http": {
+    ? `      case "channel:eve": {
         const projectId = process.env.VERCEL_PROJECT_ID;
         return (
           projectId !== undefined &&

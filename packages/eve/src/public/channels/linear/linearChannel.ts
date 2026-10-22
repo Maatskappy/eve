@@ -211,7 +211,6 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
     LinearReceiveTarget,
     LinearInstrumentationMetadata
   >({
-    kindHint: "linear",
     turnPolicy: config.turnPolicy,
     state: initialLinearState(),
     metadata(state): LinearInstrumentationMetadata {

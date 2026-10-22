@@ -18,11 +18,15 @@ describe("signsInPrivately", () => {
     expect(signsInPrivately({ ...state, channelType: 1 })).toBe(true);
   });
 
+  it("shows the challenge in a DM a Gateway message started", () => {
+    expect(signsInPrivately({ ...state, channelType: 1, interactionToken: null })).toBe(true);
+  });
+
   it.each([
     ["a group DM", { channelType: 3 }],
     ["a server channel", { channelType: 0, guildId: "guild" }],
     ["a conversation whose type it didn't record", {}],
-    ["a session eve started itself", { channelType: 1, interactionToken: null }],
+    ["a session eve started itself", { channelType: undefined, interactionToken: null }],
   ])("keeps the challenge out of %s", (_, change) => {
     expect(signsInPrivately({ ...state, ...change })).toBe(false);
   });

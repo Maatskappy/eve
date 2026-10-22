@@ -1,5 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { MessageContent } from "#shared/message-content.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
 
 import type { RemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
@@ -9,7 +10,6 @@ import type {
   RuntimeSubagentDispatchFailure,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
-import type { Answer } from "#shared/input.js";
 import type {
   InteractionOpenedData,
   InteractionSettledData,
@@ -166,24 +166,11 @@ export interface TurnCaller {
     | { readonly kind: "callback"; readonly token: string; readonly url: string };
 }
 
-/**
- * Base deliver payload crossing the runtime boundary.
- *
- * The runtime reads {@link message} and {@link answers} for delivery
- * coalescing. Adapters extend this interface with their own typed fields (e.g.
- * Slack adapters add `interaction`) and receive the extended type through the
- * generic payload on their `deliver` hook.
- *
- * `message` is a plain text string or an array of message parts (`text` and
- * `file`), letting channels forward file attachments straight to the harness.
- */
-export interface DeliverPayload {
-  readonly answers?: readonly Answer[];
-  readonly message?: MessageContent;
-  readonly context?: readonly string[];
-  /** Prior conversation added as user and assistant turns before this delivery's input. */
+/** Internal transport payload, including framework-owned compatibility and context fields. */
+export interface DeliverPayload extends Omit<ChannelDelivery, "state"> {
+  /** Framework-owned history; delivery hooks cannot replace it. */
   readonly history?: readonly SessionHistoryMessage[];
-  readonly outputSchema?: JsonObject;
+  readonly state?: unknown;
   readonly [key: string]: unknown;
 }
 

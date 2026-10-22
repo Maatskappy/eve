@@ -25,17 +25,23 @@ import type {
 export type { PrepareSend };
 
 /**
- * Local activity of an eve agent session. Failures are reported separately in `error`.
+ * Outstanding work this binding has observed or still owes. Failures are reported separately in
+ * `error`.
  *
- * - `"idle"`: nothing is pending, so a new turn can start.
+ * - `"idle"`: no command, answer, or followed receipt is pending, and the last observed view is
+ *   idle. A turn waiting only on a person can still be open; read `activeTurn(view)`.
  * - `"resuming"`: catching up on an attached session; submission is disabled.
- * - `"busy"`: a send is in flight, or a turn, task, or sign-in is still pending.
+ * - `"busy"`: a send, answer, or control command is pending, a followed receipt has not settled,
+ *   or the session has running or queued work.
+ *
+ * After `followWhile` closes the stream, `status` reflects the last observed view, not the
+ * current server state.
  */
 export type UseEveAgentStatus = SessionStoreStatus;
 
 /**
- * Snapshot of an eve agent session: the conversation (`messages`, `interactions`, `agents`,
- * `view`, `previews`), `events` (the authoritative server stream), `session` (resumable cursor),
+ * Snapshot of an eve agent session: the conversation (`messages`, `agents`, `view`),
+ * `events` (the authoritative server stream), `session` (resumable cursor),
  * `status`, and `error`.
  */
 export type UseEveAgentSnapshot = SessionStoreSnapshot;
@@ -44,9 +50,14 @@ export type UseEveAgentSnapshot = SessionStoreSnapshot;
  * Snapshot plus commands returned by `useEveAgent`.
  */
 export interface UseEveAgentReturn extends UseEveAgentSnapshot {
-  /** Requests durable cancellation of the active turn while continuing to receive its events. */
+  /**
+   * Requests durable cancellation of the active turn while continuing to receive its events.
+   * Offer it while `activeTurn(view)` returns a turn, including one waiting on a person.
+   */
   readonly cancel: () => Promise<Delivery>;
-  /** Resolves at the durable tail; the session stream keeps following afterward. */
+  /** Follow a same-session delivery receipt from this or another store until settlement. */
+  readonly follow: (receipt: Pick<Delivery, "sessionId" | "deliveryId">) => void;
+  /** Resolves at the durable tail; subsequent following obeys `followWhile`. */
   readonly resume: () => Promise<void>;
   /** Creates the session without starting its first turn. */
   readonly prewarm: () => Promise<void>;
@@ -112,16 +123,12 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
   readonly optimistic?: boolean;
   /** Follow each subagent call's session into `agents` while mounted. @default false */
   readonly followAgents?: boolean;
-  /**
-   * Keep the session stream open between turns to show events that arrive from schedules,
-   * channels, or other clients. Set to false to close it once the session is idle and reopen it
-   * on the next send, answer, or resume. @default true
-   */
-  readonly followIdle?: boolean;
+  /** Keep following while the committed view matches; local obligations always keep the stream open. @default () => true */
+  readonly followWhile?: (view: SessionStoreSnapshot["view"]) => boolean;
   /**
    * Prewarm an owned session when true. React observes this value across renders;
-   * changing it from false to true prepares the current session, and reset checks
-   * the latest rendered value before preparing the next session.
+   * changing it from false to true prepares the current session, and `newSession()`
+   * checks the latest rendered value before preparing the next session.
    *
    * Changing the value to false does not discard an existing session or abort
    * session creation already in flight.
@@ -142,19 +149,21 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
 /**
  * React hook that drives an eve session and projects its event stream into UI data.
  *
- * Returns the current snapshot (the conversation's `messages`, `interactions`, `agents`, `view`,
- * and `previews`, plus `events`, `session`, `status`, and `error`) and the commands `prewarm`,
- * `send`, `respond`, `resume`, `cancel`, and `reset`. Read lifecycle from `view` with selectors
+ * Returns the current snapshot (the conversation's `messages`, `agents`, and `view`, plus
+ * `events`, `session`, `status`, and `error`) and the commands `prewarm`, `send`, `respond`,
+ * `resume`, `cancel`, `newSession`, and `reset`. Read lifecycle from `view` with selectors
  * from `eve/events`.
  *
  * Session-shaping options (`baseUrl`, `session`, `initialEvents`,
  * `initialSession`, `auth`, `headers`, `optimistic`, `resume`) are read once
  * when the store is created; remount to change them. `prewarm` and lifecycle
  * callbacks (`onError`, `onEvent`, `onFinish`, `onSessionChange`, `prepareSend`)
- * refresh on every render.
+ * and `followWhile` refresh on every render.
  */
 export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn {
   const storeRef = useRef<SessionStore | undefined>(undefined);
+  const followWhileRef = useRef(options.followWhile);
+  followWhileRef.current = options.followWhile;
   const mountedRef = useRef(false);
   const resumeOnMountRef = useRef(options.resume ?? false);
   const [autoResumePending, setAutoResumePending] = useState(resumeOnMountRef.current);
@@ -177,7 +186,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       initialSession: options.initialSession,
       optimistic: options.optimistic,
       followAgents: options.followAgents,
-      followIdle: options.followIdle,
+      followWhile: (view) => followWhileRef.current?.(view) ?? true,
       session: options.session,
     });
   }
@@ -241,6 +250,10 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   }, [store]);
   const prewarm = useCallback(() => store.prewarm(), [store]);
   const resume = useCallback(() => store.resume(), [store]);
+  const follow = useCallback(
+    (receipt: Pick<Delivery, "sessionId" | "deliveryId">) => store.follow(receipt),
+    [store],
+  );
   const send = useCallback(
     <TOutput = unknown>(message: MessageContent, options?: SendTurnOptions<TOutput>) => {
       return store.send({ ...options, message });
@@ -270,8 +283,21 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       reset,
       respond,
       resume,
+      follow,
       send,
     }),
-    [cancel, clear, compact, newSession, prewarm, reset, respond, resume, send, visibleSnapshot],
+    [
+      cancel,
+      clear,
+      compact,
+      follow,
+      newSession,
+      prewarm,
+      reset,
+      respond,
+      resume,
+      send,
+      visibleSnapshot,
+    ],
   );
 }

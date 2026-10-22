@@ -67,9 +67,12 @@ export default defineChannel({
       });
     }),
 
-    POST<AnchorState>("/anchor/reply", async (request, { from }) => {
+    POST<AnchorState>("/anchor/reply", async (request, { from, resolveSession }) => {
       const body = readBody(await request.json().catch(() => ({})));
       const anchorToken = `thread:${body.threadId}`;
+      if ((await resolveSession(anchorToken)) === undefined) {
+        return Response.json({ code: "anchor_not_ready" }, { status: 409 });
+      }
       const session = await from(anchorToken).send(body.message, {
         auth: authFor("reply", body.marker),
         state: initialState(anchorToken),

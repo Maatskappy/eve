@@ -3,13 +3,13 @@ import { SessionStore } from "eve/client";
 import { delivery } from "eve/events";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
+import { interceptFetchOrigin } from "../lib/fetch-interceptor";
 
 export default defineEval({
   description: "A frontend stream reconnect uses the latest send's authorization header.",
   async test(t) {
     const session = await t.session();
     const host = `https://${crypto.randomUUID()}.invalid`;
-    const originalFetch = globalThis.fetch;
     let resolveReconnectAuthorization!: (authorization: string | null) => void;
     const reconnectAuthorization = new Promise<string | null>((resolve) => {
       resolveReconnectAuthorization = resolve;
@@ -21,9 +21,8 @@ export default defineEval({
       initialSession: session.state,
     });
 
-    globalThis.fetch = async (input, init) => {
+    const unregisterFetch = interceptFetchOrigin(host, async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
-      if (url.origin !== host) return originalFetch(input, init);
       const forcedReconnect = awaitingForcedReconnect;
       const response = await t.target.fetch(`${url.pathname}${url.search}`, init);
       if (!url.pathname.endsWith("/stream") || !response.ok || response.body === null) {
@@ -42,7 +41,7 @@ export default defineEval({
         },
       });
       return new Response(response.body.pipeThrough(transport), response);
-    };
+    });
 
     try {
       const first = await store.send({
@@ -74,10 +73,32 @@ export default defineEval({
       if (disconnectStream === undefined)
         throw new Error("The first turn never opened its stream.");
       disconnectStream();
-      await t.require(await reconnectAuthorization, equals("Bearer fresh"));
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
+      try {
+        const authorization = await Promise.race([
+          reconnectAuthorization,
+          new Promise<string | null>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("Frontend stream did not reconnect within 20 seconds.")),
+              20_000,
+            );
+            onAbort = () => reject(t.abortSignal.reason);
+            if (t.abortSignal.aborted) onAbort();
+            else t.abortSignal.addEventListener("abort", onAbort, { once: true });
+          }),
+        ]);
+        await t.require(authorization, equals("Bearer fresh"));
+      } finally {
+        clearTimeout(timeout);
+        if (onAbort) t.abortSignal.removeEventListener("abort", onAbort);
+      }
     } finally {
-      store.newSession();
-      globalThis.fetch = originalFetch;
+      try {
+        store.newSession();
+      } finally {
+        unregisterFetch();
+      }
     }
   },
 });

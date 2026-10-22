@@ -1,5 +1,6 @@
 import { useEveAgent, type EveToolPart, type EveMessagePart } from "eve/react";
 import { useState } from "react";
+import { activeTurn } from "eve/events";
 
 function ToolBlock({
   canRespond,
@@ -64,6 +65,7 @@ export function EveAgentConsole() {
   const [draft, setDraft] = useState("");
   const agent = useEveAgent({ prewarm: draft.trim().length > 0 });
   const isBusy = agent.status === "busy";
+  const turnOpen = activeTurn(agent.view) !== undefined;
   const isInputDisabled = isBusy || agent.status === "resuming";
 
   function submit() {
@@ -122,7 +124,7 @@ export function EveAgentConsole() {
           rows={2}
           value={draft}
         />
-        {isBusy ? (
+        {turnOpen ? (
           <button onClick={() => void agent.cancel()} type="button">
             Stop
           </button>

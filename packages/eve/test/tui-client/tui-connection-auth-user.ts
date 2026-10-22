@@ -267,28 +267,6 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     ),
   );
 
-  const replyResp = await fetch(`${target.baseUrl}/anchor/reply`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      threadId: THREAD_ID,
-      message: [
-        "Use the `stub-mcp-user` connection's `echo_marker` tool again.",
-        `The model-visible tool name is \`${EXPECTED_TOOL_NAME}\`.`,
-        'Call it with `note: "cross-principal-smoke"`. Do not answer without calling the tool.',
-      ].join("\n"),
-    }),
-  });
-  if (!replyResp.ok) {
-    throw new Error(`POST /anchor/reply failed: ${replyResp.status} ${await replyResp.text()}`);
-  }
-  const replyBody = (await replyResp.json()) as { sessionId?: string };
-  if (replyBody.sessionId !== sessionId) {
-    throw new Error(
-      `Expected follow-up to resume session ${sessionId}, got ${replyBody.sessionId ?? "<none>"}.`,
-    );
-  }
-
   let followupAuthRequired = false;
   let followupToolCompleted = false;
   let followupBoundary: SessionStreamEvent["type"] | undefined;
@@ -296,6 +274,39 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   const followupTimer = setTimeout(() => followupAbort.abort(), 60_000);
 
   try {
+    let replyResp: Response;
+    // A streamed terminal precedes the channel handler that claims its reply alias.
+    while (true) {
+      replyResp = await fetch(`${target.baseUrl}/anchor/reply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: followupAbort.signal,
+        body: JSON.stringify({
+          threadId: THREAD_ID,
+          message: [
+            "Use the `stub-mcp-user` connection's `echo_marker` tool again.",
+            `The model-visible tool name is \`${EXPECTED_TOOL_NAME}\`.`,
+            'Call it with `note: "cross-principal-smoke"`. Do not answer without calling the tool.',
+          ].join("\n"),
+        }),
+      });
+      if (replyResp.status !== 409) break;
+      const error = (await replyResp.json()) as { code?: string };
+      if (error.code !== "anchor_not_ready")
+        throw new Error(`Unexpected anchor error: ${error.code}`);
+      followupAbort.signal.throwIfAborted();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (!replyResp.ok) {
+      throw new Error(`POST /anchor/reply failed: ${replyResp.status} ${await replyResp.text()}`);
+    }
+    const replyBody = (await replyResp.json()) as { sessionId?: string };
+    if (replyBody.sessionId !== sessionId) {
+      throw new Error(
+        `Expected follow-up to resume session ${sessionId}, got ${replyBody.sessionId ?? "<none>"}.`,
+      );
+    }
+
     const followupCalls = new Set<string>();
     for await (const event of session.stream({ signal: followupAbort.signal })) {
       if (

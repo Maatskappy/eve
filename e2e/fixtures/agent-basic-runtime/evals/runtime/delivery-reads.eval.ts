@@ -2,6 +2,7 @@ import { Client } from "eve/client";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import { delivery as deliveryState, emptySessionView, foldEvents } from "eve/events";
+import { interceptFetchOrigin } from "../lib/fetch-interceptor";
 
 export default defineEval({
   description: "Alice can stop observing a request, read it again, and obtain its settled result.",
@@ -9,13 +10,10 @@ export default defineEval({
   async test(t) {
     const managed = await t.session();
     const host = `https://${crypto.randomUUID()}.invalid`;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
+    const unregisterFetch = interceptFetchOrigin(host, (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
-      return url.origin === host
-        ? t.target.fetch(`${url.pathname}${url.search}`, init)
-        : originalFetch(input, init);
-    };
+      return t.target.fetch(`${url.pathname}${url.search}`, init);
+    });
     try {
       const session = new Client({ baseUrl: host }).sessions.attach(managed.id);
       const accepted = await session.send(
@@ -53,7 +51,7 @@ export default defineEval({
       await t.require(ignored.status, equals("completed"));
       await t.require(ignored.outcome, equals("ignored"));
     } finally {
-      globalThis.fetch = originalFetch;
+      unregisterFetch();
     }
   },
 });

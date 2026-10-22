@@ -174,7 +174,7 @@ export async function resolveOnMessage(input: {
   readonly invocation?: EveHandle["invocation"];
   readonly message: string | UserContent;
   readonly request: Request;
-  readonly sessionId?: string;
+  readonly sessionId: string;
 }): Promise<OnMessageOutcome | Response> {
   const handler = input.config.onMessage ?? defaultOnMessage;
 
@@ -184,9 +184,9 @@ export async function resolveOnMessage(input: {
       caller: input.auth,
       clientContext: input.clientContext,
       request: input.request,
+      sessionId: input.sessionId,
     };
     if (input.invocation !== undefined) eve.invocation = input.invocation;
-    if (input.sessionId !== undefined) eve.sessionId = input.sessionId;
     const ctx: EveMessageContext = { eve };
     result = await handler(ctx, input.message);
     if (result === null || result === undefined) {

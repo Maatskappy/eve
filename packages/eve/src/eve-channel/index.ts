@@ -311,16 +311,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         const createSession = readRouteSessionCreator(args);
-        if (createSession === undefined) {
+        const reserveSessionId = readRouteSessionIdReserver(args);
+        if (createSession === undefined || reserveSessionId === undefined) {
           return Response.json(
             { error: "Session creation requires internal channel dispatch context.", ok: false },
             { status: 500 },
           );
         }
         // Reserved before onMessage so the creating message sees the same id as follow-ups.
-        let sessionId: string | undefined;
+        let sessionId: string;
         try {
-          sessionId = await readRouteSessionIdReserver(args)?.();
+          sessionId = await reserveSessionId();
         } catch (error) {
           const errorId = logError(log, "session-id reservation failed", error);
           return Response.json(

@@ -74,7 +74,7 @@ export interface EveHandle {
    * gets the id before the session exists, and it equals the id that later
    * follow-ups receive.
    */
-  readonly sessionId?: string;
+  readonly sessionId: string;
 }
 
 /** Pre-dispatch context passed to `eveChannel({ onMessage })`. */

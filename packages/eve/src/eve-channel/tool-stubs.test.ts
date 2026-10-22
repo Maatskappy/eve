@@ -4,7 +4,10 @@ import type { EveChannelInput } from "#eve-channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachRouteSessionCreator,
+  attachRouteSessionIdReserver,
+} from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const storage = vi.hoisted(() => ({
@@ -203,7 +206,9 @@ async function request(
       throw new Error("Unexpected remote dispatch.");
     },
   } satisfies RouteHandlerArgs;
-  if (create !== undefined) attachRouteSessionCreator(args, create);
+  if (create !== undefined) {
+    attachRouteSessionIdReserver(attachRouteSessionCreator(args, create), async () => "wrun_new");
+  }
   return (await route.handler(
     new Request("https://agent.test" + path, {
       method,

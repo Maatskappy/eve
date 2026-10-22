@@ -2,12 +2,15 @@ import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime, reserveSessionId } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createAttachSessionFn, type Session } from "#channel/session.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachRouteSessionCreator,
+  attachRouteSessionIdReserver,
+} from "#internal/nitro/routes/channel-route-context.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
@@ -846,6 +849,7 @@ async function converse(
           return handle;
         },
       );
+      attachRouteSessionIdReserver(args, reserveSessionId);
       const response = await route.handler(request, args);
       const settled = Promise.all(pending);
       background.push(settled);

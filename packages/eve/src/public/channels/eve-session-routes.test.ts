@@ -43,15 +43,18 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
 }
 
 function createArgs(session = createFixedSession()): RouteHandlerArgs {
-  return {
-    ...mockAgentRouteArgs(),
-    ...mockChannelContext(vi.fn()),
-    attachSession: () => session,
-    to: vi.fn() as never,
-    params: { sessionId: "wrun_A" },
-    waitUntil: vi.fn(),
-    requestIp: "127.0.0.1",
-  };
+  return attachRouteSessionIdReserver(
+    {
+      ...mockAgentRouteArgs(),
+      ...mockChannelContext(vi.fn()),
+      attachSession: () => session,
+      to: vi.fn() as never,
+      params: { sessionId: "wrun_A" },
+      waitUntil: vi.fn(),
+      requestIp: "127.0.0.1",
+    },
+    async () => "wrun_A",
+  );
 }
 
 describe("eve ID-addressed session routes", () => {

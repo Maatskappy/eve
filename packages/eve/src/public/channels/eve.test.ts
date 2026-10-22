@@ -11,7 +11,10 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { readClientContext } from "#internal/client-context.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachRouteSessionCreator,
+  attachRouteSessionIdReserver,
+} from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
 import {
@@ -159,9 +162,9 @@ function createEveCreateHandler(
     resolveSession,
     send: mockSend,
     async fetch(req: Request) {
-      const args = attachRouteSessionCreator(
-        { ...createRouteArgs(), resolveSession },
-        createSession as never,
+      const args = attachRouteSessionIdReserver(
+        attachRouteSessionCreator({ ...createRouteArgs(), resolveSession }, createSession as never),
+        async () => "wrun_reserved",
       );
       return (createRoute as any).handler(req, args);
     },
@@ -747,7 +750,7 @@ describe("eveChannel — onMessage", () => {
     const onMessage = vi.fn((ctx, message) => {
       expect(ctx.eve.caller).toEqual(ACCEPTED_AUTH);
       expect(defaultEveAuth(ctx)).toEqual(ACCEPTED_AUTH);
-      expect(ctx.eve.sessionId).toBeUndefined();
+      expect(ctx.eve.sessionId).toBe("wrun_reserved");
       expect(ctx.eve.request.url).toBe("https://example.com/eve/v1/session");
       expect(message).toBe("What word is selected?");
       return {

@@ -29,7 +29,10 @@ import { isConnectionAuthorizationFailedError } from "#public/connections/errors
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
-import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  attachRouteSessionCreator,
+  attachRouteSessionIdReserver,
+} from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
@@ -104,6 +107,7 @@ function createEveCreateHandler(input: EveChannelInput) {
         },
         createSession,
       );
+      attachRouteSessionIdReserver(args, async () => "wrun_reserved");
       return (
         createRoute as { handler: (req: Request, args: RouteHandlerArgs) => unknown }
       ).handler(req, args) as Promise<Response>;

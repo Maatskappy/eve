@@ -42,7 +42,7 @@ function context(
 ): DynamicResolveContext {
   return {
     model: null,
-    channel: {},
+    channel: { kind: "unknown", metadata: {} },
     session: { id: "test", auth: { current: null, initiator: null } },
     messages: [{ role: "user", content: text }],
     abortSignal,

@@ -1,3 +1,4 @@
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { SessionSchedule } from "#context/session-schedule.js";
 import type { SessionAuth } from "#context/keys.js";
@@ -44,11 +45,7 @@ export interface ScheduleScopeContext {
     readonly auth: SessionAuth;
     readonly schedule?: SessionSchedule;
   };
-  readonly channel: {
-    readonly kind?: string;
-    readonly continuationToken?: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: InstrumentationChannel;
 }
 
 /** Stable creator reference; never a snapshot of credentials or permissions. */

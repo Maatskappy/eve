@@ -289,7 +289,7 @@ describe("dynamic connection lifecycle", () => {
     });
 
     expect(received).toEqual({
-      channel: { kind: undefined },
+      channel: { kind: "unknown" },
       session: {
         auth: {
           current: expect.objectContaining({ principalId: "user-1" }),

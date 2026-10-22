@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineSelfModificationAgent } from "./agent.js";
 
 const context: DynamicResolveContext = {
-  channel: {},
+  channel: { kind: "unknown", metadata: {} },
   messages: [],
   model: null,
   session: { auth: { current: null, initiator: null }, id: "session" },

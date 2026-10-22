@@ -287,7 +287,7 @@ describe("memory provider tools", () => {
       ctx,
       async () =>
         await dynamic.events["turn.started"]?.(event.fact, {
-          channel: {},
+          channel: { kind: "unknown", metadata: {} },
           model: null,
           messages: [],
           session: { auth: { current: null, initiator: null }, id: "session_1" },

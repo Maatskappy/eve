@@ -1,3 +1,4 @@
+import type { JsonValue } from "#shared/json.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { SkillFileSource } from "#channel/skill-files.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
@@ -21,6 +22,7 @@ export type RouteSessionCreator = (
 export type RemoteAgentStreamHeadersResolver = (input: {
   readonly name: string;
   readonly resolverId?: string;
+  readonly dynamicBinding?: JsonValue;
   readonly url: string;
 }) => Promise<Record<string, string>>;
 

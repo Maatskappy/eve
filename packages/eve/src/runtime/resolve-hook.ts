@@ -2,7 +2,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { CompiledHookDefinition } from "../compiler/manifest.js";
 import type { CompiledModuleMap } from "../compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "../internal/authored-module.js";
-import type { StreamEventHook } from "../public/definitions/hook.js";
+import { assertHookForm, type StreamEventHook } from "../public/definitions/hook.js";
 import { removedEventKeyMessage } from "../public/definitions/removed-event-keys.js";
 import { toErrorMessage } from "../shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "./resolve-helpers.js";
@@ -32,6 +32,10 @@ export async function resolveHookDefinition(
     const resolvedRecord = expectObjectRecord(
       resolvedExportValue,
       describe(definition, "to return an object"),
+    );
+    assertHookForm(
+      resolvedRecord,
+      `The hook export "${definition.exportName ?? "default"}" from "${definition.logicalPath}"`,
     );
 
     const events: Record<string, StreamEventHook<SessionEvent>> = {};

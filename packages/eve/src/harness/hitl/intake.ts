@@ -39,6 +39,8 @@ import {
   withoutResponses,
 } from "./delivery.js";
 import { recheckApprovedCall } from "#harness/tools.js";
+import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
+import { callSettledFrom } from "#harness/call-facts.js";
 
 /**
  * What a delivery leaves for its step once its answers are admitted. `stop` ends the step: a
@@ -215,6 +217,13 @@ async function runApproved(
     for (const approval of approvals) {
       const tool = tools.get(approval.call.toolName);
       if (tool?.workflowId === undefined) continue;
+      if (changedSinceOffered(approval.call, tool)) {
+        const { callId, toolName } = approval.call;
+        const failed = failedCall({ callId, message: changedToolMessage(toolName), toolName });
+        await step.publish(callSettledFrom(failed.result));
+        denied.push({ part: failed.part });
+        continue;
+      }
       const recheck = await recheckApprovedCall(tool, {
         abortSignal: step.config.abortSignal,
         approvalGrants: grantedApprovals(step.view()),
@@ -298,7 +307,7 @@ async function runApproved(
         abortSignal: step.config.abortSignal,
         approvalGrants: grantedApprovals(step.view()),
         approvals,
-        messages: step.projectHistory(step.session.history),
+        messages: step.session.history,
         position: step.position(),
         publish: step.publish,
         responderOf: (approval) => approval.responder,
@@ -358,7 +367,7 @@ function stepKey(at: { readonly turnId: string; readonly stepIndex: number }): s
   return `${at.turnId}:${at.stepIndex}`;
 }
 
-/** The entries of the step that asked, restored by building its catalog; the running step's without one. */
+/** The entries of the step that asked, built once per step; the running step's without one. */
 async function restoreTools(
   step: Step,
   parked: SuspendedStep | undefined,
@@ -370,12 +379,6 @@ async function restoreTools(
   restoredTools.set(step, cache);
   const restored = cache.tools.get(key);
   if (restored !== undefined && cache.last === key) return restored;
-  await config.participants?.restoreStep({
-    at: { sequence: at.sequence, stepIndex: at.stepIndex, turnId: at.turnId },
-    messages: step.projectHistory(step.session.history),
-    modelId: step.session.agent.modelReference?.id ?? "dynamic",
-    parked: parked !== undefined,
-  });
   const tools = buildStepCatalog({
     agentTools: config.tools,
     ctx: step.ctx,

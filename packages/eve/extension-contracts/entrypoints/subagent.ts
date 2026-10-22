@@ -6,6 +6,7 @@ export {
   type DefinedAgent,
   type DynamicLocalSubagentDefinition,
   type DynamicSubagentDefinition,
+  type DynamicSubagentResult,
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
   type WorkspaceAgentDefinition,

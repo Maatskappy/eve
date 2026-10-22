@@ -48,9 +48,8 @@ export interface AgentInfoSource {
 export interface AgentInfoEntry extends AgentInfoSource {
   readonly name: string;
 }
-/** A dynamic capability resolver and its change points. */
+/** A dynamic capability definition. */
 export interface AgentInfoDynamicResolverEntry extends AgentInfoSource {
-  readonly eventNames: readonly string[];
   readonly slug: string;
 }
 /** An inspected tool definition. */
@@ -129,7 +128,6 @@ export interface AgentInfoHookEntry extends AgentInfoSource {
 export interface AgentInfoMemoryEntry extends AgentInfoSource {
   readonly description?: string;
   readonly slot: string;
-  readonly visibility: "scope" | "session";
 }
 /** An inspected sandbox definition. */
 export interface AgentInfoSandboxEntry extends AgentInfoSource {

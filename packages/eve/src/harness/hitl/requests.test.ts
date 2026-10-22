@@ -65,6 +65,28 @@ describe("writeHitlState", () => {
     expect(readHitlState(after).signIns).toEqual([]);
     expect([...readHitlState(after).relays.keys()]).toEqual(["q-2"]);
   });
+
+  it("keeps a dynamic remote child's binding across persisted upserts", () => {
+    const remoteRoute: Relay = {
+      childContinuationToken: "child",
+      remote: {
+        name: "billing",
+        url: "https://billing.example.com",
+        sessionId: "s-child",
+        resolverId: "agent/subagents/billing",
+        dynamicBinding: {
+          session: { id: "s-parent" },
+          at: "2026-01-01T00:00:00.000Z",
+          position: 3,
+          memos: { "k-1": { token: "t" } },
+        },
+      },
+    };
+    const first = save(undefined, { relays: { upsert: { "q-1": remoteRoute } } });
+    const persisted = JSON.parse(JSON.stringify(first)) as SessionStateMap;
+    const after = save(persisted, { relays: { upsert: { "q-2": route("other") } } });
+    expect(readHitlState(after).relays.get("q-1")).toEqual(remoteRoute);
+  });
 });
 
 describe("holdsHitlRequests", () => {

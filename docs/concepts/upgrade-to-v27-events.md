@@ -5,6 +5,8 @@ description: "Move hooks, channels, clients, and evals from the v26 event stream
 
 Stream version 27 changes event names, payloads, and client state. New sessions use v27; sessions started on an earlier deployment keep their earlier stream. Update event consumers and rebuild extensions before deploying. A v27 frontend cannot render an older session's event history; its owning deployment can still serve its channels. See [Sessions, runs & streaming](./sessions-runs-and-streaming) for the current stream contract.
 
+Discard persisted pre-v27 event arrays and their saved cursors before hydrating a v27 frontend. Do not pass those arrays as `initialEvents`; keep older chats on the deployment that owns their stream.
+
 ## Event mapping
 
 | v26                                                               | v27                                                                                                             |
@@ -42,10 +44,24 @@ New facts include `delivery.admitted`, `response.admitted`, `model.retried`, and
 | Workflow `ToolInputRequest`, `ToolInputResponse`                       | `ToolQuestion`, `ToolAnswer`                                     |
 | Approval `request.requestId`                                           | `request.interactionId`                                          |
 | `MessageResponse`, `MessageResult`                                     | `Delivery`, `DeliveryResult` from `eve/sessions`                 |
+| Creation result `{ session, response }`                                | `{ session, delivery }`                                          |
+| Client and frontend target `host`                                      | `baseUrl` (direct client required; frontend default `""`)        |
+| `EveAgentStore`                                                        | `SessionStore`                                                   |
 | `StreamOptions`, `GetEventStreamOptions`                               | `SessionStreamOptions` from `eve/sessions`                       |
 | Evals `inputRequests`, `pendingInputRequests`, `requireInputRequest()` | `interactions`, `pendingInteractions`, `requireInteraction()`    |
 
 Use `APPROVE_OPTION_ID` (`"approve"`) and `DENY_OPTION_ID` (`"deny"`) from `eve/events` for new approval and budget controls; replace checks for the old `"cancel"` decision. Existing posted platform controls retain their routing encodings. Keep a default branch when switching on interaction kinds or outcomes: v27 can add values without changing its stream version.
+
+## Import paths
+
+| Before                                                            | Now                                                              |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `eve/tools/agent-router`                                          | `eve/tools/agent_router`                                         |
+| `eve/computer-use` and its subpaths                               | `eve/extensions/computer-use` and the matching subpaths          |
+| `eve/self-modification`, `eve/self-modification/local`            | `eve/extensions/self-modification/local`                         |
+| `eve/self-modification/remote`                                    | `eve/extensions/self-modification/remote`                        |
+| `eve/self-modification/config`, `eve/setup`, `eve/setup/scaffold` | No public replacement; these are private implementation modules. |
+| `Datadog` from `eve/evals`                                        | `datadogReporter` from `eve/evals`                               |
 
 ## Update event consumers
 
@@ -73,10 +89,11 @@ export default defineHook({
 
 ## Other migration points
 
+- Channel CORS options use `allowHeaders`, `exposeHeaders`, and `preflight.statusCode` instead of `allowedHeaders`, `exposedHeaders`, and `preflightStatus`.
 - Authored channel identity is `channel:<name>`, including route-only channels and the default `channel:eve` (formerly `http`). Check visibility and authorization rules. Move visibility classification from `metadata().audience` to `audience(input)`; without it, audience is `unknown`. Channel context factories take `context(state, channel)`, and continuation aliases live on `channel.continuation`. See [Custom channels](../channels/custom).
 - Session readers have `id` and `stream()`; `sessions.attach(id)` returns a read-only `SessionReader`, not command authority. Use `SessionInfo` from `eve/context` for the metadata in `ctx.session`. A command that cannot reach an active session reports `SessionNotActiveError` (HTTP `409 session_not_active`). See [session handles](./sessions-runs-and-streaming#read-a-session-in-process).
 - `approvalKey` and `ApprovalContext.approvedTools` are removed. Use an `approval` policy for input-dependent decisions. `once()` remembers approval per tool for the session, not per input.
 - Replace connection auth's `credentialOwner` with `principalType: "app" | "user"`. With `getToken` alone, omitted ownership defaults to `"app"`; set `"user"` for per-user tokens. See [connection credential ownership](/docs/connections#choose-app-vs-user-auth).
-- `defineDynamic` handler keys stay `beforeSession`, `beforeTurn`, and `beforeModel`, but the event argument is now the matching v27 fact.
+- Dynamic capabilities use `defineDynamic(ctx => value)`, not lifecycle event maps. Replace `defineDurableCallback` and `defineDurableSchema` wrappers with ordinary functions and schemas; put external JSON observations in `ctx.memo(key, fn)`. See [Dynamic capabilities](../guides/dynamic-capabilities).
 - MCP's `input_required` now covers sign-ins as well as approvals and questions. Answer non-sign-in interactions using `responses: [{ interactionId, optionId?, text? }]`; complete sign-ins externally. Direct `invokeTool` calls return call-shaped outcomes, not conversational pauses. See [MCP](../channels/mcp).
 - Remote agent protocol 3 supports relaying interactions. Older peers can still exchange results, but cannot relay approvals, questions, or sign-ins; upgrade them before relying on those flows. See [Remote agents](../guides/remote-agents).

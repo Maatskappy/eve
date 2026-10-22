@@ -47,7 +47,7 @@ Authenticated with `Authorization: Bearer <INTERNAL_API_SECRET>`. See [`apps/web
 
 ## Memory Flow
 
-1. **Session injection** — [`agent/instructions.ts`](agent/instructions.ts) on `beforeSession`
+1. **Session injection** — [`agent/instructions.ts`](agent/instructions.ts), with the profile memoized per user
 2. **Agent save** — [`agent/tools/save_memory.ts`](agent/tools/save_memory.ts) with web approval UI
 3. **Profile UI** — import, view, edit, delete on Settings → Profile
 

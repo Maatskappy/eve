@@ -124,45 +124,36 @@ configuration to expose the subagent, or `null` to omit it from the parent's too
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.research === true
-        ? defineAgent({
-            description: "Investigate ambiguous questions before the parent responds.",
-            model: "anthropic/claude-opus-5.5",
-          })
-        : null,
-  },
-});
-```
-
-Resolvers run at `session.started` or `turn.started`; `step.started` is not
-supported for subagents. A nullish result (`null` or `undefined`) removes the
-subagent's description and tool definition from the model-visible surface.
-The subagent's filesystem manifest is always compiled; a non-nullish result injects
-the returned agent configuration when the child runs.
-
-Packaging controls must be available before the resolver runs. Put them on
-`defineDynamic`, rather than the `defineAgent` returned by an event handler:
-
-```ts
-export default defineDynamic({
-  build: { externalDependencies: ["native-package"] },
-  events: {
-    "session.started": () =>
-      defineAgent({
-        description: "Use a native package when handling delegated work.",
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes.role === "researcher"
+    ? defineAgent({
+        description: "Investigate ambiguous questions before the parent responds.",
         model: "anthropic/claude-opus-5.5",
-      }),
-  },
+      })
+    : null,
+);
+```
+
+eve evaluates the subagent before each parent model call. A nullish result (`null` or `undefined`)
+removes the subagent's description and tool definition from the model-visible
+surface. The subagent's filesystem manifest is always compiled; a non-nullish
+result injects the returned agent configuration when the child runs.
+
+Packaging controls must be available at compile time. `defineDynamic` takes only a function;
+put packaging configuration on the root agent instead:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  build: { externalDependencies: ["native-package"] },
 });
 ```
 
-The compiler applies `build.externalDependencies` while bundling every authored
-module in that dynamic subagent.
+The root's external dependencies apply when bundling subagent modules too.
 See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
-scope precedence, failure behavior, and the dispatch-time guard.
+when eve evaluates a subagent, failure behavior, and the dispatch-time guard.
 
 Minimum files:
 

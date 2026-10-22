@@ -5,7 +5,6 @@ vi.mock("#ai/decide.js", () => ({ decide }));
 
 import type { ApprovalContext } from "#approval/definition.js";
 import { always, auto, never, once } from "#tools/approval/policies.js";
-import { readDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
   return {
@@ -30,14 +29,8 @@ describe("dynamic tool approval helpers", () => {
     ["always", always(), "user-approval"],
     ["never", never(), "not-applicable"],
     ["once", once(), { type: "user-approval" }],
-  ] as const)("gives %s a stable replay descriptor", async (_name, policy, expected) => {
-    const reference = readDurableDynamicCallback(policy);
-    expect(reference?.callback).toBeTypeOf("function");
-    expect(reference?.closure).toEqual({});
-
-    expect(await reference!.callback(reference!.closure, approvalContext() as never)).toEqual(
-      expected,
-    );
+  ] as const)("%s returns its fixed decision", async (_name, policy, expected) => {
+    expect(await policy(approvalContext())).toEqual(expected);
   });
 
   it.each([
@@ -88,46 +81,12 @@ describe("dynamic tool approval helpers", () => {
     );
   });
 
-  it("replays automatic review with the saved model and criteria", async () => {
-    decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
-    const original = readDurableDynamicCallback(
-      auto({
-        model: "original-reviewer",
-        instructions: "Review Alice's notes.",
-        criteria: { clear: "Within Alice's policy." },
-      }),
-    )!;
-    const rebound = readDurableDynamicCallback(
-      auto({
-        model: "current-reviewer",
-        instructions: "Review Bob's notes.",
-        criteria: { clear: "Within Bob's policy." },
-      }),
-    )!;
-    await rebound.callback(
-      JSON.parse(JSON.stringify(original.closure)),
-      approvalContext() as never,
-    );
-    expect(decide).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "original-reviewer",
-        questions: {
-          permission: expect.objectContaining({
-            instructions: "Review Alice's notes.",
-            criteria: expect.objectContaining({ clear: "Within Alice's policy." }),
-          }),
-        },
-      }),
-    );
-  });
-
   it("accepts another decision model", async () => {
     decide.mockResolvedValueOnce({ answers: { permission: { choice: "clear" } } });
     const model = { modelId: "custom", provider: "test", specificationVersion: "v4" } as never;
     const context = approvalContext();
 
     const policy = auto({ model });
-    expect(readDurableDynamicCallback(policy)).toBeUndefined();
     await expect(policy(context)).resolves.toBe("approved");
     expect(decide).toHaveBeenCalledWith(expect.objectContaining({ model }));
   });

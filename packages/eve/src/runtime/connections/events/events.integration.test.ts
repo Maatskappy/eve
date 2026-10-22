@@ -180,7 +180,6 @@ beforeEach(async () => {
     graph,
     moduleMap,
     resolvedAgent: root.agent,
-    hookRegistry: root.hookRegistry,
     subagentRegistry: root.subagentRegistry,
     toolRegistry: root.toolRegistry,
     turnAgent: root.turnAgent,

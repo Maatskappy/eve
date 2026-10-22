@@ -30,6 +30,7 @@ import {
   type Interaction,
 } from "#protocol/session-projection/reader.js";
 import type { Answer } from "#shared/input.js";
+import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -335,7 +336,8 @@ export class Conversation {
     for (const [id, pending] of this.#pendingAnswers) {
       if (
         pending.deliveryId !== undefined &&
-        this.view.deliveries[pending.deliveryId] !== undefined
+        (this.view.deliveries[pending.deliveryId] !== undefined ||
+          this.view.deliveries[answersDeliveryId(pending.deliveryId)] !== undefined)
       ) {
         this.#pendingAnswers.delete(id);
         this.#answersChanged();

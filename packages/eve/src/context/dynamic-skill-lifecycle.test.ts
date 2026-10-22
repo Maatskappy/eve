@@ -370,7 +370,35 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.writes).toHaveLength(6);
   });
 
-  it("removes files when a package is withdrawn or loses its supporting files", async () => {
+  it("removes files when a package is withdrawn", async () => {
+    const { ctx, sandbox } = createCtx();
+    let result: SkillPackageDefinition | null = makeSkill("Policy", "# Policy", { "a.md": "A" });
+    const resolver = createResolver("policy", () => result);
+
+    await dispatch(ctx, resolver);
+    result = null;
+    await dispatch(ctx, resolver);
+
+    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`, `${SKILL_ROOT}/policy`]);
+    expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(false);
+    expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+  });
+
+  it("keeps files when a package loses its supporting files", async () => {
+    const { ctx, get, sandbox } = createCtx();
+    let result = makeSkill("Policy", "# Policy", { "a.md": "A" });
+    const resolver = createResolver("policy", () => result);
+
+    await dispatch(ctx, resolver);
+    result = makeSkill("Policy", "# Inline policy");
+    await dispatch(ctx, resolver);
+
+    expect(get).toHaveBeenCalledOnce();
+    expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
+    expect(sandbox.files.get(`${SKILL_ROOT}/policy/a.md`)).toBe("A");
+  });
+
+  it("removes kept files when a package that lost its supporting files is withdrawn", async () => {
     const { ctx, sandbox } = createCtx();
     let result: SkillPackageDefinition | null = makeSkill("Policy", "# Policy", { "a.md": "A" });
     const resolver = createResolver("policy", () => result);
@@ -378,14 +406,12 @@ describe("dynamic skill supporting files", () => {
     await dispatch(ctx, resolver);
     result = makeSkill("Policy", "# Inline policy");
     await dispatch(ctx, resolver);
+    result = null;
+    await dispatch(ctx, resolver);
 
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`, `${SKILL_ROOT}/policy`]);
     expect(sandbox.files.has(`${SKILL_ROOT}/policy/a.md`)).toBe(false);
     expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
-
-    result = null;
-    await dispatch(ctx, resolver);
-    expect(sandbox.removedPaths).toHaveLength(2);
   });
 
   it("does not remove withdrawn files from a sandbox that never received them", async () => {

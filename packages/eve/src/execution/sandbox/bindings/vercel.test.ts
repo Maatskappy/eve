@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
+import { writeSandboxFiles } from "#shared/sandbox-write-files.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import { createVercelSandbox as createVercelImplementation } from "#execution/sandbox/bindings/vercel.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
@@ -72,7 +73,13 @@ function createMockSandbox(input: {
         command.cmd === "realpath"
           ? {
               ...createMockCommandResult(),
-              stdout: vi.fn().mockResolvedValue(`${command.args?.at(-1) ?? ""}\n`),
+              // `realpath -m -z -- <paths...>` ends each path with NUL.
+              stdout: vi.fn().mockResolvedValue(
+                (command.args ?? [])
+                  .slice(3)
+                  .map((path) => `${path}\0`)
+                  .join(""),
+              ),
             }
           : createMockCommandResult(),
       ),
@@ -455,7 +462,7 @@ describe("createVercelSandbox", () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce({
       ...createMockCommandResult(),
-      stdout: vi.fn().mockResolvedValue("/workspace/repository/agent/instructions.md\n"),
+      stdout: vi.fn().mockResolvedValue("/workspace/repository/agent/instructions.md\0"),
     });
 
     await handle.sandbox.writeTextFile({
@@ -464,7 +471,7 @@ describe("createVercelSandbox", () => {
     });
 
     expect(sessionSandbox.runCommand).toHaveBeenLastCalledWith({
-      args: ["-m", "--", "/source/instructions.md"],
+      args: ["-m", "-z", "--", "/source/instructions.md"],
       cmd: "realpath",
       signal: undefined,
     });
@@ -474,6 +481,38 @@ describe("createVercelSandbox", () => {
           content: Buffer.from("updated instructions\n"),
           path: "/workspace/repository/agent/instructions.md",
         },
+      ],
+      { signal: undefined },
+    );
+  });
+
+  it("writes a batch of files with one realpath call and one upload", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    vi.mocked(sessionSandbox.runCommand).mockClear();
+
+    await writeSandboxFiles(handle.sandbox, {
+      files: [
+        { content: Buffer.from("A"), path: "/home/agent/.agents/skills/policy/a.md" },
+        { content: Buffer.from("B"), path: "skills/policy/b notes.md " },
+      ],
+    });
+
+    expect(sessionSandbox.runCommand).toHaveBeenCalledOnce();
+    expect(sessionSandbox.runCommand).toHaveBeenCalledWith({
+      args: [
+        "-m",
+        "-z",
+        "--",
+        "/home/agent/.agents/skills/policy/a.md",
+        "/workspace/skills/policy/b notes.md ",
+      ],
+      cmd: "realpath",
+      signal: undefined,
+    });
+    expect(sessionSandbox.writeFiles).toHaveBeenLastCalledWith(
+      [
+        { content: Buffer.from("A"), path: "/home/agent/.agents/skills/policy/a.md" },
+        { content: Buffer.from("B"), path: "/workspace/skills/policy/b notes.md " },
       ],
       { signal: undefined },
     );

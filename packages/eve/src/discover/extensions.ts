@@ -1,8 +1,10 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
+  droppedExtensionCapabilityReason,
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
   findUnsupportedExtensionCapabilities,
+  type UnsupportedExtensionCapability,
   parseExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
@@ -10,6 +12,7 @@ import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
 import { type ProjectSource, readPackageJsonName } from "#discover/project-source.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   parseBuiltInExtensionPackageRoots,
   parseExtensionPackageRoots,
@@ -209,7 +212,7 @@ export async function locateExtensionMount(input: {
       diagnostics: unsupportedCapabilities.map((unsupported) =>
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-          message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
+          message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. ${incompatibleCapabilityRemedy(unsupported)}`,
           sourcePath: compatibilityPath,
         }),
       ),
@@ -343,6 +346,19 @@ export async function locateExtensionMountPackage(input: {
     },
     diagnostics: [],
   };
+}
+
+/** An older contract needs a rebuilt extension; only a newer one needs a newer eve. */
+function incompatibleCapabilityRemedy(unsupported: UnsupportedExtensionCapability): string {
+  if (!unsupported.supportedVersions.some((version) => version > unsupported.requiredVersion))
+    return `Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`;
+  const eve = `eve ${resolveInstalledPackageInfo().version} or later`;
+  const dropped = droppedExtensionCapabilityReason(
+    unsupported.capability,
+    unsupported.requiredVersion,
+  );
+  const reason = dropped === undefined ? "" : `${dropped} `;
+  return `${reason}Rebuild the extension with ${eve}, or install a compatible extension release.`;
 }
 
 function formatSupportedVersions(versions: readonly number[]): string {

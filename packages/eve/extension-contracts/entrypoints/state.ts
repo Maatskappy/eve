@@ -1,5 +1,6 @@
 export {
-  type Session,
+  type SessionInfo,
+  type HistoryMessage,
   type SessionAuth,
   type SessionAuthContext,
   type SessionContext,

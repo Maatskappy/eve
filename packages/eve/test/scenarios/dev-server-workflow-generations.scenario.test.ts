@@ -92,7 +92,7 @@ function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): s
 
 describe("eve dev server workflow generations", () => {
   it(
-    "retries an active child Workflow on its selected generation after promotion",
+    "recovers an interrupted inline turn after promotion and uses the new generation in a fresh session",
     async () => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -112,6 +112,10 @@ describe("eve dev server workflow generations", () => {
           createGenerationMarkerToolSource("generation-two", false),
         );
         await writeFile(
+          join(app.appRoot, "agent", "tools", "get_next_marker.ts"),
+          createGenerationMarkerToolSource("generation-two", false),
+        );
+        await writeFile(
           join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
@@ -121,18 +125,25 @@ describe("eve dev server workflow generations", () => {
         await writeFile(crashWorkerPath, "crash");
         const firstResult = await withinDeadline(
           firstTurn,
-          `Timed out waiting for the selected-generation retry.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+          `Timed out waiting for the interrupted turn to settle.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
-        expect(readCompletedMessages(firstResult.events)).toContain("generation-one");
-        // Providers are installed once by the active host, while durable tool
-        // code can retry from the generation that originally selected it.
-        expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-two");
+        // The crashed call never runs again; the model reads that it may have, and calls again.
+        expect(
+          firstResult.events.flatMap((event) =>
+            event.type === "call.settled" ? [event.data.outcome] : [],
+          ),
+        ).toEqual(["abandoned", "completed"]);
+        expect(firstResult.events.filter((event) => event.type === "turn.settled")).toMatchObject([
+          { data: { outcome: "completed" } },
+        ]);
+        expect(firstResult.events.filter((event) => event.type === "session.ended")).toEqual([]);
 
         const secondResult = await sendDevelopmentMessage({
-          message: "Use get_marker.",
-          session: firstResult.session,
+          message: "Use get_next_marker.",
+          session: createDevelopmentSessionState(),
           serverUrl: server.url,
         });
+        expect(secondResult.session.sessionId).not.toBe(firstResult.session.sessionId);
         expect(readCompletedMessages(secondResult.events)).toContain("generation-two");
         expect(readCompletedMessages(secondResult.events)).toContain("instrumentation-two");
       } finally {
@@ -190,7 +201,7 @@ describe("eve dev server workflow generations", () => {
           body: JSON.stringify({ reason: "Start a new conversation after rebuilding" }),
           signal: AbortSignal.timeout(10_000),
         });
-        expect(reset.status, await reset.text()).toBe(200);
+        expect(reset.status, await reset.text()).toBe(202);
       } finally {
         await server.stop();
       }
@@ -204,10 +215,10 @@ function readCompletedMessages(
 ): string {
   return events
     .flatMap((event) => {
-      if (event.type !== "message.completed" || !isRecord(event.data)) {
+      if (event.type !== "content.completed" || !isRecord(event.data)) {
         return [];
       }
-      return typeof event.data.message === "string" ? [event.data.message] : [];
+      return typeof event.data.value === "string" ? [event.data.value] : [];
     })
     .join("\n");
 }

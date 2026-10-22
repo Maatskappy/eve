@@ -21,13 +21,7 @@ export const DEPLOYED_SELF_MODIFICATION_CONFIG_PATH =
 
 const runFile = promisify(execFile);
 const GENERATED_MARKER = "// eve-self-modification: generated-v1";
-const LEGACY_LOCAL_CONFIG =
-  'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n';
 const DEFAULT_EXTENSION = renderLocalSelfModificationExtension();
-const LEGACY_DEFAULT_EXTENSION = DEFAULT_EXTENSION.replace(
-  '"eve/self-modification/local"',
-  '"eve/self-modification"',
-);
 
 export interface SelfModificationSetupValues {
   readonly branch: string;
@@ -83,7 +77,7 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
     )
     .join("\n");
   const httpCase = values.vercelBackend
-    ? `      case "http": {
+    ? `      case "channel:eve": {
         const projectId = process.env.VERCEL_PROJECT_ID;
         return (
           projectId !== undefined &&
@@ -99,7 +93,7 @@ export function renderSelfModificationConfig(values?: SelfModificationSetupValue
   const switchCases = `${httpCase}${channelCases}`;
   const credentialErrorMessage = `Self-modification could not obtain a GitHub credential from Vercel Connect for ${values.connector}. Install and attach the configured GitHub connector to this Vercel project, install the managed GitHub App for the configured repository, then retry.`;
   const body = `import { getToken } from "@vercel/connect";
-import selfModification from "eve/self-modification/remote";
+import selfModification from "eve/extensions/self-modification/remote";
 
 export default selfModification({
   source: {
@@ -147,13 +141,7 @@ export function classifySelfModificationConfig(
   source: string | undefined,
 ): "missing" | "local" | "generated" | "authored" {
   if (source === undefined) return "missing";
-  if (
-    source === DEFAULT_EXTENSION ||
-    source === LEGACY_DEFAULT_EXTENSION ||
-    source === LEGACY_LOCAL_CONFIG
-  ) {
-    return "local";
-  }
+  if (source === DEFAULT_EXTENSION) return "local";
   const [marker, ...body] = source.split("\n");
   const match = /^\/\/ eve-self-modification: generated-v1 digest:([a-f0-9]{64})$/u.exec(
     marker ?? "",

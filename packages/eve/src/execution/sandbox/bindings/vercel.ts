@@ -626,7 +626,7 @@ function createHandle(input: {
         createOptions: input.createOptions,
         loadDeleteSandboxModule: input.loadDeleteSandboxModule,
         sandbox,
-        signal: options?.abortSignal,
+        signal: options?.signal,
       });
     },
     async onSandboxStop() {
@@ -652,7 +652,7 @@ function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSan
         cwd: options.workingDirectory ?? WORKSPACE_ROOT,
         detached: true,
         env: options.env,
-        signal: options.abortSignal,
+        signal: options.signal,
       });
       return adaptMultiplexedCommandToSandboxProcess({
         command,
@@ -664,22 +664,24 @@ function createVercelInternalSandboxSession(sandbox: VercelSandbox): InternalSan
     },
     async writeFile(options: SandboxWriteFileOptions) {
       const files = [{ content: await streamToBuffer(options.content), path: options.path }];
-      await sandbox.writeFiles(await resolveVercelWriteFiles(sandbox, files, options.abortSignal), {
-        signal: options.abortSignal,
+      await sandbox.writeFiles(await resolveVercelWriteFiles(sandbox, files, options.signal), {
+        signal: options.signal,
       });
     },
     async writeFiles(options: SandboxWriteFilesOptions) {
       if (options.files.length === 0) return;
       await sandbox.writeFiles(
-        await resolveVercelWriteFiles(sandbox, options.files, options.abortSignal),
-        { signal: options.abortSignal },
+        await resolveVercelWriteFiles(sandbox, options.files, options.signal),
+        {
+          signal: options.signal,
+        },
       );
     },
     async removePath(options: SandboxRemovePathOptions) {
       await sandbox.fs.rm(options.path, {
         force: options.force,
         recursive: options.recursive,
-        signal: options.abortSignal,
+        signal: options.signal,
       });
     },
   };

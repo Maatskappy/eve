@@ -7,7 +7,6 @@ import {
 } from "#execution/tool-session/sandbox.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { DockerSandboxEnvironmentOptions } from "#public/sandbox/docker-sandbox.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import type { VercelSandboxCreateOptions } from "#public/sandbox/vercel-sandbox.js";
 import {
   type SandboxSessionEndWithArtifact,
@@ -35,7 +34,10 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export interface DefaultSandboxEnvironmentOptions {
   readonly docker?: DockerSandboxEnvironmentOptions;
-  readonly justBash?: JustBashSandboxCreateOptions;
+  readonly justBash?: {
+    readonly autoInstall?: boolean;
+    readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
+  };
   readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
   readonly vercel?: VercelSandboxCreateOptions;
 }
@@ -92,6 +94,14 @@ export const DefaultSandbox = defineSandboxProvider<
 >({
   name: "default",
   environment(options = {}) {
+    if (
+      options.justBash &&
+      Object.keys(options.justBash).some((key) => key !== "autoInstall" && key !== "prepare")
+    ) {
+      throw new Error(
+        "DefaultSandbox justBash settings support autoInstall and prepare only. Use JustBashSandbox.environment() for customCommands or filesystem.",
+      );
+    }
     // Created on first use, so a hosted bundle never constructs the local providers it prunes.
     const providers = new Map<SelectedProvider, SandboxProviderRuntime>();
     const provider = (name: SelectedProvider) => {

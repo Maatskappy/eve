@@ -18,13 +18,13 @@ export interface MaterializableSkillPackage {
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly license?: string;
-  readonly markdown: string;
+  readonly content: string;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly name: string;
 }
 
-export function stripSkillFrontmatter(markdown: string): string {
-  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+export function stripSkillFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
 /** Content hash over every package file, including `SKILL.md`. */
@@ -45,7 +45,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
 
   const files: NormalizedSkillPackageFile[] = [
     {
-      content: Buffer.from(input.markdown, "utf8"),
+      content: Buffer.from(input.content, "utf8"),
       relativePath: "SKILL.md",
     },
   ];
@@ -65,7 +65,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
     description: input.description,
     files,
     license: input.license,
-    markdown: input.markdown,
+    content: input.content,
     metadata: input.metadata === undefined ? undefined : { ...input.metadata },
     name: input.name,
   };

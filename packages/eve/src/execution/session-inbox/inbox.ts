@@ -1,5 +1,8 @@
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  SESSION_INBOX_SESSION_ID_METADATA_KEY,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
 
@@ -329,7 +332,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       token,
       hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>({
         token: sessionInboxHookToken(token),
-        metadata: { sessionId },
+        metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
         ...(force && { experimental_force: true }),
       }),
       stopping: false,

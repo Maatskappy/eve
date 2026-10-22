@@ -605,6 +605,48 @@ describe("dynamic skill supporting files", () => {
     expect(sandbox.removedPaths).toEqual([`${SKILL_ROOT}/policy`]);
   });
 
+  it("drains sibling writes before failed preparation can be followed by withdrawal", async () => {
+    const { access, ctx, sandbox } = createCtx();
+    let enabled = true;
+    const resolver = createResolver("policy", () =>
+      enabled ? makeSkill("Policy", "# Policy", { "fail.md": "Fail", "rules.md": "Rules" }) : null,
+    );
+    await dispatch(ctx, resolver);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const write = sandbox.session.writeBinaryFile.bind(sandbox.session);
+    vi.spyOn(sandbox.session, "writeBinaryFile").mockImplementation(async (input) => {
+      if (input.path.endsWith("/fail.md")) throw new Error("disk full");
+      if (input.path.endsWith("/rules.md")) {
+        started.resolve();
+        await release.promise;
+      }
+      await write(input);
+    });
+    vi.useFakeTimers();
+    let settled = false;
+    const pending = access.get().finally(() => {
+      settled = true;
+    });
+    const failure = expect(pending).rejects.toThrow("disk full");
+    try {
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      release.resolve();
+      await failure;
+      enabled = false;
+      await dispatch(ctx, resolver);
+      await access.get();
+      expect(sandbox.files.has(`${SKILL_ROOT}/policy/rules.md`)).toBe(false);
+      expect(ctx.get(DynamicSkillSandboxKey)).toEqual({});
+    } finally {
+      release.resolve();
+      await failure;
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["remove", "retry"],
     ["write", "retry"],

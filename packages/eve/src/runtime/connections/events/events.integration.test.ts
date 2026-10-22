@@ -6,6 +6,8 @@ import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-life
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { sessionStartedForResolvers } from "#harness/session-machine/resolver-events.js";
 import { connectionEventManagementEntry } from "#execution/catalog/connection-event-management.js";
+import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import { CALL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import * as workflowRuntime from "#execution/workflow-runtime.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
@@ -778,6 +780,8 @@ it("ends the watch after its terminated callback", async () => {
   await dispatch(message);
   expect(terminated).toHaveBeenCalledTimes(1);
   expect(retired.has(initial.binding!.id)).toBe(true);
+  const { retireConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
+  expect(retireConnectionEventOwner).toHaveBeenCalledWith(initial.binding!.id, "sub_0");
   expect(callback).not.toHaveBeenCalled();
 });
 
@@ -1039,7 +1043,10 @@ it("does not let a sampled webhook override the session's saved sampling decisio
 async function dynamicWatch(
   resolver: (
     context: DynamicConnectionResolveContext,
-  ) => ReturnType<typeof defineMcpClientConnection> | null,
+  ) =>
+    | ReturnType<typeof defineMcpClientConnection>
+    | null
+    | Promise<ReturnType<typeof defineMcpClientConnection> | null>,
 ) {
   const { manifest, moduleMap } = await compileFromMemory({
     model: "openai/gpt-5.4",
@@ -1166,7 +1173,7 @@ it("retries a failed account lookup without retiring the watch", async () => {
   expect(callback).toHaveBeenCalledOnce();
 });
 
-it("keeps opted-in saved-watch management available only to its creator", async () => {
+it("keeps opted-in saved-watch management available to its creator in a fresh empty session", async () => {
   const base = eventDefinition();
   const definition = defineMcpClientConnection({
     ...base,
@@ -1175,7 +1182,8 @@ it("keeps opted-in saved-watch management available only to its creator", async 
       management: "creator",
     },
   });
-  await dynamicWatch(() => definition);
+  let selected: typeof definition | null = definition;
+  await dynamicWatch(() => selected);
   const result = await watch();
   const { id } = result;
   expect(result).toMatchObject({
@@ -1184,8 +1192,24 @@ it("keeps opted-in saved-watch management available only to its creator", async 
       stop: "eve__event_watch_stop",
     },
   });
-  const stop = connectionEventManagementEntry("eve__event_watch_stop")!;
-  const get = connectionEventManagementEntry("eve__event_watch_get")!;
+  selected = null;
+  ctx.set(SessionIdKey, "new-session");
+  await dispatchDynamicConnectionEvent({
+    ctx,
+    event: sessionStartedForResolvers(),
+    resolvers: ctx.require(BundleKey).resolvedAgent.dynamicConnectionResolvers!,
+  });
+  const catalog = buildStepCatalog({ agentTools: new Map(), ctx, endsTurn: true, session: {} });
+  expect(catalog.connections).toHaveLength(0);
+  expect(catalog.advertised.has(CALL_TOOL_NAME)).toBe(true);
+  const stop = catalog.resolve({
+    toolName: CALL_TOOL_NAME,
+    input: { name: "eve__event_watch_stop", input: { id } },
+  })!.definition;
+  const get = catalog.resolve({
+    toolName: CALL_TOOL_NAME,
+    input: { name: "eve__event_watch_get", input: { id } },
+  })!.definition;
   savedGet.mockResolvedValue(handlers.get(id)!.subscription);
   setUser("bob");
   await expect(
@@ -1224,6 +1248,55 @@ it("does not execute queued delivery after stopping is durable", async () => {
   await dispatch(payload());
   expect(callback).not.toHaveBeenCalled();
 });
+
+it.each(["stopping", "ended", "replaced"])(
+  "does not start a callback when the watch is %s during account resolution",
+  async (state) => {
+    const definition = eventDefinition();
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let paused = false;
+    await dynamicWatch(async () => {
+      if (paused) {
+        entered.resolve();
+        await resume.promise;
+      }
+      return definition;
+    });
+    const { id } = await watch();
+    initial = { ...initial, serializedContext: serializeContext(ctx) };
+    paused = true;
+    const message = payload();
+    const { event: _event, ...envelope } = message.delivery as Extract<
+      typeof message.delivery,
+      { event: unknown }
+    >;
+    const running = dispatch({
+      ...message,
+      delivery: {
+        ...envelope,
+        control: { type: "terminated", error: { code: 0, message: "Ended" } },
+      },
+    });
+    await entered.promise;
+    const { findConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
+    if (state === "ended") handlers.delete(id);
+    else if (state === "replaced") {
+      const previous = handlers.get(id)!;
+      handlers.set(id, { ...previous, subscription: { ...previous.subscription!, id: "sub_new" } });
+    } else
+      vi.mocked(findConnectionEventOwner).mockResolvedValueOnce({
+        owner: initial.binding!,
+        subscription: handlers.get(id)!.subscription,
+        stopping: true,
+      });
+    resume.resolve();
+    await running;
+    expect(callback).not.toHaveBeenCalled();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(retired.size).toBe(0);
+  },
+);
 
 it("isolates two users' dynamic watches with the same connection name", async () => {
   const original = eventDefinition();

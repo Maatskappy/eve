@@ -366,6 +366,9 @@ a watch-listing API.
 Stop existing watches before deleting the last dynamic resolver from a deployment,
 since that also removes its receiver route. Returning `null` instead keeps the
 route available to retire watches when deliveries arrive.
+It also keeps `eve__tool` available in fresh sessions for saved-watch management.
+For agents with only static connections, stop watches before removing their last
+connection: fresh sessions with no deferred capabilities do not expose `eve__tool`.
 
 The watch records stopping before upstream cleanup and rejects subsequent
 deliveries while cleanup retries. A callback already running may finish.

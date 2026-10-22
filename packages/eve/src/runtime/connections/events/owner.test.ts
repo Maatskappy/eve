@@ -138,6 +138,8 @@ it("asks a running watch to retire, and reports one that has ended", async () =>
   holdWatch();
   expect(await retireConnectionEventOwner(binding.id)).toBe(true);
   expect(resumed).toHaveBeenCalledExactlyOnceWith(token, { kind: "retire" });
+  expect(await retireConnectionEventOwner(binding.id, "sub_1")).toBe(true);
+  expect(resumed).toHaveBeenLastCalledWith(token, { kind: "retire", subscriptionId: "sub_1" });
 });
 
 it("reports a subscribe still in flight when the caller stops waiting, then its later result", async () => {

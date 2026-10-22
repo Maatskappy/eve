@@ -138,8 +138,13 @@ export async function findConnectionEventOwner(
 }
 
 /** Asks the watch's run to unsubscribe and end; the run repeats unsubscribe until Connect finishes. */
-export async function retireConnectionEventOwner(bindingId: string): Promise<boolean> {
-  return resumeWatch(bindingId, { kind: "retire" });
+export async function retireConnectionEventOwner(
+  bindingId: string,
+  subscriptionId?: string,
+): Promise<boolean> {
+  const message: { kind: "retire"; subscriptionId?: string } = { kind: "retire" };
+  if (subscriptionId !== undefined) message.subscriptionId = subscriptionId;
+  return resumeWatch(bindingId, message);
 }
 
 async function resumeWatch(

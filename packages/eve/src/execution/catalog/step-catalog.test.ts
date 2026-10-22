@@ -168,14 +168,13 @@ describe("buildStepCatalog", () => {
       ]);
     });
 
-    it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", () => {
+    it("gives an agent no catalog tools for empty dynamic skill and tool results", () => {
       const bundle = catalogBundle({ dynamicSubagents: ["helper"] });
       const ctx = new ContextContainer();
       ctx.set(BundleKey, {
         ...bundle,
         resolvedAgent: {
           ...bundle.resolvedAgent,
-          dynamicConnectionResolvers: [{}],
           dynamicSkillResolvers: [{}],
           dynamicToolResolvers: [{}],
         } as never,

@@ -20,10 +20,8 @@ export async function handleConnectionEventRequest(
   return traceConnectionEventRequest(request, async (span) => {
     if (request.method !== "POST") return new Response(null, { status: 405 });
     const connectionName = input.connectionName ?? new URL(request.url).pathname.split("/").at(-1)!;
-    if (
-      !/^[a-z][a-z0-9-]*(?:__[a-z][a-z0-9-]*)*$/.test(connectionName) ||
-      connectionName.length > 256
-    )
+    // Extension namespaces also allow uppercase letters and underscores.
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,255}$/.test(connectionName))
       return new Response(null, { status: 404 });
     let stage = "load";
     let identifiers: Record<string, string> = {};

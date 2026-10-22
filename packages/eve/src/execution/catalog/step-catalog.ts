@@ -74,6 +74,8 @@ interface CatalogTools extends OfferedCatalogTools {
  * `eve__search` with anything it could find, which is whatever `eve__tool`
  * calls plus deferred skills. What a step reaches includes what its dynamic
  * resolvers returned, so a resolver that returns only listed tools adds none.
+ * Root agents with dynamic connections keep calls available for saved watches,
+ * even when their account resolvers now return nothing.
  * Once a session's tool list offers a catalog tool it keeps it, so the tool
  * list changes at most once for each and never drops one that earlier calls
  * named. A session that reaches none of these has no catalog tools, and pays
@@ -84,13 +86,15 @@ function catalogToolsFor(input: {
   readonly deferred: ReadonlyMap<string, HarnessToolDefinition>;
   readonly offered: OfferedCatalogTools | undefined;
   readonly skills: ReadonlyMap<string, CatalogSkill>;
+  readonly watchManagement: boolean;
 }): CatalogTools {
   const { offered } = input;
   const skills = [...input.skills.values()];
   const connections = offered?.connections === true || input.connections.length > 0;
   const searchableSkills =
     offered?.searchableSkills === true || skills.some((skill) => skill.deferred);
-  const tools = offered?.tools === true || connections || input.deferred.size > 0;
+  const tools =
+    offered?.tools === true || connections || input.deferred.size > 0 || input.watchManagement;
   return {
     connections,
     search: tools || searchableSkills,
@@ -167,6 +171,10 @@ export function buildStepCatalog(input: {
     deferred,
     offered: input.ctx?.get(OfferedCatalogToolsKey),
     skills,
+    // A retained resolver may return null while its creator still needs to stop a saved watch.
+    watchManagement:
+      input.session.rootSessionId === undefined &&
+      (bundle?.resolvedAgent.dynamicConnectionResolvers?.length ?? 0) > 0,
   });
   const { search: _search, ...offered } = catalogTools;
   const skillLoader = createSkillLoader(skills);

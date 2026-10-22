@@ -184,6 +184,25 @@ it("unsubscribes when stopped, and ends only once Connect finishes cleanup", asy
   expect(world.backoffs).toEqual([5_000, 10_000]);
 });
 
+it("ignores retirement from an earlier subscription that reused the watch id", async () => {
+  const accepted = Promise.withResolvers<void>();
+  world.started.mockImplementationOnce(async () => accepted.resolve());
+  const run = connectionEventWorkflow({ binding, serializedContext: {} });
+  await watching();
+  world.resume(token, { kind: "retire", subscriptionId: "sub_old" });
+  world.resume(token, delivery("sub_1"));
+  expect(
+    await Promise.race([run.then(() => "stopped"), accepted.promise.then(() => "active")]),
+  ).toBe("active");
+  expect(world.stopping).toBe(false);
+  expect(world.unsubscribed).not.toHaveBeenCalled();
+  world.resume(token, { kind: "retire", subscriptionId: "sub_1" });
+  await run;
+  expect(world.unsubscribed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ subscriptionId: "sub_1" }),
+  );
+});
+
 it("keeps the watch through repeated failed unsubscribes until Connect's cleanup completes", async () => {
   let attempts = 0;
   world.unsubscribed.mockImplementation(async () => {

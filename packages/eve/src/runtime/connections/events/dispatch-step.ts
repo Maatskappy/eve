@@ -110,10 +110,18 @@ export async function dispatchConnectionEventStep(input: {
           reason: "binding_unavailable",
         },
       );
-      await retireConnectionEventOwner(input.binding.id);
+      await retireConnectionEventOwner(input.binding.id, delivery.subscriptionId);
     }
     return;
   }
+  // Account resolution can outlast a concurrent stop or completed cleanup.
+  const current = await findConnectionEventOwner(input.binding.id);
+  if (
+    current === undefined ||
+    current.stopping ||
+    current.subscription?.id !== delivery.subscriptionId
+  )
+    return;
   const { binding, connection } = resolved;
   const bundle = ctx.require(BundleKey);
   const { callbacks } = resolved.events;
@@ -162,5 +170,5 @@ export async function dispatchConnectionEventStep(input: {
     },
   );
   if ("control" in delivery && delivery.control.type === "terminated")
-    await retireConnectionEventOwner(binding.id);
+    await retireConnectionEventOwner(binding.id, delivery.subscriptionId);
 }

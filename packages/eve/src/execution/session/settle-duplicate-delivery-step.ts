@@ -2,7 +2,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
 import { admitDeliveries } from "#execution/session/delivery-facts.js";
-import { withSessionStateDelta } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 
 /** A duplicate starts no work, but its distinct receipt must still settle. */

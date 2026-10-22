@@ -207,11 +207,24 @@ Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay i
 
 ## Resuming after a crash
 
-Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. An interrupted step runs again from the checkpoint before it, so model calls in that step can run again.
+
+A step publishes session events as it works, before it saves its checkpoint. When an interrupted step already wrote some, its retry continues the stream after them instead of writing them again:
+
+- A tool call whose start is present in the recovered stream does not run again. The model reads each such call's name, input, and what eve knows of it, such as that it completed but its result was lost, and decides what to call again.
+- What the interrupted attempt left open settles `abandoned`: its model run, unfinished calls, and the approvals or questions it asked. The model asks again if it still needs them.
+- A turn the interrupted attempt already settled stays settled, with its input and reply in history.
+- A clear the interrupted attempt finished still empties history. An unfinished clear or compaction change settles `interrupted`; its control delivery settles `failed` instead of running again. A completed compaction keeps its recorded outcome, but its lost private summary is not reconstructed. The checkpoint history remains available for a later compaction.
+- Hooks and channel handlers do not run again for the events the interrupted attempt wrote. New recovery facts use normal hooks and instrumentation.
+
+A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, or with `STEP_FAILED` when one of its steps fails on every retry. The session stays open for the next message.
+
+Terminal cleanup folds the physical stream tail before closing open work and ending the session. Existing facts retain their positions and outcomes; an already ended session is only closed. The terminal event uses normal channel routing when its context can be restored, or a direct stream write otherwise. Hooks do not run for that terminal publication. A hook interrupted after publication may therefore have completed its side effect, partly completed it, or never run.
+
+These are durable-step retries, not the model provider's retry loop or ordinary tool errors handled within a step. Recovery does not make external effects exactly-once. The SDK acknowledges a stream write when it enters a buffer, not when it becomes durable. A crash can therefore lose a call's start marker after execution begins. A call whose start had not reached the stream when the step was interrupted can run again, a call reported as interrupted may have taken effect, and the model can call a tool again. A world that redelivers a step while its earlier attempt is still running can also run both. Give tools with irreversible effects a stable operation ID, or have them check whether the action already happened.
 
 With `experimental.workflow.modelCallsPerStep` greater than `1`, an
-interrupted Workflow step can also repeat earlier model calls and inline tool
-executions from the same batch. Approval, input, and blocking coordination
+interrupted step can repeat earlier model calls from the same batch. Approval, input, and blocking coordination
 boundaries still force a checkpoint before eve waits.
 
 Steering can interrupt pending model generation before assistant output begins.

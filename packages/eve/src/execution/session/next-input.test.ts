@@ -8,7 +8,8 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
 vi.mock("../route-child-delivery.js", () => ({

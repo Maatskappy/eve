@@ -4,7 +4,7 @@ import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
-import { runStep } from "#context/run-step.js";
+import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
 import { ConnectionRegistryKey, connectionProvider } from "#context/providers/connection.js";
 import { sandboxProvider } from "#context/providers/sandbox.js";
@@ -39,6 +39,8 @@ import { isBetweenTurns, storedProjection, turnPosition } from "#harness/session
 import {
   currentProjection,
   enterSessionProjection,
+  enterSessionProjectionAt,
+  nextLinePosition,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
@@ -53,11 +55,17 @@ import type {
   TurnStepResult,
 } from "#execution/session/turn-step-types.js";
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
-import { withSessionStateDelta } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
   checksSessionEvents,
+  foldOrphanedLines,
   openSessionEventPublisher,
+  readOrphanedLines,
 } from "#execution/publish-session-events.js";
+import {
+  readInterruptedAttempt,
+  recoverInterruptedStep,
+} from "#execution/session/interrupted-step.js";
 import { stepDisagreement } from "#execution/session/step-decision-check.js";
 import { createLogger } from "#internal/logging.js";
 import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
@@ -131,6 +139,21 @@ async function runSessionStepBody(
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   enterSessionProjection(ctx, durableSession.state);
+  // An earlier attempt may have published past the checkpoint. The step recovers from what it
+  // wrote instead of running the model and tools again, so every position and id follows it.
+  const orphaned = await readOrphanedLines({
+    sessionId: durableSession.sessionId,
+    position: nextLinePosition(ctx),
+    sessionWritable: input.sessionWritable,
+    always: input.recover !== undefined,
+  });
+  const interrupted =
+    orphaned.length > 0 || input.recover !== undefined
+      ? readInterruptedAttempt(nextLinePosition(ctx), orphaned)
+      : undefined;
+  if (orphaned.length > 0) {
+    enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
+  }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
@@ -319,7 +342,7 @@ async function runSessionStepBody(
         sessionStarted: turnPosition(currentProjection(ctx)).sessionStarted,
         channelKind: ctx.get(ChannelInstrumentationKey)?.kind ?? getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
-        admitted: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId] !== undefined,
+        status: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId]?.status,
         payloads: delivered,
       });
       if (accepted > 0 && pendingHistory.length > 0) {
@@ -389,9 +412,9 @@ async function runSessionStepBody(
 
     /** Whether the admission changed the session: its history or its sandbox. */
     let admissionChangedSession = false;
-    /** The admission commit: the session's start if it hasn't, then each delivery admitted. */
-    const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
-      if (admission === undefined || admission.facts.length === 0) return;
+    /** The admission's facts: the session's start if it hasn't, then each delivery admitted. */
+    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): SessionEvent[] => {
+      if (admission === undefined || admission.facts.length === 0) return [];
       const facts: SessionEvent[] = [];
       if (!turnPosition(currentProjection(ctx)).sessionStarted) {
         const parent = ctx.get(ParentSessionKey);
@@ -407,6 +430,12 @@ async function runSessionStepBody(
           }),
         );
       }
+      return [...facts, ...admission.facts];
+    };
+    /** The admission commit, with the session's providers its hooks read. */
+    const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
+      const facts = admissionFacts(runtime);
+      if (facts.length === 0) return;
       // The admission commits before the step's framework context exists, and its hooks read
       // the session (`ctx.session`) like every other commit's. The session's start resolves
       // its dynamic connections into a registry, which the step's own scope rebuilds and
@@ -423,7 +452,7 @@ async function runSessionStepBody(
       // Instrumentation hears the admission like any commit, so providers see the session start.
       const publish = instrumentation?.createHandleEvent({ handleEvent }) ?? handleEvent;
       try {
-        await contextStorage.run(ctx, () => publish([...facts, ...admission.facts]));
+        await contextStorage.run(ctx, () => publish(facts));
       } finally {
         if (sandbox !== undefined) {
           const sandboxState = await sandbox.value.captureState();
@@ -484,19 +513,68 @@ async function runSessionStepBody(
     }
 
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
-    try {
-      const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+    let restoration: Promise<void> | undefined;
+    const prepareReactions = (session: HarnessSession): Promise<void> => {
       ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-      const revision = deploymentId
-        ? `deployment:${deploymentId}`
-        : await resolveRuntimeCompiledArtifactsVersionedCacheKey(bundle.compiledArtifactsSource);
-      await contextStorage.run(ctx, () =>
-        restoreReactions(ctx, { abortSignal, conversation: initialSession.history, revision }),
-      );
-    } catch (error) {
-      await instrumentation?.flush();
-      throw error;
+      return (restoration ??= (async () => {
+        try {
+          const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+          const revision = deploymentId
+            ? `deployment:${deploymentId}`
+            : await resolveRuntimeCompiledArtifactsVersionedCacheKey(
+                bundle.compiledArtifactsSource,
+              );
+          await contextStorage.run(ctx, () =>
+            restoreReactions(ctx, { abortSignal, conversation: session.history, revision }),
+          );
+        } catch (error) {
+          await instrumentation?.flush();
+          throw error;
+        }
+      })());
+    };
+    if (interrupted !== undefined) {
+      const recovered = await recoverInterruptedStep({
+        admission: admissionFacts(runtimeIdentity),
+        attempt: interrupted,
+        control:
+          input.input?.control === undefined
+            ? undefined
+            : { delivery: input.input.controlDelivery, kind: input.input.control },
+        ctx,
+        failed: input.recover,
+        publish: async (events, session) => {
+          const scoped = await withContextScope(ctx, session, async (current) => {
+            await prepareReactions(current);
+            const emit = createTurnEventHandler({
+              abortSignal,
+              canCancelTurn: false,
+              conversation: current.history,
+              hookCancellation: new AbortController(),
+              publisher,
+            });
+            const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
+            await publish(events);
+            return { result: undefined, session: current };
+          });
+          return scoped.session;
+        },
+        session: initialSession,
+        stepInput: resolved,
+      }).catch(async (error: unknown) => {
+        await instrumentation?.flush();
+        throw error;
+      });
+      if ("result" in recovered) {
+        await instrumentation?.flush();
+        // The attempt that ended the session may have closed its stream already.
+        if (recovered.result.action === "done") await publisher.writer.close().catch(() => {});
+        return recovered.result;
+      }
+      initialSession = recovered.session;
+      resolved = recovered.stepInput;
     }
+    await prepareReactions(initialSession);
 
     try {
       await publishAdmission(runtimeIdentity);

@@ -39,7 +39,16 @@ async function cancelledWithoutCheckpoint(
     session = deferred.session;
     if (deferred.message !== undefined) preserved = { ...stepInput, message: deferred.message };
   }
-  // A cancellation at step entry lands before the framework providers exist, and staging the
+  return await preserveStoppedTurnMessage(ctx, session, preserved);
+}
+
+/** The session with the message of a step that stopped before the model read it kept in history. */
+export async function preserveStoppedTurnMessage(
+  ctx: ContextContainer,
+  session: HarnessSession,
+  preserved: HarnessStepInput | undefined,
+): Promise<HarnessSession> {
+  // A step stopped at entry stops before the framework providers exist, and staging the
   // message's attachments needs the sandbox.
   if (ctx.get(SandboxKey) === undefined && hasFileParts(preserved?.message)) {
     try {

@@ -1,3 +1,5 @@
+import { getStepMetadata } from "#compiled/@workflow/core/index.js";
+import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
@@ -11,6 +13,7 @@ import { forwardSessionInput } from "#execution/forward-session-input.js";
 import {
   createDurableSessionState,
   readDurableSession,
+  replaceDurableSessionSnapshot,
   type DurableSession,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
@@ -27,6 +30,7 @@ import { announceWaiting } from "#harness/session-machine/waiting.js";
 import { cascade } from "#harness/session-machine/cascade.js";
 import { copyView } from "#protocol/session-projection/fold.js";
 import {
+  advance,
   currentProjection,
   currentView,
   enterSessionProjection,
@@ -36,6 +40,7 @@ import {
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
 import {
+  SESSION_PROJECTION_STATE_KEY,
   storedProjection,
   type SessionView as MachineView,
 } from "#harness/session-machine/view.js";
@@ -51,8 +56,13 @@ import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
-import { encodeLineBytes, type FactPosition } from "#protocol/session-events/envelope.js";
-import { type SessionProjection } from "#protocol/session-projection.js";
+import {
+  encodeLineBytes,
+  type FactPosition,
+  type StoredLine,
+} from "#protocol/session-events/envelope.js";
+import { FACT_CATALOG, isFactType } from "#protocol/session-events/catalog.js";
+import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
 import { sessionEndedFacts } from "#harness/facts.js";
 import { createStreamChecker, type StreamChecker } from "#protocol/session-events/checker.js";
@@ -238,6 +248,12 @@ async function publishInSessionScope<T>(
 ): Promise<{ readonly result: T; readonly session: HarnessSessionBase }> {
   const { ctx } = step;
   enterSessionProjection(ctx, step.durableSession.state);
+  // The step decides from its checkpoint, so a retry writes again what its attempt wrote.
+  const orphaned = await readOrphanedLines({
+    sessionId: step.durableSession.sessionId,
+    position: nextLinePosition(ctx),
+    sessionWritable: step.sessionWritable,
+  });
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
   const hydrated = hydrateDurableSession({
     compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
@@ -262,6 +278,7 @@ async function publishInSessionScope<T>(
     cancelTurn: publication.cancelTurn,
     ctx,
     inputSource: publication.inputSource,
+    orphaned,
     origin: publication.origin,
     sessionWritable: step.sessionWritable,
   });
@@ -358,14 +375,161 @@ export function checksSessionEvents(): boolean {
   return process.env.EVE_DEV === "1";
 }
 
+/** A line an interrupted attempt of the current step wrote after the step's checkpoint. */
+export interface OrphanedLine {
+  readonly line: StoredLine;
+  readonly position: number;
+}
+
+/**
+ * What an interrupted earlier attempt of the running step wrote, read once per attempt: the
+ * attempt's own writes reach the stream only as it completes, so a later read could miss them.
+ * Keyed by the attempt's session writable, which each attempt restores afresh.
+ */
+const interruptedAttempts = new WeakMap<WritableStream<Uint8Array>, readonly OrphanedLine[]>();
+
+/**
+ * The lines an interrupted earlier attempt of this step wrote after the checkpoint: none on a
+ * first attempt, unless `always`, for a step that recovers what a failed step's attempts left.
+ */
+export async function readOrphanedLines(input: {
+  readonly sessionId: string;
+  readonly position: number;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly always?: boolean;
+}): Promise<readonly OrphanedLine[]> {
+  if (input.always !== true && !isRetriedStep()) return [];
+  const { sessionId, sessionWritable, position: first } = input;
+  let lines = interruptedAttempts.get(sessionWritable);
+  if (lines === undefined) {
+    lines = await readLinesFrom(sessionId, first);
+    interruptedAttempts.set(sessionWritable, lines);
+  }
+  return lines.filter(({ position }) => position >= first);
+}
+
+/**
+ * The state a retried step returns, following every line its interrupted attempt wrote. The
+ * retry decides from the same checkpoint and writes the same lines again, so this changes
+ * nothing; if its decisions changed and it wrote fewer, the lines it left still sit on the
+ * stream, and the session folds them instead of writing its next lines over their positions.
+ */
+export function followInterruptedAttempt(
+  sessionWritable: WritableStream<Uint8Array>,
+  state: DurableSessionState,
+): DurableSessionState {
+  const session = readDurableSession(state);
+  const projection = storedProjection(session.state);
+  const unwritten = (interruptedAttempts.get(sessionWritable) ?? []).filter(
+    ({ position }) => position >= projection.view.position,
+  );
+  if (unwritten.length === 0) return state;
+  log.error(
+    "a retried step wrote less than its interrupted attempt; the session follows the stream",
+    {
+      lines: unwritten.length,
+      sessionId: state.sessionId,
+    },
+  );
+  return replaceDurableSessionSnapshot({
+    session: {
+      ...session,
+      state: {
+        ...session.state,
+        [SESSION_PROJECTION_STATE_KEY]: foldOrphanedLines(projection, unwritten),
+      },
+    },
+    state,
+  });
+}
+
+function isRetriedStep(): boolean {
+  try {
+    return getStepMetadata().attempt > 1;
+  } catch (error) {
+    if (error instanceof Error && error.name === "NotInStepContextError") return false;
+    throw error;
+  }
+}
+
+async function readLinesFrom(sessionId: string, first: number): Promise<OrphanedLine[]> {
+  const tail = await readSessionStreamTailIndex(sessionId);
+  if (tail + 1 < first) throw new Error("Session checkpoint is ahead of its stream.");
+  const lines: OrphanedLine[] = [];
+  if (tail < first) return lines;
+  let position = first;
+  for await (const record of streamSessionLines(sessionId, { follow: false, startIndex: first })) {
+    if (record.position > tail) break;
+    if (record.line === undefined || record.position !== position) {
+      throw new Error("Cannot reconcile an unreadable or missing session line.");
+    }
+    lines.push({ line: record.line, position: position++ });
+  }
+  if (position !== tail + 1) throw new Error("Session stream ended before its reported tail.");
+  return lines;
+}
+
+/** The projection with orphaned lines folded in, as if the step had just written them. */
+export function foldOrphanedLines(
+  projection: SessionProjection,
+  lines: readonly OrphanedLine[],
+): SessionProjection {
+  let next = projection;
+  for (const { line, position } of lines) {
+    // Progress advances the physical cursor but changes no durable lifecycle table.
+    const events = "facts" in line ? eventsOfLine(line, position, line.at) : [];
+    next = advance(next, line, position, events);
+  }
+  return next;
+}
+
+/** Folds the physical tail for terminal closure, without guessing auth or replaying authored work. */
+async function reconcilePublishedSessionLines(
+  checkpoint: SessionProjection | undefined,
+  sessionId: string,
+): Promise<SessionProjection> {
+  const projection = checkpoint ?? initialSessionProjection();
+  return foldOrphanedLines(projection, await readLinesFrom(sessionId, projection.view.position));
+}
+
+/**
+ * Whether a line a retry would write is the one its interrupted attempt wrote there: the same
+ * facts, by type and entity, or the same progress record. Timestamps and incidental ids differ.
+ */
+function sameLine(orphaned: StoredLine, line: StoredLine<SessionEvent, SessionEvent>): boolean {
+  if ("progress" in line || "progress" in orphaned) {
+    return (
+      "progress" in line &&
+      "progress" in orphaned &&
+      JSON.stringify(orphaned.progress) === JSON.stringify(line.progress)
+    );
+  }
+  const identity = (fact: unknown) => {
+    const { data, type } = fact as SessionEvent;
+    if (!isFactType(type)) return String(type);
+    const id = (data as Readonly<Record<string, unknown>>)[FACT_CATALOG[type].idField];
+    return `${type}:${String(id)}`;
+  };
+  return (
+    orphaned.facts.length === line.facts.length &&
+    orphaned.facts.every((fact, index) => identity(fact) === identity(line.facts[index]))
+  );
+}
+
 export function openSessionEventPublisher(input: {
   readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
   readonly origin: SessionEventOrigin;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly inputSource?: string;
+  /**
+   * What an interrupted attempt of this step already wrote. Each line the publication would
+   * write again is folded from the stream instead, and its handlers and hooks don't run again.
+   */
+  readonly orphaned?: readonly OrphanedLine[];
 }): SessionEventPublisher {
   const { ctx } = input;
+  const orphaned = [...(input.orphaned ?? [])];
   const dispatcher = createSessionEventDispatcher(input);
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
@@ -404,6 +568,22 @@ export function openSessionEventPublisher(input: {
     });
     for (const { line, bytes } of lines) {
       const position = nextLinePosition(ctx);
+      const earlier = orphaned[0];
+      if (earlier !== undefined) {
+        // Only a decision the retry repeats exactly can adopt what its attempt wrote.
+        if (earlier.position !== position || !sameLine(earlier.line, line)) {
+          throw new Error("A retried step published differently from its interrupted attempt.");
+        }
+        orphaned.shift();
+        const lineAt = "facts" in earlier.line ? earlier.line.at : at;
+        recordPublishedLine(
+          ctx,
+          earlier.line,
+          position,
+          eventsOfLine(earlier.line, position, lineAt),
+        );
+        continue;
+      }
       await writer.write(bytes).catch((error: unknown) => {
         // Validation ran ahead of the write. A failed write must not leave the checker ahead
         // of the checkpoint; a later publication reseeds it from what actually committed.
@@ -516,8 +696,11 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
       await streamWriter.write(bytes);
     },
     close: async () => {
-      await streamWriter.close();
-      release();
+      try {
+        await streamWriter.close();
+      } finally {
+        release();
+      }
     },
     release,
   };
@@ -541,7 +724,8 @@ export interface SessionEnding {
  * Ends the session from outside a turn: one commit settles what it left open and ends it
  * (`session.ended`), through its channel adapter and instrumentation, then closes the session
  * stream so readers following it reach its end. Stream-event hooks do not run: the ending session
- * may not restore, and no turn scope remains for authored code. Never throws.
+ * may not restore, and no turn scope remains for authored code. Throws only when the session's
+ * published tail cannot be read, which the ending must follow.
  *
  * When the context cannot be restored, the commit is only written and the stream closed: the one
  * degraded write of a session event.
@@ -550,6 +734,7 @@ export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly ending: SessionEnding;
   readonly serializedContext: Record<string, unknown>;
+  readonly sessionState?: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
   /** The session's last turn, for channel handlers' `ctx.session.turn`. */
   readonly turn?: { readonly id: string; readonly sequence: number };
@@ -561,13 +746,27 @@ export async function publishTerminalSessionEvent(input: {
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   const fields = { errorId: input.errorId, sessionId };
   const type = "session.ended";
-  const facts = sessionEndedFacts(input.projection, input.ending);
-
+  let projection =
+    input.projection ??
+    (input.sessionState === undefined
+      ? undefined
+      : storedProjection(readDurableSession(input.sessionState).state));
+  try {
+    projection = await reconcilePublishedSessionLines(projection, sessionId);
+  } catch (error) {
+    // Ending over the checkpoint alone could miss rows the tail opened and close rows it closed,
+    // so the step retries instead.
+    log.error(`failed to fold the published tail for terminal ${type} event`, {
+      ...fields,
+      error,
+    });
+    throw error;
+  }
   let ctx: ContextContainer;
   let publisher: SessionEventPublisher;
   try {
     ctx = await deserializeContext(input.serializedContext);
-    enterSessionProjectionAt(ctx, input.projection);
+    enterSessionProjectionAt(ctx, projection);
     publisher = openSessionEventPublisher({
       ctx,
       origin: "own",
@@ -575,11 +774,30 @@ export async function publishTerminalSessionEvent(input: {
     });
   } catch (error) {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
-    // The writer that would close what the session leaves open isn't available: close it here.
-    const closed = input.projection === undefined ? facts : cascade(input.projection.view, facts);
+    // Folding needs no provider or authority; a broken context must not hide orphaned facts.
+    if (projection.view.session.status === "ended") {
+      try {
+        await openSessionEventWriter(input.sessionWritable).close();
+      } catch {
+        // Another attempt may have closed the stream already.
+      }
+      return;
+    }
+    const closed = cascade(projection.view, sessionEndedFacts(projection, input.ending));
     await writeUnroutedSessionEvent(input.sessionWritable, closed).catch((writeError) =>
       log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
     );
+    return;
+  }
+
+  if (projection.view.session.status === "ended") {
+    try {
+      await publisher.writer.close();
+    } catch {
+      // The terminal fact survived an earlier attempt that already closed the stream.
+    } finally {
+      publisher.writer.release();
+    }
     return;
   }
 
@@ -613,7 +831,7 @@ export async function publishTerminalSessionEvent(input: {
   }
   const emit = instrumentation?.createHandleEvent({ handleEvent: publish }) ?? publish;
   try {
-    await contextStorage.run(ctx, () => emit(facts));
+    await contextStorage.run(ctx, () => emit(sessionEndedFacts(projection, input.ending)));
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {

@@ -1,3 +1,4 @@
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
@@ -211,7 +212,7 @@ function buildConnectionResolveContext(ctx: ContextContainer): DynamicConnection
       },
     },
     channel: {
-      kind: ctx.get(ChannelInstrumentationKey)?.kind,
+      kind: normalizeInstrumentationChannelKind(ctx.get(ChannelInstrumentationKey)?.kind),
     },
   };
 }

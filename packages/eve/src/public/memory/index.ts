@@ -1,3 +1,4 @@
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import { createHash } from "node:crypto";
 
 import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
@@ -35,11 +36,7 @@ export interface MemoryScopeContext {
     readonly id: string;
     readonly auth: SessionAuth;
   };
-  readonly channel: {
-    readonly kind?: string;
-    readonly continuationToken?: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  };
+  readonly channel: InstrumentationChannel;
 }
 
 export type MemoryScopeDefinition =

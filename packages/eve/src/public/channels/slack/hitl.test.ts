@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Interaction } from "#protocol/session-reader.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,

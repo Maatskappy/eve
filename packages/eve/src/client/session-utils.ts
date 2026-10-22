@@ -1,12 +1,14 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import { deliveryStatus, type RequestStatus } from "#protocol/session-projection/request-status.js";
-import type { DeliverySettledData } from "#protocol/session-events/families/delivery.js";
+import type {
+  DeliveryOutcome,
+  DeliverySettledData,
+} from "#protocol/session-events/families/delivery.js";
 import type { TurnOutcome } from "#protocol/session-events/families/turn.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openInteractions } from "#protocol/session-projection/selectors.js";
-import { interaction } from "#protocol/session-reader.js";
-import type { Interaction } from "#protocol/session-reader.js";
+import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
 
 /** What one response's events say, for a reader that wants the outcome. */
 interface TurnEventSummary {
@@ -18,7 +20,8 @@ interface TurnEventSummary {
   readonly message: string | undefined;
   /** The value of the latest `result` part, whatever its phase. */
   readonly result: unknown;
-  readonly status: RequestStatus;
+  readonly status: RequestStatus | "working";
+  readonly outcome: DeliveryOutcome | undefined;
   readonly sessionEnded: boolean;
 }
 
@@ -31,6 +34,16 @@ export function summarizeTurnEvents(
   events: readonly SessionEvent[],
   deliveryId?: string,
 ): TurnEventSummary {
+  const summary = turnSummary(deliveryId);
+  for (const event of events) summary.observe(event);
+  return summary.result();
+}
+
+/** Incremental response summary; progress events are folded, not retained. */
+export function turnSummary(deliveryId?: string): {
+  observe(event: SessionEvent): void;
+  result(): TurnEventSummary;
+} {
   const segment = new ResponseSegment({ deliveryId });
   let settlement: DeliverySettledData | undefined;
   let consumedBy: string | undefined;
@@ -46,7 +59,7 @@ export function summarizeTurnEvents(
   let message: string | undefined;
   let result: unknown;
 
-  for (const event of events) {
+  function observe(event: SessionEvent): void {
     if (event.type === "session.ended") sessionEnded = true;
     if (event.type === "delivery.consumed" && event.data.deliveryId === deliveryId)
       consumedBy = event.data.turnId;
@@ -81,37 +94,46 @@ export function summarizeTurnEvents(
     }
   }
 
-  const turnId = settlement?.turnId ?? consumedBy;
-  const status =
-    deliveryId === undefined
-      ? summarizeBoundaryStatus(boundary, failure)
-      : deliveryStatus(
-          settlement?.outcome,
-          outcomes.get(turnId ?? ""),
-          sessionFailure === undefined ? undefined : "failed",
-        );
-  if (deliveryId !== undefined) {
-    const conversational =
-      settlement?.outcome === "handled" || settlement?.outcome === "awaiting-input";
-    message = conversational && turnId !== undefined ? turnReplies.get(turnId) : undefined;
-    result = conversational && turnId !== undefined ? turnResults.get(turnId) : undefined;
-    failure = status === "failed" ? (turnFailures.get(turnId ?? "") ?? sessionFailure) : undefined;
-    if (status === "failed" && failure === undefined && settlement?.reason !== undefined) {
-      failure = {
-        code: settlement.outcome === "refused" ? "DELIVERY_REFUSED" : "DELIVERY_FAILED",
-        message: settlement.reason,
-      };
+  function summarize(): TurnEventSummary {
+    const turnId = settlement?.turnId ?? consumedBy;
+    const status =
+      deliveryId === undefined
+        ? summarizeBoundaryStatus(boundary, failure)
+        : deliveryStatus(
+            settlement?.outcome,
+            outcomes.get(turnId ?? ""),
+            sessionFailure === undefined ? undefined : "failed",
+          );
+    if (deliveryId !== undefined) {
+      const conversational =
+        settlement?.outcome === "handled" || settlement?.outcome === "awaiting-input";
+      message = conversational && turnId !== undefined ? turnReplies.get(turnId) : undefined;
+      result = conversational && turnId !== undefined ? turnResults.get(turnId) : undefined;
+      failure =
+        status === "failed" ? (turnFailures.get(turnId ?? "") ?? sessionFailure) : undefined;
+      if (status === "failed" && failure === undefined) {
+        failure = {
+          code: settlement?.outcome === "refused" ? "DELIVERY_REFUSED" : "DELIVERY_FAILED",
+          message:
+            settlement?.reason ??
+            (settlement?.outcome === "refused"
+              ? "The delivery was refused."
+              : "The delivery failed."),
+        };
+      }
     }
+    return {
+      boundary,
+      failure,
+      interactions: segment.interactions,
+      message,
+      result,
+      sessionEnded,
+      status,
+      outcome: settlement?.outcome,
+    };
   }
-  return {
-    boundary,
-    failure,
-    interactions: segment.interactions,
-    message,
-    result,
-    sessionEnded,
-    status,
-  };
+  return { observe, result: summarize };
 }
 
 function summarizeBoundaryStatus(

@@ -13,7 +13,7 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
@@ -798,7 +798,7 @@ export interface SlackChannelConfig {
 
 function rebuildSlackContext(
   state: SlackChannelState,
-  session: SessionHandle,
+  session: ChannelContext,
   api: SlackTransportOptions | undefined,
   credentials: SlackChannelCredentials | undefined,
 ): SlackChannelContext {
@@ -918,7 +918,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     // The runtime hands `deliver` the full adapter context; `session.auth.current`
     // is the caller of this delivery.
-    deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
+    deliver(
+      payload,
+      channel: SlackChannelContext & { readonly session: ChannelContext["session"] },
+    ) {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       return withUndeliveredReplyNote(channel.state, payload);
     },
@@ -983,8 +986,8 @@ function defaultOnAnswers(ctx: SlackAnswerContext): SlackAnswerResult {
 async function receiveOnSlack(
   input: {
     readonly auth: SessionAuthContext | null;
-    readonly history?: readonly SessionHistoryMessage[];
     readonly message: MessageContent;
+    readonly history?: readonly SessionHistoryMessage[];
     readonly target: SlackReceiveTarget;
     readonly title?: string;
   },
@@ -1064,7 +1067,7 @@ async function receiveOnSlack(
   }
 
   return deps
-    .from(slackContinuationToken({ channelId, threadTs: continuationThreadTs }))
+    .from(slackContinuationToken({ channelId: channelId, threadTs: continuationThreadTs }))
     .send(input.message, { auth: input.auth, history: input.history, state, title: input.title });
 }
 

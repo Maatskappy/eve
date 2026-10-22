@@ -10,6 +10,7 @@ import {
   type RequestBatch,
   type RequestSettlement,
 } from "#channel/interaction-prompts.js";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { promptQueue, type PromptQueueState } from "#channel/prompt-queue.js";
 import { settleSignIn, showSignIn, type SignInSurface } from "#channel/sign-in.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -88,7 +89,8 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
     ...(working !== undefined && { "call.requested": working, "turn.started": working }),
     ...(queue !== undefined && { committed: queue }),
     async "interaction.opened"(event, ctx) {
-      const { channel, view } = ctx;
+      const { channel } = ctx;
+      const view = sessionTables(ctx.view);
       if ("show" in requests) {
         const batch = requestBatchOf(view, event.data);
         for (const request of batch?.requests ?? []) await requests.show(channel, request, batch!);
@@ -97,7 +99,8 @@ export function surfaceEvents<TChannel extends { readonly state: object }>(
     },
     // Covers every way a request ends: a press, a typed answer, or a withdrawal.
     async "interaction.settled"(event, ctx) {
-      const { channel, view } = ctx;
+      const { channel } = ctx;
+      const view = sessionTables(ctx.view);
       if ("settle" in requests) {
         const settlement = requestSettlementOf(view, event.data);
         if (settlement !== undefined) await requests.settle(channel, settlement);

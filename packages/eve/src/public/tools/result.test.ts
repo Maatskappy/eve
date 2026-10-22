@@ -11,30 +11,29 @@ import {
   toolResultFrom,
   type MatchedConnectionResult,
   type MatchedToolResult,
-  type SettledCallRow,
+  type ToolResultSource,
 } from "#public/tools/result.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** A settled call's row, as `ctx.view.calls[callId]` holds it. */
-function toolResult(toolName: string, output: unknown, isError?: boolean): SettledCallRow {
+import { call, emptySessionView, foldEvents } from "#protocol/session-projection/public-view.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import type { JsonValue } from "#shared/json.js";
+
+function toolResult(toolName: string, output: JsonValue, isError?: boolean): ToolResultSource {
   return {
     callId: "call_1",
-    capability: { kind: "tool", name: toolName },
-    outcome: isError === true ? "failed" : "completed",
-    output: output as SettledCallRow["output"],
+    kind: "tool",
+    name: toolName,
+    state: isError === true ? "failed" : "completed",
+    output,
   };
 }
 
-function subagentResult(): SettledCallRow {
-  return {
-    callId: "call_2",
-    capability: { kind: "agent", name: "sub" },
-    outcome: "completed",
-    output: "done",
-  };
+function subagentResult(): ToolResultSource {
+  return { callId: "call_2", kind: "agent", name: "sub", state: "completed", output: "done" };
 }
 
 describe("toolResultFrom", () => {
@@ -78,29 +77,38 @@ describe("toolResultFrom", () => {
     }
   });
 
-  it("matches a completed call's row from the session's tables", () => {
-    const row = {
-      callId: "call_3",
-      capability: { kind: "tool", name: "get_weather" },
-      outcome: "completed",
-      output: { city: "SF", tempF: 72 },
-    } as const;
+  it("matches a completed call observation from an opaque snapshot", () => {
+    const view = foldEvents(
+      emptySessionView(),
+      stampTestEvents([
+        {
+          type: "call.requested",
+          data: {
+            callId: "call_3",
+            owner: { runId: "run_0" },
+            capability: { kind: "tool", name: "get_weather" },
+          },
+        },
+        {
+          type: "call.settled",
+          data: { callId: "call_3", outcome: "completed", output: { city: "SF", tempF: 72 } },
+        },
+      ]),
+    );
+    const row = call(view, "call_3")!;
 
     expect(toolResultFrom(row, weatherTool)).toEqual({
       callId: "call_3",
       output: { city: "SF", tempF: 72 },
       toolName: "get_weather",
     });
-    expect(toolResultFrom({ ...row, outcome: "failed" }, weatherTool)).toBeUndefined();
+    expect(toolResultFrom({ ...row, state: "failed" }, weatherTool)).toBeUndefined();
     expect(
-      toolResultFrom({ ...row, capability: { kind: "agent", name: "get_weather" } }, weatherTool),
+      toolResultFrom({ ...row, kind: "agent", name: "get_weather" }, weatherTool),
     ).toBeUndefined();
     expect(toolResultFrom(undefined, weatherTool)).toBeUndefined();
     expect(
-      toolResultFrom(
-        { ...row, capability: { kind: "tool", name: "linear__list_issues" } },
-        linearConnection,
-      ),
+      toolResultFrom({ ...row, kind: "tool", name: "linear__list_issues" }, linearConnection),
     ).toMatchObject({ connectionToolName: "list_issues" });
   });
 

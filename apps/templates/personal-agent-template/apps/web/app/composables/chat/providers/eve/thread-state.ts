@@ -15,7 +15,7 @@ export function resumeOptionsFromThread(thread: ThreadRecord): ChatSessionOption
     initialSession: session?.sessionId
       ? {
           sessionId: session.sessionId,
-          streamIndex: Math.max(session.streamIndex ?? 0, events.length),
+          streamIndex: session.streamIndex ?? 0,
         }
       : undefined,
     initialEvents: events as readonly EveStreamEvent[],

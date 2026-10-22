@@ -26,8 +26,6 @@ export type {
   MessagePart,
   MessageTextPart,
 } from "#shared/message-content.js";
-export type { Delivery } from "#shared/delivery.js";
-export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 export type { ClientAgentSession } from "#client/agent-session.js";
 export type { ClientSession } from "#client/session.js";
 export type {
@@ -72,13 +70,11 @@ export type {
   CreateSessionOptions,
   HeadersValue,
   HealthResult,
-  DeliveryResult,
   RespondTurnOptions,
   SendTurnInput,
   SendTurnOptions,
   SessionSnapshot,
   ClientSessionState,
-  SessionStreamOptions,
   StreamReconnectPolicy,
   StreamReconnectRetryPolicy,
   TokenValue,
@@ -99,7 +95,7 @@ export type {
 } from "#protocol/session-event.js";
 export { endsTurn, failureOf } from "#client/session-utils.js";
 
-export type { AskedCall } from "#protocol/session-reader.js";
+export type { AskedCall } from "#protocol/session-projection/reader.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";
 
 export type { AgentInfoMemoryEntry } from "#client/types.js";

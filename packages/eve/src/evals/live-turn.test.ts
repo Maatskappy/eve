@@ -1,3 +1,4 @@
+import { interaction, turns } from "#protocol/session-projection/public-view.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
@@ -84,6 +85,7 @@ describe("EveEvalLiveTurn", () => {
     const turn = await manager.attach("session_1").send("Queued message.");
     expect(turn.reply).toBe("Queued reply.");
     expect(turn.status).toBe("completed");
+    expect(turn.outcome).toBe("handled");
   });
 
   it("keeps earlier and intervening questions when an answer delivery settles", async () => {
@@ -156,7 +158,7 @@ describe("EveEvalLiveTurn", () => {
     ]);
     expect(answered.interactions.map((row) => row.interactionId)).toEqual(["second", "third"]);
     expect(answered.events.some((event) => event.type === "interaction.opened")).toBe(false);
-    expect(session.view.interactions.third?.status).toBe("open");
+    expect(interaction(session.view, "third")?.status).toBe("open");
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
@@ -182,7 +184,7 @@ describe("EveEvalLiveTurn", () => {
     expect((await session.watch().result()).reply).toBe("Second.");
     expect(String(fetch.mock.calls[1]?.[0])).toContain(`startIndex=${cursor}`);
     expect(session.state.streamIndex).toBeGreaterThan(cursor);
-    expect(Object.keys(session.view.turns)).toEqual(["turn_0", "turn_1"]);
+    expect(turns(session.view).map(({ turnId }) => turnId)).toEqual(["turn_0", "turn_1"]);
   });
 
   it("waits for a settled call to a tool, by default with any outcome", async () => {

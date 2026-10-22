@@ -144,16 +144,19 @@ describe("dynamic tool cold replay", () => {
         const created = await client.sessions.create({ message: "Hello." });
         await expect(created.delivery.result()).resolves.toMatchObject({
           interactions: [],
-          status: "waiting",
+          status: "completed",
         });
 
-        const waiting = await (
-          await created.session.send("Call tools in parallel: guarded_marker, companion_marker")
-        ).result();
-        expect(waiting.status).toBe("waiting");
+        const delivery = await created.session.send(
+          "Call tools in parallel: guarded_marker, companion_marker",
+        );
+        const events = [];
+        for await (const event of delivery.stream()) events.push(event);
+        const waiting = await delivery.result();
+        expect(waiting.status).toBe("awaiting-input");
         expect(
           waiting.interactions,
-          `Expected two approval requests.\n\nevents:\n${JSON.stringify(waiting.events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+          `Expected two approval requests.\n\nevents:\n${JSON.stringify(events, null, 2)}\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         ).toHaveLength(2);
 
         const firstRequest = await readMarker(app.appRoot, "approval-request", "guarded");
@@ -191,7 +194,7 @@ describe("dynamic tool cold replay", () => {
             })),
           )
         ).result();
-        expect(resumed.status).toBe("waiting");
+        expect(resumed.status).toBe("completed");
 
         for (const key of ["guarded", "companion"]) {
           const response = await readMarker(app.appRoot, "approval-response", key);

@@ -44,14 +44,14 @@ export default defineEval({
       throw new Error(`The first reply resolved ${JSON.stringify(resolved)}.`);
     }
 
-    const denied = await approved.session.send("deny");
-    denied.noFailedCalls();
-    const completed = denied.reply?.includes(MARKER)
-      ? denied
+    const cancelled = await approved.session.send("deny");
+    cancelled.noFailedCalls();
+    const completed = cancelled.reply?.includes(MARKER)
+      ? cancelled
       : await waitForMessage(t, approved.session, MARKER);
     completed.messageIncludes('deploy_release={"deployed":true}');
     if (completed.reply?.includes('"published":true') === true) {
-      throw new Error("The typed deny ran publish_notes instead of denying it.");
+      throw new Error("The typed cancel ran publish_notes instead of denying it.");
     }
 
     t.calledAgent("release-pair", { status: "completed", count: 1 });

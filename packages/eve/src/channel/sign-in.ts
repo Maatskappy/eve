@@ -10,7 +10,7 @@ import type {
   InteractionOutcome,
   InteractionSettledData,
 } from "#protocol/session-events/families/interaction.js";
-import { signInEnding } from "#protocol/session-reader.js";
+import { signInEnding } from "#protocol/session-projection/reader.js";
 import { displayProperName } from "#protocol/session-projection/display-name.js";
 
 /** A sign-in as a channel shows it. */

@@ -36,6 +36,11 @@ export interface GitHubShellOutput {
   readonly truncated: boolean;
 }
 
+/** Resolves the co-author credited by this turn's GitHub publishing commands. */
+export type GitHubAttribution = (
+  ctx: ToolContext,
+) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
+
 export interface GitHubConfig {
   /**
    * Resolves who the current turn publishes for. When it returns a person,
@@ -44,9 +49,7 @@ export interface GitHubConfig {
    * receives the `gh` tool's context, so `ctx.getToken` can resolve the
    * requester's linked accounts.
    */
-  readonly attribution?: (
-    ctx: ToolContext,
-  ) => GitHubCoAuthor | null | PromiseLike<GitHubCoAuthor | null>;
+  readonly attribution?: GitHubAttribution;
   readonly authorize?: GitHubAuthorize;
   readonly broker: (
     sandbox: SandboxSession,

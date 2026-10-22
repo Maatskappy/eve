@@ -5,8 +5,19 @@ import { extname } from "node:path";
 /** Formats the user and assistant messages observed in one eval session. */
 export function formatEvalTranscript(events: readonly SessionStreamEvent[]): string {
   const messages: string[] = [];
+  // Imported history of the deliveries one line consumes precedes their messages, as the model
+  // reads them.
+  let consumed: { readonly line: number | undefined; at: number } | undefined;
   for (const event of events) {
+    const line = event.meta?.position?.line;
+    if (event.type !== "delivery.consumed" || consumed?.line !== line) consumed = undefined;
     if (event.type === "delivery.consumed") {
+      consumed ??= { at: messages.length, line };
+      const history = (event.data.history ?? []).map(
+        ({ role, text }) => `${role === "user" ? "User" : "Assistant"}:\n${text}`,
+      );
+      messages.splice(consumed.at, 0, ...history);
+      consumed.at += history.length;
       const text = event.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
       if (text.length > 0) messages.push(`User:\n${text.join("\n")}`);
     } else if (event.type === "content.completed") {

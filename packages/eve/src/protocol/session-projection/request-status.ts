@@ -1,27 +1,15 @@
 import type { DeliveryOutcome } from "#protocol/session-events/families/delivery.js";
 import type { TurnOutcome } from "#protocol/session-events/families/turn.js";
 import type { SessionOutcome } from "#protocol/session-events/families/session.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
-
-/** The state of one request, separate from whether its session has ended. */
-export type RequestStatus = "working" | "awaiting-input" | "completed" | "failed" | "cancelled";
-
-/** The request's own settlement, not the session's readiness for another message. */
-export function requestStatus(view: SessionView, deliveryId: string): RequestStatus {
-  const delivery = view.deliveries[deliveryId];
-  return deliveryStatus(
-    delivery?.outcome,
-    delivery?.turnId === undefined ? undefined : view.turns[delivery.turnId]?.outcome,
-    delivery === undefined ? undefined : view.session.outcome,
-  );
-}
+/** A settled delivery's result, separate from whether its session can accept more input. */
+export type RequestStatus = "awaiting-input" | "completed" | "failed" | "cancelled";
 
 /** Shared by complete views and response readers that joined a turn after its introduction. */
 export function deliveryStatus(
   outcome: DeliveryOutcome | undefined,
   turn: TurnOutcome | undefined,
   session?: SessionOutcome,
-): RequestStatus {
+): RequestStatus | "working" {
   switch (outcome) {
     case undefined:
       return session === "failed" ? "failed" : "working";
@@ -35,5 +23,7 @@ export function deliveryStatus(
       return "completed";
     case "handled":
       return turn === "cancelled" ? "cancelled" : turn === "failed" ? "failed" : "completed";
+    default:
+      return "failed";
   }
 }

@@ -2,7 +2,8 @@ import type { InstrumentationProviderDefinition } from "#instrumentation/lifecyc
 import { contentAttribute } from "#compiled/@vercel/agent-runs/otel.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { isSampledTrace } from "#shared/trace-policy.js";
-import { currentView } from "#harness/session-machine/current.js";
+import { enteredView } from "#harness/session-machine/current.js";
+import { contextStorage } from "#context/container.js";
 
 /** Attribute a turn only when exactly one message delivery was consumed, across workers. */
 export function createAgentChannelDeliveryInstrumentation(input: {
@@ -13,7 +14,9 @@ export function createAgentChannelDeliveryInstrumentation(input: {
     async "delivery.consumed"(event) {
       if (event.turnId === undefined) return;
       // Answer-only deliveries resume the original request; they do not replace its attribution.
-      if (currentView().deliveries[event.deliveryId]?.parts?.length === 0) return;
+      const ctx = contextStorage.getStore();
+      if (ctx !== undefined && enteredView(ctx)?.deliveries[event.deliveryId]?.parts?.length === 0)
+        return;
       await input.stateStore.update(
         "turn",
         JSON.stringify([event.sessionId, event.turnId]),

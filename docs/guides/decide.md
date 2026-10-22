@@ -215,7 +215,7 @@ guide for an end-to-end walkthrough.
 
 ## Runtime behavior
 
-`auto` decides at the first `step.started` event, after the incoming prompt
+`auto` decides in its first `beforeModel` resolver run, after the incoming prompt
 is available and before the selected language model runs. It reuses that choice
 for later tool-loop steps in the same turn. A new turn makes a new choice, and
 child sessions route from their own prompts.

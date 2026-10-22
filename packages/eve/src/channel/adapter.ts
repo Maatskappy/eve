@@ -5,7 +5,7 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
 import type { FactPosition, Scope } from "#protocol/session-events/envelope.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import type { DeliverPayload } from "#channel/types.js";
 import type { ChannelDelivery } from "#shared/channel-delivery.js";
@@ -32,12 +32,10 @@ const log = createLogger("channel.adapter");
  * `ctx` provides read/write access to durable context keys (the same
  * {@link ContextAccessor} that tools and providers use).
  *
- * `session` is a live handle to the current session — id, auth,
- * optional channel continuation address, including an imperative `alias()`
- * for channels that need to add an alias for the session mid-turn (e.g. Slack's
- * auto-anchor on first post).
+ * `session` supplies live identity/auth; `continuation` owns channel routing (such as
+ * Slack's auto-anchor on first post). Neither grants session command authority.
  */
-export interface ChannelAdapterContext<TState = Record<string, unknown>> {
+export interface ChannelAdapterContext<TState = Record<string, unknown>> extends ChannelContext {
   /**
    * Mutable adapter state. Auto-serialized at step boundaries via
    * JSON snapshot. The adapter reads and writes this directly.
@@ -49,11 +47,6 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
    * to read during the turn.
    */
   readonly ctx: ContextAccessor;
-
-  /**
-   * Live handle to the current session.
-   */
-  readonly session: SessionHandle;
 
   /** @internal Independent source of a relayed child input batch. */
   readonly inputSource?: string;

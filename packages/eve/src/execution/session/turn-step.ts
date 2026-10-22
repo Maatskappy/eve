@@ -628,7 +628,7 @@ async function runSessionStepBody(
                 ? completedAuths.map(({ challenge }) => challenge)
                 : undefined;
             const harnessResult = await runHarnessStep(schemaSession, stepInput, completions);
-            // Only the step knows whether it stopped for a person; the tables say who.
+            // Only the step knows whether it stopped for an interaction; the tables say which.
             await publisher.finish({ announce: stoppedForPerson(harnessResult) });
             return harnessResult;
           });
@@ -682,8 +682,8 @@ async function runSessionStepBody(
 }
 
 /**
- * The step stopped for a person: it says so, or it stopped with nothing of its own to wait on,
- * and the tables say whether that's a person (`announceWaiting`).
+ * The step stopped for an interaction: it says so, or it stopped with nothing of its own to wait on,
+ * and the tables say whether that's an interaction (`announceWaiting`).
  */
 function stoppedForPerson(result: StepResult): boolean {
   if (result.held !== undefined) return result.held.kind === "request";

@@ -21,11 +21,14 @@ import { attachInputText, readInputText } from "#internal/input-text.js";
 interface BaseChannelSendOptions {
   /** Stable delivery identity, deduplicated within this session's recent-key window. */
   readonly idempotencyKey?: string;
+  /**
+   * Prior conversation added as user and assistant turns before this
+   * message and its `context`. Seeds a session this send creates, or
+   * extends the history of the session that owns the address.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
-  /** Prior conversation imported before this message and its context. */
-  readonly history?: readonly SessionHistoryMessage[];
-  readonly initiatorAuth?: SessionAuthContext | null;
   /** JSON Schema for a structured final answer, as on `Session.send()`. */
   readonly outputSchema?: JsonObject;
   readonly title?: string;
@@ -49,23 +52,17 @@ interface BaseChannelRespondOptions<TState = undefined> {
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
-interface BaseChannelCreateOptions {
+/** Options for creating a session at a channel-local address without running a turn. */
+export type ChannelCreateOptions<TState = undefined> = {
   readonly auth: SessionAuthContext | null;
   /** Prior conversation the session starts with; it joins history with the first message. */
   readonly history?: readonly SessionHistoryMessage[];
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly title?: string;
-}
-
-/** Options for creating a session at a channel-local address without running a turn. */
-export type ChannelCreateOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseChannelCreateOptions
-  : BaseChannelCreateOptions & { readonly state: TState };
+} & ([TState] extends [undefined] ? unknown : { readonly state: TState });
 
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
-  /** Starts or resumes a turn with a user message. May create a session. */
-  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Delivery>;
   /**
    * Creates a session that waits for its first message, without running a
    * turn. When another session owns the address, or claims it concurrently,
@@ -74,7 +71,8 @@ export interface ChannelSource<TState = undefined> {
    * address, then create again.
    */
   create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
-
+  /** Starts or resumes a turn with a user message. May create a session. */
+  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Delivery>;
   /** Answers pending input requests. Never creates a session. */
   respond<const TResponses extends readonly Answer[]>(
     answers: StrictAnswers<TResponses>,

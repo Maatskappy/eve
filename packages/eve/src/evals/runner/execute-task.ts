@@ -130,6 +130,8 @@ function buildTaskResult(input: {
   const events = input.sessions.flatMap((session) => session.events);
   return {
     data: input.turn?.data,
+    outcome: input.turn?.outcome,
+    error: input.turn?.error,
     reply: input.turn?.reply,
     view: input.turn?.view,
     sessionEnded: input.turn?.sessionEnded ?? false,

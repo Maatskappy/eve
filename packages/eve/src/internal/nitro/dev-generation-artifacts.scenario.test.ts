@@ -293,7 +293,7 @@ describe("development generation artifacts", () => {
       const agent = modules[child.configResolver.sourceId] as {
         default: { events: Record<string, Function> };
       };
-      for (const event of ["session.started", "turn.started"]) {
+      for (const event of ["beforeSession", "beforeTurn"]) {
         await expect(agent.default.events[event]!({}, { model: null })).resolves.toBeNull();
       }
 

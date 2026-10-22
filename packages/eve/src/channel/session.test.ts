@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  buildSessionHandle,
+  buildChannelContext,
   createAttachSessionFn,
   createSession,
   type Session,
@@ -229,7 +229,7 @@ describe("fixed session operations", () => {
   });
 });
 
-describe("buildSessionHandle", () => {
+describe("buildChannelContext", () => {
   it("exposes sessionId / continuationToken / auth from the live accessor", () => {
     const ctx = new ContextContainer();
     ctx.set(SessionIdKey, "sess-123");
@@ -247,29 +247,30 @@ describe("buildSessionHandle", () => {
       principalType: "runtime",
     });
 
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    expect(session.id).toBe("sess-123");
-    expect(session.continuation?.token).toBe("C1:T1");
-    expect(session.auth.current?.principalId).toBe("U1");
-    expect(session.auth.initiator?.principalId).toBe("eve:app");
+    expect(channel.session.id).toBe("sess-123");
+    expect(channel.session).not.toHaveProperty("continuation");
+    expect(channel.continuation?.token).toBe("C1:T1");
+    expect(channel.session.auth.current?.principalId).toBe("U1");
+    expect(channel.session.auth.initiator?.principalId).toBe("eve:app");
   });
 
   it("reflects later writes via getter access", () => {
     const ctx = new ContextContainer();
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    expect(session.continuation).toBeUndefined();
+    expect(channel.continuation).toBeUndefined();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
-    expect(session.continuation?.token).toBe("C1:T1");
+    expect(channel.continuation?.token).toBe("C1:T1");
   });
 
   it("namespaces the channel-local token on continuation.alias", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:");
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    session.continuation?.alias("C1:T1");
+    channel.continuation?.alias("C1:T1");
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
@@ -277,9 +278,9 @@ describe("buildSessionHandle", () => {
   it("round-trips the exposed channel-local token through continuation.alias", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    session.continuation?.alias(session.continuation.token);
+    channel.continuation?.alias(channel.continuation.token);
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
@@ -287,7 +288,7 @@ describe("buildSessionHandle", () => {
   it("records every distinct continuation address without duplicating redundant aliases", () => {
     // Authors call continuation.alias from hot-path event handlers
     // (e.g. Slack's `message.completed`). The handler can't always
-    // know whether the token has actually changed, so the SessionHandle
+    // know whether the token has actually changed, so the channel context
     // itself short-circuits redundant writes — the workflow body
     // shouldn't tear down and recreate its park hook for a no-op.
     let writeCount = 0;
@@ -307,15 +308,15 @@ describe("buildSessionHandle", () => {
       },
     };
 
-    const session = buildSessionHandle(observed);
+    const channel = buildChannelContext(observed);
 
-    session.continuation?.alias("C1:T1");
+    channel.continuation?.alias("C1:T1");
     expect(writeCount).toBe(0);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
 
-    session.continuation?.alias("C1:T2");
-    session.continuation?.alias("C1:T3");
-    session.continuation?.alias("C1:T2");
+    channel.continuation?.alias("C1:T2");
+    channel.continuation?.alias("C1:T3");
+    channel.continuation?.alias("C1:T2");
 
     expect(writeCount).toBe(6);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T2");
@@ -328,8 +329,8 @@ describe("buildSessionHandle", () => {
 
   it("throws clearly when no namespaced placeholder token exists", () => {
     const ctx = new ContextContainer();
-    const session = buildSessionHandle(ctx);
+    const channel = buildChannelContext(ctx);
 
-    expect(session.continuation).toBeUndefined();
+    expect(channel.continuation).toBeUndefined();
   });
 });

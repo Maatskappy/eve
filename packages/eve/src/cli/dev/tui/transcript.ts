@@ -1,3 +1,4 @@
+import { sessionTables, snapshotState } from "#protocol/session-projection/session-view.js";
 import {
   agentCallTurns,
   agentToolSession,
@@ -110,7 +111,7 @@ export class ConversationTranscript {
 
   /** How input requests name the task that asked: as its task lines do. */
   taskLabel(conversation: ConversationState, taskId: string): string | undefined {
-    const task = conversation.view.tasks[taskId];
+    const task = sessionTables(conversation.view).tasks[taskId];
     if (task === undefined) return undefined;
     const calls = taskCalls(conversation.view, taskId);
     const call = calls.findLast((candidate) => candidate.status !== "settled") ?? calls.at(-1);
@@ -224,7 +225,7 @@ export class ConversationTranscript {
         turnId !== undefined &&
         !turnFailures.has(turnId) &&
         lastOfTurn.get(turnId) === messageIndex &&
-        conversation.view.turns[turnId]?.outcome === "cancelled"
+        sessionTables(conversation.view).turns[turnId]?.outcome === "cancelled"
       ) {
         blocks.push(
           this.#memoize(`cancelled:${turnId}`, [], () => ({
@@ -306,7 +307,7 @@ export class ConversationTranscript {
     now: number,
   ): Block[] {
     const { conversation, working } = view;
-    const lastTurn = Object.values(conversation.view.turns).at(-1);
+    const lastTurn = Object.values(sessionTables(conversation.view).turns).at(-1);
     // A cancelled or failed turn gets no end for the tasks still working; they read as stopped.
     const stopping =
       !working &&
@@ -343,7 +344,10 @@ export class ConversationTranscript {
           endLine(
             record,
             settled
-              ? { ...call, output: callOutputSource(conversation.view, call.callId)?.output }
+              ? {
+                  ...call,
+                  output: callOutputSource(sessionTables(conversation.view), call.callId)?.output,
+                }
               : { outcome: "interrupted", status: "settled" },
             activity.tools,
             options.dot ?? "·",
@@ -416,7 +420,7 @@ export class ConversationTranscript {
         order += 1;
         if (!isToolCallRow(part) || part.kind === "control") continue;
         const childTask = childTasks.get(part.callId);
-        const state = toolState(part, child.view);
+        const state = toolState(part, sessionTables(child.view));
         const id = `subagent:${record.callId}:tool:${part.callId}`;
         const block = this.#memoize(id, [part, state.status, record.name], () => {
           const context = this.#presentationContext(part.callId, part, state, options, {
@@ -666,7 +670,7 @@ export function turnActivity(view: AgentTUIConversationView, tasks: readonly Tas
       return "Compacting";
     case "waiting-on-tasks":
       return waitingLabel(tasks);
-    case "waiting-on-person": {
+    case "waiting-on-interaction": {
       const signIns = current.interactions.flatMap((row) =>
         row.request.signIn === undefined ? [] : [row.request.signIn],
       );
@@ -675,7 +679,7 @@ export function turnActivity(view: AgentTUIConversationView, tasks: readonly Tas
         : "Waiting for input";
     }
     default: {
-      const { previews } = view.conversation;
+      const { previews } = snapshotState(view.conversation.view);
       return Object.values(previews.parts).some((part) => part.kind === "text") ||
         Object.keys(previews.calls).length > 0
         ? "Generating"

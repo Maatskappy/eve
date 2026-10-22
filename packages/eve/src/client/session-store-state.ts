@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { Client } from "#client/client.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
+import type { SessionView } from "#protocol/session-projection/session-view.js";
 import type { ConversationState } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type {
@@ -20,7 +20,7 @@ export type SessionStoreStatus = "idle" | "busy" | "resuming";
 export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<SendTurnPayload>;
 
 export interface SessionStoreSnapshot extends ConversationState {
-  /** Authoritative lifecycle tables as of this committed snapshot. */
+  /** Immutable lifecycle observations as of this complete commit. */
   readonly view: SessionView;
   /** The latest session creation, stream, resume, or turn failure. */
   readonly error: Error | undefined;
@@ -34,8 +34,11 @@ export interface SessionStoreSnapshot extends ConversationState {
  * do not alter execution; `prepareSend` may replace the outbound turn payload.
  */
 export interface SessionStoreCallbacks {
+  /** Reports live failures; restoring history updates `error` without replaying this callback. */
   readonly onError?: (error: Error) => void;
+  /** Observes newly read events, including catch-up events. */
   readonly onEvent?: (event: SessionStreamEvent) => void;
+  /** Fires once a live turn settles, after its complete commit; history does not replay it. */
   readonly onFinish?: (snapshot: SessionStoreSnapshot) => void;
   readonly onSessionChange?: (session: ClientSessionState | undefined) => void;
   readonly prepareSend?: PrepareSend;

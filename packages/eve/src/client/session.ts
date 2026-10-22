@@ -1,5 +1,4 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { SessionOperations } from "#shared/session.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { deliveryEvents } from "#client/delivery-events.js";
 import type { ChildOpened } from "#protocol/session-events/families/child.js";
@@ -54,11 +53,7 @@ export interface ClientSessionContext {
 }
 
 /** One fixed, ID-addressed conversation with an eve agent. */
-export class ClientSession implements SessionOperations<
-  SendTurnOptions,
-  RespondTurnOptions,
-  { readonly signal?: AbortSignal }
-> {
+export class ClientSession {
   readonly #context: ClientSessionContext;
   #state: ClientSessionState;
 
@@ -208,8 +203,13 @@ export class ClientSession implements SessionOperations<
     });
     return new StreamDelivery({
       ...receipt,
-      createStream: () =>
-        this.#createEventStream(startIndex, options ?? {}, receipt.deliveryId, kind !== "reset"),
+      createStream: (read) =>
+        this.#createEventStream(
+          startIndex,
+          { signal: read?.signal },
+          receipt.deliveryId,
+          kind !== "reset",
+        ),
     });
   }
 
@@ -241,7 +241,8 @@ export class ClientSession implements SessionOperations<
     response.body?.cancel().catch(() => {});
     if (deliveryId === undefined) throw new Error("Message route did not return a delivery id.");
     return new StreamDelivery<TOutput>({
-      createStream: () => this.#createEventStream(initialStreamIndex, input, deliveryId),
+      createStream: (read) =>
+        this.#createEventStream(initialStreamIndex, { ...input, signal: read?.signal }, deliveryId),
       deliveryId,
       sessionId: this.#state.sessionId,
     });

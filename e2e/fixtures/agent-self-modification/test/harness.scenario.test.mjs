@@ -34,28 +34,27 @@ function response(body = {}) {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
-function context(target, signal = new AbortController().signal) {
+function context(target, abortSignal = new AbortController().signal) {
   return {
-    signal,
+    abortSignal,
     target,
     log() {},
-    calledSubagent() {},
+    calledAgent() {},
     session: () => {
       throw new Error("session was not expected");
     },
   };
 }
 
-/** Mirrors a recorded eval turn: idle turns end on session.waiting. */
+/** Mirrors a recorded eval turn. */
 function completedTurn(sessionId, events = [], { input = {}, interactions = [] } = {}) {
   const call = { input, status: "completed" };
   return {
     sessionId,
     events,
     interactions,
-    status: "waiting",
+    sessionEnded: false,
     expectOk() {},
-    calledSubagent() {},
     requireToolCall(name, { status = "completed" } = {}) {
       if (call.status !== status) throw new Error(`${name} is ${call.status}, not ${status}.`);
       return call;
@@ -104,8 +103,8 @@ function targetFor({ calls = [], turns = {} } = {}) {
       calls.push({ path, options });
       return response({ revision: "revision-after-cleanup" });
     },
-    watchTurn(sessionId) {
-      return turns[sessionId];
+    attach(sessionId) {
+      return { watch: () => turns[sessionId] };
     },
   };
 }
@@ -170,10 +169,12 @@ test("close retires every session before restoring the complete source tree", as
         parentFinished = true;
         return completedTurn(parent.sessionId, parentEvents);
       };
-      target.watchTurn = () => {
-        assert.equal(parentFinished, true);
-        return child;
-      };
+      target.attach = () => ({
+        watch() {
+          assert.equal(parentFinished, true);
+          return child;
+        },
+      });
 
       await harness.request("make a change");
       await harness.verify("verify it");
@@ -245,12 +246,14 @@ test("one reset failure still retires other sessions and leaves unsafe source un
       return completedTurn("parent", parentEvents);
     },
   };
-  target.watchTurn = () => ({
-    sessionId: "bad",
-    events: [],
-    async result() {
-      return completedTurn("bad");
-    },
+  target.attach = () => ({
+    watch: () => ({
+      sessionId: "bad",
+      events: [],
+      async result() {
+        return completedTurn("bad");
+      },
+    }),
   });
   const t = context(target);
   t.session = async () => ({ start: async () => liveParent });
@@ -425,10 +428,6 @@ test("request follows a continued agent task past stale child turns", async () =
     { type: "delivery.consumed", data: { parts: [{ kind: "text", text: "Diagnose only." }] } },
   ]);
   diagnostic.session = { state: { streamIndex: 20 } };
-  diagnostic.result = async () => ({
-    ...completedTurn("child", diagnostic.events),
-    status: "waiting",
-  });
   const repaired = liveTurn("child", [
     ...diagnostic.events,
     { type: "delivery.consumed", data: { parts: [{ kind: "text", text: message }] } },
@@ -437,9 +436,9 @@ test("request follows a continued agent task past stale child turns", async () =
   const observed = [];
   await withHarness(async ({ harness, target }) => {
     const children = [initialChild, diagnostic, repaired];
-    target.watchTurn = (sessionId, options) => {
+    target.attach = (sessionId, options) => {
       observed.push({ sessionId, ...options });
-      return children.shift();
+      return { watch: () => children.shift() };
     };
     await harness.request("Create the tool.", { start: async () => initialParent });
     const result = await harness.request("Please repair it.", {

@@ -6,6 +6,7 @@
   "InstrumentationEvents",
   "InstrumentationHandler",
   "InstrumentationModelInput",
+  "InstrumentationModelOutcome",
   "InstrumentationModelStartedInput",
   "InstrumentationParentLineage",
   "InstrumentationProvider",

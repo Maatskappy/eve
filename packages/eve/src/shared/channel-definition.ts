@@ -2,7 +2,7 @@ import { type ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { SessionHandle } from "#channel/session.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { ChannelDelivery, ChannelDeliveryReplacement } from "#shared/channel-delivery.js";
@@ -29,7 +29,7 @@ export interface FetchFileResult {
 export interface FetchFileContext {
   readonly state: Readonly<Record<string, unknown>>;
   /** The session the attachment arrived in, for checking it against the session's caller. */
-  readonly session: SessionHandle;
+  readonly session: ChannelContext["session"];
 }
 
 export type FetchFileFunction = (
@@ -71,7 +71,7 @@ export interface GenericChannelDefinition<
   /** Return a replacement delivery, or void to keep it unchanged. Change state through the channel context. */
   deliver?(
     payload: ChannelDelivery<TState>,
-    ctx: TCtx,
+    ctx: TCtx & ChannelContext,
   ): ChannelDeliveryReplacement | void | Promise<ChannelDeliveryReplacement | void>;
   readonly state?: TState;
   /**
@@ -83,7 +83,7 @@ export interface GenericChannelDefinition<
   readonly cors?: ChannelCors;
   /**
    * Builds the per-step channel context handed to `events` and `deliver`.
-   * Receives the live {@link SessionHandle}, so a factory can close over it to
+   * Receives live session information and channel continuation routing, so a factory can
    * register late-bound callbacks. eve writes state mutations made inside the
    * returned context back through `adapter.state`.
    *
@@ -91,7 +91,7 @@ export interface GenericChannelDefinition<
    * event handler reads it as `ctx.channel`, with continuation routing added,
    * beside the session's context.
    */
-  context?(state: NonNullable<TState>, session: SessionHandle): TCtx;
+  context?(state: NonNullable<TState>, channel: ChannelContext): TCtx;
 
   readonly routes: readonly RouteDefinition<TState>[];
   receive?(

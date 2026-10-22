@@ -1,5 +1,5 @@
+import type { ChannelCors } from "#channel/cors.js";
 import type { MessageContent } from "#shared/message-content.js";
-import type { ChannelCorsOptions } from "#channel/cors.js";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
@@ -27,15 +27,6 @@ export type EveEventContext = ChannelContinuationOps;
 
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
-
-/** Serializable CORS options shared with custom channels. */
-export type EveChannelCorsOptions = ChannelCorsOptions;
-
-/**
- * Higher-level CORS policy for the default eve HTTP channel. Pass `true` for
- * fully permissive browser access, or pass an options object to narrow it.
- */
-export type EveChannelCors = boolean | EveChannelCorsOptions;
 
 /**
  * Turn-scoped context: a string, an array of strings, or a JSON object. The same
@@ -174,7 +165,7 @@ export interface EveChannelConfig {
    * CORS untouched, pass `true` for fully permissive CORS, or pass an options
    * object to narrow the policy.
    */
-  readonly cors?: EveChannelCors;
+  readonly cors?: ChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /**

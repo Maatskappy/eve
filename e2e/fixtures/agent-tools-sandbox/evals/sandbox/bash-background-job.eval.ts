@@ -1,4 +1,4 @@
-import { emptySessionView, foldEvents, callOutputSource } from "eve/events";
+import { emptySessionView, foldEvents, calls } from "eve/events";
 import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
@@ -56,12 +56,11 @@ function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
 }
 
 function bashOutputs(events: readonly SessionStreamEvent[]): readonly BashOutput[] {
-  const view = emptySessionView();
-  foldEvents(view, events);
+  const view = foldEvents(emptySessionView(), events);
 
-  return Object.values(view.calls).flatMap((call) => {
-    if (call.capability.name !== BASH_TOOL || call.outcome !== "completed") return [];
-    const output = callOutputSource(view, call.callId)?.output;
+  return calls(view).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.outcome !== "completed") return [];
+    const output = call.output;
     if (typeof output !== "object" || output === null || Array.isArray(output)) return [];
     return [output as BashOutput];
   });

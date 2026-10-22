@@ -1,7 +1,7 @@
 import type { Session } from "#channel/session.js";
 import { signInOf, type SignIn } from "#channel/sign-in.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { openSignIns } from "#protocol/session-reader.js";
+import { openSignIns } from "#protocol/session-projection/reader.js";
 
 // A pending sign-in holds its turn near the tail. Bound button lookups in long-lived threads,
 // as on main; the lookup needs only sign-in rows, not a complete conversation projection.

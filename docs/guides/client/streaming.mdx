@@ -3,17 +3,17 @@ title: "Streaming"
 description: "Consume eve client stream events live, reconnect by line position, and aggregate turn results."
 ---
 
-`ClientSession.send()` posts a message and returns a `Delivery` when the server accepts it. The receipt has its own `sessionId` and `deliveryId`; it does not wait for a reply. Call `result()` to aggregate its stream, or iterate it live.
+`ClientSession.send()` posts a message and returns a `Delivery` when the server accepts it. The receipt has its own `sessionId` and `deliveryId`; it does not wait for a reply. Call `result()` for its summary or `stream()` to observe it live. Both methods support independent, repeated reads. Import the shared delivery and reader contracts from `eve/sessions`.
 
 Session controls return deliveries too. `session.cancel({ turnId })` targets an observed turn, so a late cancellation cannot stop unrelated later work. Omitting `turnId` cancels the current work. For example, cancel as soon as this message reaches a turn:
 
 ```ts
-const { session, response } = await client.sessions.create({ message: "Run the long operation." });
+const { session, delivery } = await client.sessions.create({ message: "Run the long operation." });
 
-for await (const event of response) {
+for await (const event of delivery.stream()) {
   if (
     event.type === "delivery.consumed" &&
-    event.data.deliveryId === response.deliveryId &&
+    event.data.deliveryId === delivery.deliveryId &&
     event.data.turnId !== undefined
   ) {
     const cancellation = await session.cancel({ turnId: event.data.turnId });
@@ -28,13 +28,16 @@ Between turns, `session.compact()` queues context compaction without sending mod
 
 ```ts
 const compaction = await session.compact();
-const compacted = await compaction.result();
+for await (const event of compaction.stream()) {
+  if (event.type === "context.settled") console.log(event.data.outcome);
+}
+await compaction.result();
 
 const cleared = await session.clear();
 await cleared.result();
 ```
 
-Inspect `context.settled` in `compacted.events` to check whether summarization succeeded. A failed or empty summary preserves the previous history. `session.reset()` instead retires the session; its delivery settles after retirement and address release.
+Observe `context.settled` while streaming to check whether summarization succeeded. A failed or empty summary preserves the previous history. `session.reset()` instead retires the session; its delivery settles after retirement and address release.
 
 ## Aggregate a turn
 
@@ -46,12 +49,14 @@ const result = await response.result();
 
 console.log(result.status);
 console.log(result.reply);
-console.log(result.events.length);
+console.log(result.outcome);
+if (result.status === "failed") console.error(result.error.code, result.error.message);
 ```
 
-This consumes the stream until the message's delivery settles (`delivery.settled` for its
-`deliveryId`), finishing that line, or until the session ends first. A delivery settles when the
-turn that consumed it settles (`handled`), or when the turn pauses on a person
+This reads until the message's delivery settles (`delivery.settled` for its
+`deliveryId`), finishing that line. A stream that ends without the accepted delivery's settlement
+rejects the read, including when only a session terminal was observed. A delivery settles when the
+turn that consumed it settles (`handled`), or when the turn pauses on an interaction
 (`awaiting-input`), such as for an approval, question, or sign-in. See
 [authorization pauses](#authorization-pauses).
 
@@ -63,9 +68,14 @@ with `respond()`, which keeps reading the same turn. A question stays pending un
 `interaction.settled`, which the session you answer on also emits for a subagent's or workflow
 tool's question.
 
-`result().status` describes this request: `working`, `awaiting-input`, `completed`, `failed`, or
-`cancelled`. A completed request can leave its session open. Read `result().sessionEnded` to
-check whether the session itself ended.
+`result().status` describes the settled request: `awaiting-input`, `completed`, `failed`, or
+`cancelled`. To inspect live progress, use `delivery(view, deliveryId)` and, when it has a `turnId`, `turn(view, turnId)` from `eve/events`.
+A completed request can leave its session open. Read `result().sessionEnded` to check whether
+the session itself ended, and `outcome` to distinguish an applied control from an ignored one.
+
+Results do not collect an `events` array. To keep a request log, append events from
+`response.stream()` to your own collection. You can still call `response.result()` afterward;
+the reads do not share a consumption cursor.
 
 `result()` closes that HTTP stream, including when fetch instrumentation clones
 the response for tracing. The durable session remains available for follow-up
@@ -78,7 +88,7 @@ Use `for await...of` when you want to render progress:
 ```ts
 const response = await session.send("Draft a plan and show your work.");
 
-for await (const event of response) {
+for await (const event of response.stream()) {
   if (event.type === "content.delta") {
     process.stdout.write(event.data.delta);
   }
@@ -96,7 +106,7 @@ The default message reducer accumulates these for you. A raw stream consumer can
 ```ts
 const parts = new Map<string, string>();
 
-for await (const event of response) {
+for await (const event of response.stream()) {
   if (event.type !== "content.delta") continue;
   parts.set(event.data.partId, (parts.get(event.data.partId) ?? "") + event.data.delta);
 }
@@ -118,7 +128,7 @@ function handleEvent(event: SessionStreamEvent) {
   console.log(event.meta.position, event.meta.at);
 
   if (endsTurn(event)) {
-    console.log("turn ended or paused on a person:", event.type);
+    console.log("turn ended or paused on an interaction:", event.type);
   }
 }
 ```
@@ -127,7 +137,7 @@ The most common UI events are:
 
 | Event                 | Use                                                                                                                      |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `delivery.consumed`   | Confirm the user message landed; `data.parts` includes text and file metadata.                                           |
+| `delivery.consumed`   | Confirm the user message landed; `data.parts` includes text and file metadata, and `data.history` any imported history.  |
 | `content.delta`       | Render text and reasoning deltas as they stream.                                                                         |
 | `content.completed`   | A finished part. `phase` tells a `"reply"` from `"narration"`; `kind: "result"` is [structured output](./output-schema). |
 | `call.input`          | Accumulate raw tool-input deltas before validation completes.                                                            |
@@ -169,7 +179,7 @@ const response = await session.send("Run the long operation.", {
   streamReconnectPolicy: { reconnect: false },
 });
 
-for await (const event of response) {
+for await (const event of response.stream()) {
   console.log(event.type);
 }
 ```
@@ -275,7 +285,7 @@ The child has its own cursor, starting at `0`, and reading it never advances the
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn. Cancellation is asynchronous; watch the stream for `turn.settled` with `outcome: "cancelled"`.
+Pass an `AbortSignal` to `send()` to abort submission, and to `stream()` or `result()` to abort a read. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn. Cancellation is asynchronous; watch the stream for `turn.settled` with `outcome: "cancelled"`.
 
 Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 
@@ -287,14 +297,17 @@ const response = await session.send("Run a long analysis.", {
   signal: controller.signal,
 });
 
-for await (const event of response) {
+for await (const event of response.stream({ signal: controller.signal })) {
   console.log(event.type);
 }
 
 clearTimeout(timeout);
 ```
 
-Once a response is aborted, create a new send for the next turn. Don't reuse the same `Delivery`.
+An interrupted read does not consume the delivery. Call `response.stream()` or
+`response.result()` again without the aborted signal to observe the same accepted work.
+Aborting one read leaves concurrent readers running; do not send the message again merely to
+resume observation.
 
 ## What to read next
 

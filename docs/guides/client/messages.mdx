@@ -12,31 +12,38 @@ Pass a string to `send()` for plain text:
 ```ts
 import { Client } from "eve/client";
 
-const client = new Client({ host: "http://127.0.0.1:2000" });
-const { session, response } = await client.sessions.create({
+const client = new Client({ baseUrl: "http://127.0.0.1:2000" });
+const { session, delivery } = await client.sessions.create({
   message: "What is the weather in Brooklyn?",
 });
 
 // Metadata is available as soon as the POST succeeds.
-console.log(response.sessionId);
+console.log(delivery.sessionId);
 
-const result = await response.result();
+const result = await delivery.result();
 console.log(result.status, result.reply);
 ```
 
-`response.result()` consumes the event stream and returns a `DeliveryResult`:
+`delivery.result()` reads through this delivery's settlement and returns a `DeliveryResult`.
+Import `Delivery`, `DeliveryReadOptions`, and `DeliveryResult` from `eve/sessions`:
 
-| Field          | Meaning                                                                              |
-| -------------- | ------------------------------------------------------------------------------------ |
-| `reply`        | The request's reply text, from the parts `turn.settled.reply` lists.                 |
-| `status`       | `working`, `awaiting-input`, `completed`, `failed`, or `cancelled` for this request. |
-| `sessionEnded` | Whether the session ended in the delivery's final commit.                            |
-| `deliveryId`   | The accepted command's ID.                                                           |
-| `events`       | All stream events observed during the turn.                                          |
-| `sessionId`    | Session ID for streaming and inspection.                                             |
-| `data`         | Structured output when the turn requested an [output schema](./output-schema).       |
+| Field          | Meaning                                                                                            |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| `reply`        | The request's reply text, from the parts `turn.settled.reply` lists.                               |
+| `status`       | `awaiting-input`, `completed`, `failed`, or `cancelled` for this settled request.                  |
+| `sessionEnded` | Whether the session ended in the delivery's final commit.                                          |
+| `deliveryId`   | The accepted command's ID.                                                                         |
+| `outcome`      | The delivery's outcome: `handled`, `awaiting-input`, `applied`, `ignored`, `refused`, or `failed`. |
+| `error`        | Required `ErrorInfo` when `status` is `failed`.                                                    |
+| `interactions` | Display-safe interactions left open for a person.                                                  |
+| `sessionId`    | Session ID for streaming and inspection.                                                           |
+| `data`         | Structured output when the turn requested an [output schema](./output-schema).                     |
 
-When the turn or the session fails, the result has `status: "failed"` rather than throwing. HTTP failures throw rather than returning a request result.
+A settled request's failure returns `status: "failed"` and `error`; inspect `error.code` and
+`error.message` to recover. HTTP failures and reads interrupted before settlement throw rather
+than fabricating a result. An `awaiting-input` result is complete: answering the prompt creates
+another delivery. Ordinary results do not retain an event log; capture `delivery.stream()`
+explicitly when you need one.
 
 `session.send()` retries `409 session_not_ready` with bounded exponential backoff for up to 20
 seconds when a durable run has been accepted but its command inbox is still starting. The caller's
@@ -59,7 +66,7 @@ response to a message accepted before the upgrade. That accepted message is not 
 Pass the full payload to `create()` for the first turn or `send()` for a follow-up:
 
 ```ts
-const { session, response } = await client.sessions.create({
+const { session, delivery } = await client.sessions.create({
   message: "What should I do on this screen?",
   clientContext: {
     route: "/billing",
@@ -68,7 +75,7 @@ const { session, response } = await client.sessions.create({
   },
 });
 
-await response.result();
+await delivery.result();
 ```
 
 `clientContext` is ephemeral context for the current turn. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. The context remains available to every model call in the turn, then disappears before the next turn. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
@@ -139,23 +146,25 @@ The reply's delivery records a `response.submitted` for each answer, and each re
 
 `send(message, options)` and `respond(answers, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
-## Single-use responses
+## Reusable delivery reads
 
-`Delivery` is single-use. Either aggregate it:
+Call `stream()` to observe progress, then `result()` for the summary:
 
 ```ts
+for await (const event of response.stream()) {
+  console.log(event.type);
+}
 const result = await response.result();
 ```
 
-Or stream it:
+Each read follows the same interval, from the admitting commit through the complete settlement
+commit, independently of other readers. Repeated or concurrent reads are supported; reading the
+interval again can open another HTTP stream. A completed summary may be cached.
 
-```ts
-for await (const event of response) {
-  console.log(event.type);
-}
-```
-
-Don't do both on the same response. Once the stream is consumed, the `ClientSession` advances its cursor for the next turn.
+Pass `{ signal }` to `stream()` or `result()` to abort that read. An aborted or failed read does
+not consume the handle or cancel the accepted work; retry the same delivery without submitting
+another message. Use `session.cancel()` to cancel work. A signal passed to `send()` controls
+submission, so pass it to the read too when a timeout must cover both.
 
 ## What to read next
 

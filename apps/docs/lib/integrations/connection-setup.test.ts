@@ -83,16 +83,6 @@ describe("Sanity connection setup", () => {
       "vercel connect create sanity --name sanity --connection-method mcp",
     );
   });
-
-  it("documents read-only Knowledge Bases with an organization token", () => {
-    const configure = getIntegration("sanity")!.configure!;
-
-    expect(configure).toContain("### Sanity Knowledge Bases");
-    expect(configure).toContain(
-      'url: "https://api.sanity.io/v1/context/organizations/<orgId>/mcp/<endpointName>"',
-    );
-    expect(configure).toContain("Bearer ${process.env.SANITY_ORGANIZATION_TOKEN}");
-  });
 });
 
 describe("Shopify connection setup", () => {

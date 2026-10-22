@@ -1,6 +1,7 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
+import type { SandboxReadinessRequest } from "#execution/sandbox/readiness-types.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
 import {
@@ -44,11 +45,14 @@ export interface SessionHandoverPayload {
 
 export type SessionInboxPayload =
   | SessionFailurePayload
+  | SandboxReadinessRequest
   | SessionHandoverPayload
   | HookPayload
   | SessionCommand
   | WorkflowToolRunMessage
   | AuthorizationCallbackPayload;
+
+export type SessionOwnerMessage = WorkflowToolRunMessage | SandboxReadinessRequest;
 
 interface Source {
   readonly token: string;

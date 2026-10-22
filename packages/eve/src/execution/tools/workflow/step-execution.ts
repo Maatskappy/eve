@@ -1,15 +1,7 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import {
-  AuthKey,
-  DynamicSkillManifestKey,
-  DynamicSkillSandboxKey,
-  InitiatorAuthKey,
-  SandboxKey,
-  SessionIdKey,
-  SessionKey,
-} from "#context/keys.js";
-import { withDynamicSkillFiles } from "#context/dynamic-skill-files.js";
+import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import { withOwnerSandboxReadiness } from "#execution/sandbox/borrow-readiness.js";
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -52,10 +44,6 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
-    if (input.sandbox.skills !== undefined)
-      context.set(DynamicSkillManifestKey, input.sandbox.skills);
-    if (input.sandbox.skillsWritten !== undefined)
-      context.set(DynamicSkillSandboxKey, input.sandbox.skillsWritten);
 
     const sandbox = openStepSandbox(input, context);
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
@@ -153,18 +141,21 @@ function openStepSandbox(input: WorkflowStepContext, context: ContextContainer) 
       nodeId: bundle.nodeId,
     });
     const node = compiled.graph.root;
-    return withDynamicSkillFiles(
-      context,
-      await ensureSandboxAccess({
-        compiledArtifactsSource: compiled.compiledArtifactsSource,
-        nodeId: node.nodeId,
-        ownsSandbox: false,
-        registry: node.sandboxRegistry,
-        sessionId,
-        state: state ?? null,
-        borrowed: true,
-      }),
-    );
+    const options = {
+      compiledArtifactsSource: compiled.compiledArtifactsSource,
+      nodeId: node.nodeId,
+      ownsSandbox: false,
+      registry: node.sandboxRegistry,
+      sessionId,
+      state: state ?? null,
+      borrowed: true,
+    };
+    return withOwnerSandboxReadiness({
+      ctx: context,
+      ownerSessionId: input.session.id,
+      access: await ensureSandboxAccess(options),
+      resume: (state) => ensureSandboxAccess({ ...options, state, resumeOnly: true }),
+    });
   };
   const openOnce = (): Promise<EnsuredSandboxAccess> => {
     opening ??= open().catch((error: unknown) => {

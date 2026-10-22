@@ -9,10 +9,10 @@ import type {
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { SessionOwnerMessage } from "#execution/session-inbox/inbox.js";
 
 export type NextTurnInstruction =
-  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
+  | { readonly kind: "workflow"; readonly message: SessionOwnerMessage }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }

@@ -4,8 +4,7 @@ import type {
   SessionParent,
   SessionTraceRoot,
 } from "#channel/types.js";
-import { DynamicSkillManifestKey, DynamicSkillSandboxKey } from "#context/keys.js";
-import type { DynamicSkillManifest, LocalDevRequestProvenance } from "#context/keys.js";
+import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { STUB_CONTEXT_KEY, type StubScope } from "#tool-stubs/types.js";
 import { readSerializedSessionSchedule, type SessionSchedule } from "#context/session-schedule.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
@@ -63,9 +62,6 @@ export interface AgentSessionBundle {
 export interface AgentSessionSandbox {
   readonly sessionId: string;
   readonly state?: SandboxState;
-  /** The calling session's packages, prepared only if a workflow step needs its sandbox. */
-  readonly skills?: DynamicSkillManifest;
-  readonly skillsWritten?: Readonly<Record<string, string>>;
 }
 
 type CallerDispatch = Pick<
@@ -110,16 +106,7 @@ export function captureAgentSessionContext(
       sessionId: session.sessionId,
       turn: { id: batch.event.turnId, sequence: batch.event.sequence },
     },
-    sandbox: {
-      sessionId: caller.sandboxSessionId,
-      state: caller.sandboxState,
-      skills: caller.serializedContext[DynamicSkillManifestKey.name] as
-        | DynamicSkillManifest
-        | undefined,
-      skillsWritten: caller.serializedContext[DynamicSkillSandboxKey.name] as
-        | Readonly<Record<string, string>>
-        | undefined,
-    },
+    sandbox: { sessionId: caller.sandboxSessionId, state: caller.sandboxState },
     traceRoot: caller.traceRoot,
     trace: resolveToolCallAgentTrace({
       callId,

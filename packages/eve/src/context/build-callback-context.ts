@@ -11,7 +11,7 @@ import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js
  * Must be called inside a harness step (active `contextStorage.run`).
  * Throws when called outside an ALS scope.
  */
-export function buildCallbackContext(): SessionContext {
+export function buildCallbackContext(abortSignal?: AbortSignal): SessionContext {
   const ctx = loadContext();
   const session = ctx.require(SessionKey);
 
@@ -36,7 +36,7 @@ export function buildCallbackContext(): SessionContext {
       if (environment !== undefined && access.environment !== environment) {
         throw new Error("The requested sandbox environment is not active for the current session.");
       }
-      return access.get().then((sandbox) => {
+      return access.get(abortSignal).then((sandbox) => {
         if (sandbox === null) {
           throw new Error("The sandbox is not available in the current authored runtime context.");
         }

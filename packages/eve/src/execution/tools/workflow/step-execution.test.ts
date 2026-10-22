@@ -17,6 +17,7 @@ import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { requestSandboxReadiness } from "#execution/sandbox/request-readiness.js";
 import { withDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
@@ -47,6 +48,17 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 const bundle = vi.hoisted(() => ({
   loadedFrom: [] as unknown[],
   registry: undefined as RuntimeSandboxRegistry | undefined,
+}));
+vi.mock("#execution/sandbox/request-readiness.js", () => ({
+  requestSandboxReadiness: vi.fn(
+    async ({ requesterSessionId }: { requesterSessionId: string }) => ({
+      session: {
+        providerName: "upsert",
+        state: { key: requesterSessionId },
+        stateProtocolVersion: 1,
+      },
+    }),
+  ),
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: async (input: { compiledArtifactsSource: unknown }) => {
@@ -170,6 +182,7 @@ describe("workflow step authorization", () => {
     durable.stepId = "step-1";
     durable.entries.clear();
     bundle.loadedFrom = [];
+    vi.mocked(requestSandboxReadiness).mockClear();
     await shutdownActiveSandboxHandles();
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -200,7 +213,7 @@ describe("workflow step authorization", () => {
     },
   );
 
-  it("resolves a development delivery's generation and starts the sandbox by key", async () => {
+  it("resolves a development delivery's generation and resumes the owner's acknowledged sandbox", async () => {
     const { registry, starts } = upsertSandboxes();
     bundle.registry = registry;
     const owner = { ...context("user-1", "owner-session") };
@@ -225,39 +238,27 @@ describe("workflow step authorization", () => {
       ),
     ).resolves.toMatchObject({ kind: "result", output: "written" });
     expect(bundle.loadedFrom).toEqual([generation.source]);
-    expect(starts).toEqual(["owner-session"]);
+    expect(starts).toEqual([]);
+    expect(requestSandboxReadiness).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerSessionId: "session-1" }),
+    );
   });
 
-  it("materializes the caller's pending skill files only when a workflow step accesses its sandbox", async () => {
+  it("requests owner readiness only when a workflow step accesses its sandbox", async () => {
     const { registry, starts } = upsertSandboxes();
     bundle.registry = registry;
     const owner = context();
-    const input: WorkflowStepContext = {
-      ...owner,
-      sandbox: {
-        ...owner.sandbox,
-        skills: {
-          policy: [
-            {
-              name: "policy",
-              description: "Policy",
-              markdown: "Read rules.md.",
-              revision: "policy-v1",
-              files: { "rules.md": "UnVsZXM=" },
-            },
-          ],
-        },
-      },
-    };
-    await runStep(() => "No sandbox needed", input);
+    await runStep(() => "No sandbox needed", owner);
     expect(starts).toEqual([]);
+    expect(requestSandboxReadiness).not.toHaveBeenCalled();
     await expect(
       runStep(async (ctx) => {
-        const sandbox = await ctx.getSandbox();
-        return await sandbox.readTextFile({ path: "/workspace/skills/policy/rules.md" });
-      }, input),
-    ).resolves.toMatchObject({ kind: "result", output: "Rules" });
-    expect(starts).toEqual([owner.sandbox.sessionId]);
+        await Promise.all([ctx.getSandbox(), ctx.getSandbox()]);
+        return "Ready";
+      }, owner),
+    ).resolves.toMatchObject({ kind: "result", output: "Ready" });
+    expect(starts).toEqual([]);
+    expect(requestSandboxReadiness).toHaveBeenCalledOnce();
   });
 
   it("leaves the session's handle tracked for runtime shutdown after a step uses the sandbox", async () => {

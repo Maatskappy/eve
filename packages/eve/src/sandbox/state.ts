@@ -5,6 +5,8 @@ import type { SandboxDeleteOptions, SandboxPreparedArtifact } from "#shared/sand
 export type SandboxSessionEndReason = "completed" | "expired" | "failed";
 
 export interface SandboxSessionState {
+  /** Distinguishes recreation even when the provider reuses the same native key. */
+  readonly instanceId?: string;
   readonly providerName: string;
   readonly state: SandboxPreparedArtifact;
   readonly stateProtocolVersion: number;
@@ -18,6 +20,6 @@ export interface SandboxAccess {
   readonly environment?: SandboxEnvironmentIdentity;
   captureState(): Promise<SandboxState>;
   delete?(options?: SandboxDeleteOptions): Promise<void>;
-  get(): Promise<SandboxSession | null>;
+  get(abortSignal?: AbortSignal): Promise<SandboxSession | null>;
   stop(): Promise<void>;
 }

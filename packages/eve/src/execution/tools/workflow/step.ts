@@ -129,8 +129,9 @@ async function invokeAuthorizedStep(input: {
     token: callbackToken,
     authorizationResults,
     sandbox: {
-      ...run.agentContext.sandbox,
       bundle: run.agentContext.bundle,
+      sessionId: run.agentContext.sandbox.sessionId,
+      state: run.agentContext.sandbox.state,
     },
   };
   const invocation: WorkflowStepInvocation = {

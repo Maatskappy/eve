@@ -35,7 +35,6 @@ import {
   type AppliedRunMessage,
 } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
-import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
@@ -44,6 +43,8 @@ import type {
 import { turnStep } from "#execution/session/turn-step.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
 import type { TurnControl } from "#execution/session/turn-control.js";
+import { handleSandboxReadiness } from "#execution/session/sandbox-readiness.js";
+import type { SessionOwnerMessage } from "#execution/session-inbox/inbox.js";
 import {
   findBlockingWorkflowToolRun,
   getBlockingWorkflowToolRuns,
@@ -146,13 +147,17 @@ export class SessionExecution {
    * stream is closed, and finalizing the session terminates the children.
    */
   private async handleBoundaryMessages(
-    messages: readonly WorkflowToolRunMessage[],
+    messages: readonly SessionOwnerMessage[],
     ending = false,
     turn?: ActiveTurn,
   ): Promise<void> {
     let applied: AppliedRunMessage[] = [];
     for (const message of messages) {
-      if (!isAppliedRunMessage(message)) {
+      if (message.kind === "sandbox-readiness") {
+        await this.applyRunMessages(applied, turn);
+        applied = [];
+        await handleSandboxReadiness(this.input.cursor, message, !ending, turn?.signal);
+      } else if (!isAppliedRunMessage(message)) {
         await this.applyRunMessages(applied, turn);
         applied = [];
         await handleWorkflowToolRunMessage({ cursor: this.input.cursor, message });
@@ -309,9 +314,13 @@ export class SessionExecution {
    * fan-out's messages share one step.
    */
   async handleWorkflowMessage(
-    message: WorkflowToolRunMessage,
+    message: SessionOwnerMessage,
     turn?: ActiveTurn,
   ): Promise<RuntimeActionResult | undefined> {
+    if (message.kind === "sandbox-readiness") {
+      await handleSandboxReadiness(this.input.cursor, message, true, turn?.signal);
+      return undefined;
+    }
     if (isAppliedRunMessage(message)) {
       const following =
         turn?.takeAppliedRunMessages() ?? takeLeadingAppliedRunMessages(this.input.inbox);

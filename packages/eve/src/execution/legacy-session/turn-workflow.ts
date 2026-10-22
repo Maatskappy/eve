@@ -20,7 +20,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
   const prepared = await prepareLegacySessionStep(rawInput);
   const { sessionId } = prepared.sessionState;
-  await recordSessionOwnerStep({ sessionId });
+  await recordSessionOwnerStep({ sessionId, serializedContext: prepared.serializedContext });
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));

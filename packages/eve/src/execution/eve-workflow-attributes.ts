@@ -10,8 +10,8 @@
  *
  * `$eve.*` is the framework-owned attribute namespace. Authored code
  * never emits these tags directly — they describe the structural shape
- * of a session/turn/subagent run so dashboards can stitch a tree of
- * workflow runs back together without inspecting their bodies.
+ * of a session/turn/subagent run for routing, sandbox ownership checks,
+ * and dashboards without inspecting workflow payloads.
  *
  * Tag inventory (recap):
  * - `$eve.type`         — `"session" | "turn" | "subagent"`
@@ -35,6 +35,7 @@
  *   and legacy importers re-record their own at boot. Ingress and the stranded
  *   replay guard compare it to decide whether the run can still execute
  * - `$eve.session`      — public session id a handoff successor owner serves
+ * - `$eve.sandbox_owner` — physical sandbox's logical session id for a sharing child
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
@@ -47,7 +48,8 @@ import {
   type SessionTraceSeed,
 } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
-import { isNonEmptyString } from "#shared/guards.js";
+import { isNonEmptyString, isObject } from "#shared/guards.js";
+import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import {
   ConversationContextKey,
@@ -68,6 +70,9 @@ export const EVE_TYPE_ATTRIBUTE = "$eve.type";
  */
 export const EVE_SESSION_ATTRIBUTE = "$eve.session";
 
+/** Framework-derived sharing identity, not a requester's claim of access. */
+export const EVE_SANDBOX_OWNER_ATTRIBUTE = "$eve.sandbox_owner";
+
 /** Root session id of a delegated subagent session run. */
 export const EVE_ROOT_ATTRIBUTE = "$eve.root";
 
@@ -86,6 +91,7 @@ interface SessionIdentitySummary {
 /** Untyped channel adapter snapshot as it survives serialization. */
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
+  readonly state?: unknown;
 }
 
 /** Untyped session parent snapshot as it survives serialization. */
@@ -180,6 +186,22 @@ export function readParentSessionId(
   serializedContext: Record<string, unknown>,
 ): string | undefined {
   return readParentLineage(serializedContext).sessionId;
+}
+
+/** Sharing is recorded by subagent dispatch, including explicit self-delegation. */
+export function readSharedSandboxOwnerSessionId(
+  serializedContext: Record<string, unknown>,
+): string | undefined {
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
+    | SerializedChannelAdapter
+    | undefined;
+  if (
+    channel?.kind !== SUBAGENT_ADAPTER_KIND ||
+    readParentSessionId(serializedContext) === undefined
+  )
+    return undefined;
+  const owner = isObject(channel.state) ? channel.state.sandboxSessionId : undefined;
+  return isNonEmptyString(owner) ? owner : undefined;
 }
 
 /**
@@ -331,6 +353,7 @@ export function buildSubagentRootAttributes(input: {
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     [EVE_TYPE_ATTRIBUTE]: "subagent",
     "$eve.parent": input.parentSessionId,
+    [EVE_SANDBOX_OWNER_ATTRIBUTE]: readSharedSandboxOwnerSessionId(input.serializedContext),
     "$eve.parent_call": input.parentCallId,
     "$eve.parent_turn": input.parentTurnId,
     [EVE_ROOT_ATTRIBUTE]: input.rootSessionId,

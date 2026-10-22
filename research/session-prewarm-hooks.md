@@ -55,6 +55,24 @@ identity. Changes and removals apply on sandbox access, not while resolving the
 skill catalog. A failed synchronization remains pending and retries on access;
 never return a sandbox whose required packages are only partly written.
 
+Retaining base64-encoded files increases durable workflow payloads. Limit each
+session's serialized dynamic skill manifest to 16 MiB, rejecting an oversized
+update before committing it. Applications should keep larger file sets in their
+own snapshots or Drives. Workflow steps request readiness rather than carrying
+copies of package bytes in every invocation.
+
+The physical sandbox's session owns package installation records. Workflow steps
+and parent-sharing children request readiness through its durable owner loop;
+the owner checkpoints preparation before replying on the requesting run's private
+stream. Borrowers only resume acknowledged state and ask the owner to recreate a
+missing sandbox. Shared package contributions remain outside skill catalogs;
+conflicting revisions under the same name are rejected, and ended contributors
+are pruned before access. Authorize registered workflow runs and direct children
+whose framework-owned sharing metadata names the same physical sandbox owner;
+parent lineage alone grants no access. Successor owners retain this metadata and
+their logical session identity across handoff. This reuses existing session
+transport and storage rather than adding a distributed lock or resource pool.
+
 Run prewarm callbacks in discovery order after inbox ownership is established,
 before the first turn or message-free wait. Creation still returns on acceptance;
 messages may queue while preparation runs. Do not run dynamic resolvers, channel

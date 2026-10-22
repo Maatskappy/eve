@@ -1,4 +1,5 @@
 import { buildCallbackContext } from "#context/build-callback-context.js";
+import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
@@ -35,7 +36,6 @@ export async function prewarmSessionStep(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
   const prepared = await withContextScope(ctx, session, async (enriched) => {
-    const callback = buildCallbackContext();
     for (const hook of bundle.hookRegistry.prewarm ?? []) {
       if (input.abortSignal.aborted) break;
       const controller = new AbortController();
@@ -45,13 +45,16 @@ export async function prewarmSessionStep(input: {
       const prewarm: PrewarmContext = {
         abortSignal,
         agent: { name: bundle.turnAgent.id, nodeId: bundle.nodeId },
-        session: { id: callback.session.id, auth: callback.session.auth },
+        session: {
+          id: session.sessionId,
+          auth: { current: ctx.get(AuthKey) ?? null, initiator: ctx.get(InitiatorAuthKey) ?? null },
+        },
         preload(asset, prepare) {
           if (!active) throw new Error("ctx.preload() called after the prewarm hook returned.");
           if (asset !== "sandbox") throw new TypeError('ctx.preload() supports only "sandbox".');
           const work = (async () => {
             abortSignal.throwIfAborted();
-            const sandbox = await callback.getSandbox();
+            const sandbox = await buildCallbackContext(abortSignal).getSandbox();
             abortSignal.throwIfAborted();
             await prepare?.(bindSandboxAbortSignal(sandbox, abortSignal));
           })();

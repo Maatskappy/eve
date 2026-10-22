@@ -113,7 +113,7 @@ describe("defineSandboxProvider", () => {
     expect([...files.keys()]).toEqual(["/workspace/notes/a.txt"]);
     expect(await sandbox.readTextFile({ path: "/workspace/notes/a.txt" })).toBe("hi");
     expect(connection.spawn).toHaveBeenCalledWith({
-      abortSignal: undefined,
+      signal: undefined,
       command: "ls",
       env: {},
       workingDirectory: "/workspace/src",
@@ -128,7 +128,7 @@ describe("defineSandboxProvider", () => {
     );
     expect(await sandbox.readTextFile({ path: "b.txt" })).toBe("streamed");
     expect(connection.readFile).toHaveBeenLastCalledWith({
-      abortSignal: undefined,
+      signal: undefined,
       path: "/workspace/b.txt",
     });
   });

@@ -53,7 +53,7 @@ export interface SandboxConnection<Extensions extends object = {}> {
    * holds only the per-call variables. Aborting kills the process tree.
    */
   spawn(options: {
-    readonly abortSignal?: AbortSignal;
+    readonly signal?: AbortSignal;
     readonly command: string;
     readonly env: Readonly<Record<string, string>>;
     readonly workingDirectory: string;
@@ -63,7 +63,7 @@ export interface SandboxConnection<Extensions extends object = {}> {
    * unreadable path rejects. Return bytes or a stream, whichever the backend has.
    */
   readFile(options: {
-    readonly abortSignal?: AbortSignal;
+    readonly signal?: AbortSignal;
     readonly path: string;
   }): Promise<Uint8Array | ReadableStream<Uint8Array> | null>;
   /** Creates missing parent directories and overwrites existing files. The only write primitive. */
@@ -140,7 +140,7 @@ export interface SandboxPrepareContext {
 }
 
 export interface SandboxSessionEndOptions {
-  readonly abortSignal?: AbortSignal;
+  readonly signal?: AbortSignal;
   readonly reason: "completed" | "expired" | "failed" | "deleted";
 }
 
@@ -315,7 +315,7 @@ function adaptSandboxProvider<
           await close();
         } finally {
           await implementation.onSessionEnd(context, state, {
-            abortSignal: options?.abortSignal,
+            signal: options?.signal,
             reason: "deleted",
           });
         }
@@ -448,14 +448,14 @@ function createConnectionSession<Extensions extends object>(
     resolvePath: resolveSandboxPath,
     spawn: (options) =>
       connection.spawn({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         command: options.command,
         env: options.env ?? {},
         workingDirectory: resolveSandboxPath(options.workingDirectory ?? WORKSPACE_ROOT),
       }),
     async writeFile(options) {
       await connection.writeFiles({
-        abortSignal: options.abortSignal,
+        signal: options.signal,
         files: [{ content: await streamToBuffer(options.content), path: options.path }],
       });
     },

@@ -72,7 +72,7 @@ describe("buildSandboxSession", () => {
     }));
     await buildSandboxSession({ ...createTestPrimitives(), writeFiles }).writeFiles({ files });
     expect(writeFiles).toHaveBeenCalledExactlyOnceWith({
-      abortSignal: undefined,
+      signal: undefined,
       files: files.map((file) => ({ content: file.content, path: `/resolved/${file.path}` })),
     });
 
@@ -113,7 +113,7 @@ describe("buildSandboxSession", () => {
     await session.removePath({ force: true, path: "skills/tenant", recursive: true });
 
     expect(removePath).toHaveBeenCalledWith({
-      abortSignal: undefined,
+      signal: undefined,
       force: true,
       path: "/workspace/skills/tenant",
       recursive: true,
@@ -240,7 +240,7 @@ describe("buildSandboxSession", () => {
     const result = await session.readBinaryFile({ path: "assets/binary.bin" });
 
     expect(readFile).toHaveBeenCalledWith({
-      abortSignal: undefined,
+      signal: undefined,
       path: "/workspace/assets/binary.bin",
     });
     expect(result).toEqual(bytes);
@@ -303,7 +303,7 @@ describe("buildSandboxSession", () => {
 
     await session.readTextFile({ path: "relative.txt" });
 
-    expect(readFile).toHaveBeenCalledWith({ abortSignal: undefined, path: "/cwd/relative.txt" });
+    expect(readFile).toHaveBeenCalledWith({ signal: undefined, path: "/cwd/relative.txt" });
   });
 
   // ---------------------------------------------------------------------------

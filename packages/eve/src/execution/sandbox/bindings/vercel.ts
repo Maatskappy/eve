@@ -26,6 +26,7 @@ import {
   applyInitialVercelNetworkPolicy,
   createVercelNetworkPolicySetter,
   ensureVercelSandboxBaseRuntime,
+  toVercelNetworkPolicy,
   withBaseSetupNetworkPolicy,
 } from "#execution/sandbox/bindings/vercel-base-runtime.js";
 import {
@@ -104,12 +105,12 @@ export function createVercelSandbox(
   const createSandbox = input.createSandbox ?? createVercelEveImageSandbox;
 
   return {
-    async onSessionEnd(context, state, { abortSignal }) {
+    async onSessionEnd(context, state, { signal }) {
       await deleteNamedVercelSandbox({
         createOptions,
         sandboxModule: await loadSandboxModule(),
         sandboxName: state?.sandboxName ?? vercelSessionName(context.session.id),
-        signal: abortSignal,
+        signal,
       });
     },
     async prepare(context) {
@@ -175,11 +176,14 @@ export function createVercelSandbox(
     sandboxName: string,
   ): Promise<VercelSandbox> {
     const artifact = requirePreparedVercelTemplate(artifactValue);
-    const { mounts, ...runtimeOptions } = options ?? {};
+    const { mounts, networkPolicy, ...runtimeOptions } = options ?? {};
     const toolSession = context.kind === "tool-session";
     const authoredCreateOptions = {
       ...createOptions,
       ...runtimeOptions,
+      ...(networkPolicy === undefined
+        ? {}
+        : { networkPolicy: toVercelNetworkPolicy(networkPolicy) }),
       env: { ...SANDBOX_AGENT_ENV, ...(runtimeOptions.env ?? createOptions.env) },
     };
     const sessionCreateOptions = toolSession
@@ -207,7 +211,7 @@ export function createVercelSandbox(
       });
       // Template-less sessions run base setup with open egress, so the policy
       // from open() or else the environment applies only once it finishes.
-      const networkPolicy = runtimeOptions.networkPolicy ?? createOptions.networkPolicy;
+      const networkPolicy = sessionCreateOptions.networkPolicy;
       if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
         try {
           await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
@@ -558,7 +562,7 @@ function createVercelConnection(
       await sandbox.fs.rm(options.path, {
         force: options.force,
         recursive: options.recursive,
-        signal: options.abortSignal,
+        signal: options.signal,
       });
     },
     async spawn(options): Promise<SandboxProcess> {
@@ -568,7 +572,7 @@ function createVercelConnection(
         cwd: options.workingDirectory,
         detached: true,
         env: options.env,
-        signal: options.abortSignal,
+        signal: options.signal,
       });
       return adaptMultiplexedCommandToSandboxProcess({
         command,
@@ -581,8 +585,10 @@ function createVercelConnection(
     async writeFiles(options: SandboxWriteFilesOptions) {
       if (options.files.length === 0) return;
       await sandbox.writeFiles(
-        await resolveVercelWriteFiles(sandbox, options.files, options.abortSignal),
-        { signal: options.abortSignal },
+        await resolveVercelWriteFiles(sandbox, options.files, options.signal),
+        {
+          signal: options.signal,
+        },
       );
     },
   };

@@ -6,7 +6,7 @@ import {
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 export interface SandboxDeleteOptions {
-  readonly abortSignal?: AbortSignal;
+  readonly signal?: AbortSignal;
 }
 
 export interface SandboxProviderResourceFile {

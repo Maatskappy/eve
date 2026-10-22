@@ -13,9 +13,9 @@ export default defineEval({
     );
     turn.expectOk();
     const started = turn.events.find(
-      (event) => event.type === "agent.started" && event.data.name === "custom-provider",
+      (event) => event.type === "child.opened" && event.data.name === "custom-provider",
     );
-    if (started?.type !== "agent.started") {
+    if (started?.type !== "child.opened") {
       throw new Error("The turn did not call the custom-provider subagent.");
     }
     const child = (await t.target.watchTurn(started.data.sessionId).result()).expectOk();

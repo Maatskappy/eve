@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  droppedExtensionCapabilityReason,
   EXTENSION_CAPABILITY_SUPPORT,
   EXTENSION_CAPABILITY_VERSIONS,
   EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
@@ -87,6 +88,16 @@ describe("extension compatibility manifest", () => {
       { capability: "futureCapability", requiredVersion: 1, supportedVersions: [] },
       { capability: "tool", requiredVersion: 2, supportedVersions: [1] },
     ]);
+  });
+
+  it("names why a dropped capability epoch is no longer supported", () => {
+    expect(droppedExtensionCapabilityReason("tool", 1)).toContain(
+      "require rebuilding this extension",
+    );
+    expect(droppedExtensionCapabilityReason("tool", EXTENSION_CAPABILITY_VERSIONS.tool + 1)).toBe(
+      undefined,
+    );
+    expect(droppedExtensionCapabilityReason("toString", 1)).toBe(undefined);
   });
 
   it("fails closed for capability names that collide with Object.prototype members", () => {

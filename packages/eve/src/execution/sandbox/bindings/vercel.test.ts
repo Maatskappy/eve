@@ -1556,7 +1556,7 @@ describe("createVercelSandbox", () => {
     const sandbox = fake.sandboxes.get(handle.sandbox.name)!;
     const abortSignal = new AbortController().signal;
 
-    await expect(handle.onSandboxDelete({ abortSignal })).resolves.toBeUndefined();
+    await expect(handle.onSandboxDelete({ signal: abortSignal })).resolves.toBeUndefined();
 
     expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
       expect.objectContaining({ name: handle.sandbox.name, resume: false, signal: abortSignal }),

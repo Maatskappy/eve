@@ -19,7 +19,6 @@ export class NodeModuleEvaluationContext {
     registries: readonly AgentSourceRegistry[],
     mountSourceId?: (binding: AgentModuleBinding) => string | undefined,
     mounts?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["mounts"],
-    evaluationId?: string,
     appRoot?: string,
     graph?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["graph"],
   ) {
@@ -28,7 +27,6 @@ export class NodeModuleEvaluationContext {
       graph,
       mountSourceId,
       mounts,
-      evaluationId,
       onLoad: (sourceId) => this.#lifecycle.recordCompileLoad(sourceId),
       registries,
       resolveBinding: (sourceId) => this.#bindings[sourceId],

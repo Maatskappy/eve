@@ -80,7 +80,6 @@ export interface AuthoredModuleLoadOptions {
      * extension may read that extension's configuration, so those mounts bind first.
      */
     readonly ancestors?: readonly (ExtensionMountEntry & { readonly mountId: string })[];
-    readonly evaluationId?: string;
   };
   /** Shares one evaluated module graph across the loads of one compilation. */
   readonly graph?: AuthoredModuleGraph;
@@ -660,8 +659,9 @@ async function writeAuthoredModuleBundle(
     writeFileSync(bundlePath, code);
   }
 
-  const instance = options.extension?.evaluationId ?? "";
-  return `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}&instance=${encodeURIComponent(instance)}`;
+  // The hash covers the mount and its inlined configuration, so an unchanged bundle reuses
+  // its evaluated module across compiles; `eve dev` would otherwise retain a copy per rebuild.
+  return `${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`;
 }
 
 function createInFlightModuleLoadKey(
@@ -670,7 +670,7 @@ function createInFlightModuleLoadKey(
 ): string {
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
-  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.extension?.evaluationId ?? ""}\0${options.appRoot ?? ""}`;
+  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extension?.mountId ?? ""}\0${options.appRoot ?? ""}`;
 }
 
 export function resolveAuthoredPackageRoot(modulePath: string): string {

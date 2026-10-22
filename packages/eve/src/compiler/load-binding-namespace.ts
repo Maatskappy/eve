@@ -41,7 +41,6 @@ export function createCompiledBindingNamespaceLoader(input: {
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
   readonly graph?: AuthoredModuleGraph;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
-  readonly evaluationId?: string;
   readonly mountSourceId?: (binding: AgentModuleBinding) => string | undefined;
   readonly onLoad?: (sourceId: string) => void;
   readonly registries: readonly AgentSourceRegistry[];
@@ -79,7 +78,6 @@ export function createCompiledBindingNamespaceLoader(input: {
         loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
         registries: input.registries,
         mounts: input.mounts,
-        evaluationId: input.evaluationId,
       });
     })().then(memoizeModuleNamespaceFactories);
     cache.set(sourceId, loading);
@@ -95,7 +93,6 @@ async function loadCompiledBindingNamespace(input: {
   readonly graph?: AuthoredModuleGraph;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
-  readonly evaluationId?: string;
   readonly registries: readonly AgentSourceRegistry[];
 }): Promise<ProgrammaticModuleNamespace> {
   if (input.binding.backing.kind === "filesystem") {
@@ -110,7 +107,6 @@ async function loadCompiledBindingNamespace(input: {
         ? undefined
         : {
             mountId,
-            evaluationId: input.evaluationId,
             entry: mount?.entry,
             ancestors:
               input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),

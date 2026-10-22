@@ -559,7 +559,7 @@ describe("mounted extension without config", () => {
  * its module instance across compiles instead of adding a copy per rebuild (#5203).
  */
 describe("mounted extension across recompiles", () => {
-  it.fails("evaluates an unchanged extension module once across compiles", async () => {
+  it("evaluates an unchanged extension module once across compiles", async () => {
     const app = await createAppRoot("eve-mounted-extension-recompile-", {
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',

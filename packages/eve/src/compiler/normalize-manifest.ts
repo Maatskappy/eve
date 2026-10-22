@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
 import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
 import { assertStaticConnectionOwnership } from "#compiler/connection-ownership.js";
@@ -172,7 +171,6 @@ class AgentGraphCompiler {
   private readonly registries: readonly AgentSourceRegistry[];
   private readonly diagnostics: CompilerDiagnostic[];
   private readonly mounts = new Map<string, ExtensionCompileMount>();
-  private readonly evaluationId = randomUUID();
   private readonly moduleGraph: AuthoredModuleGraph;
 
   constructor(
@@ -449,7 +447,6 @@ class AgentGraphCompiler {
       this.registries,
       (binding) => sourceIds.get(bindingMountId(binding) ?? ""),
       this.mounts,
-      this.evaluationId,
       input.manifest.appRoot,
       this.moduleGraph,
     );

@@ -139,6 +139,44 @@ describe("chatSdkChannel pressing a button no session can take", () => {
   );
 });
 
+describe("chatSdkChannel typed answers", () => {
+  it("keeps the delivery's context when a reply answers a pending card", async () => {
+    const bridge = chatSdkChannel({
+      adapters: { test: testAdapter() },
+      logger: "warn",
+      state: memoryState(),
+      userName: "bot",
+    });
+    if (!isCompiledChannel(bridge.channel)) throw new Error("Expected a compiled channel.");
+    const state: Pick<ChatSdkChannelState, "pendingInputCards"> = {
+      pendingInputCards: {
+        "message-1": {
+          requests: [
+            {
+              interactionId: "request-1",
+              request: { kind: "question", options: [{ id: "approve", label: "Approve" }] },
+            } as never,
+          ],
+          resolved: {},
+        },
+      },
+    };
+
+    const delivered = await bridge.channel.adapter.deliver?.(
+      {
+        context: ["Alice pasted the release notes."],
+        state: { inputAnswer: { messageId: "message-1", optionId: "approve" } },
+      },
+      { session: { auth: { current: null } }, state } as never,
+    );
+
+    expect(delivered).toMatchObject({
+      answers: [{ interactionId: "request-1", optionId: "approve" }],
+      context: ["Alice pasted the release notes."],
+    });
+  });
+});
+
 function testAdapter(): TestAdapter & Adapter {
   return new TestAdapter() as TestAdapter & Adapter;
 }

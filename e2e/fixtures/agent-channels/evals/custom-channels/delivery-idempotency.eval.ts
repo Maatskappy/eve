@@ -14,12 +14,14 @@ export default defineEval({
       postChannel<{ sessionId: string }>(t.target, path, body);
     const [accepted, retry] = await Promise.all([send(first), send(first)]);
     await t.require(retry.sessionId, equals(accepted.sessionId));
-    const initial = await t.target.watchTurn(accepted.sessionId).result();
+    const initial = await t.target.attach(accepted.sessionId).watch().result();
     initial.succeeded();
 
-    const next = t.target.watchTurn(accepted.sessionId, {
-      startIndex: (initial.events.at(-1)?.meta.position.line ?? -1) + 1,
-    });
+    const next = t.target
+      .attach(accepted.sessionId, {
+        startIndex: (initial.events.at(-1)?.meta.position.line ?? -1) + 1,
+      })
+      .watch();
     const followup = {
       message: "Bob joins Alice and asks for a brief outline of the report.",
       idempotencyKey: "bob-outline",
@@ -32,9 +34,11 @@ export default defineEval({
       data: { parts: [{ kind: "text", text: followup.message }] },
     });
 
-    const barrier = t.target.watchTurn(accepted.sessionId, {
-      startIndex: (reply.events.at(-1)?.meta.position.line ?? -1) + 1,
-    });
+    const barrier = t.target
+      .attach(accepted.sessionId, {
+        startIndex: (reply.events.at(-1)?.meta.position.line ?? -1) + 1,
+      })
+      .watch();
     const sentinel = {
       message:
         "Alice and Bob finish reviewing the outline. Acknowledge that the review is complete.",

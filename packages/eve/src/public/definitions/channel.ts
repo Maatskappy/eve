@@ -34,7 +34,10 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
-import type { Session, SessionHandle } from "#channel/session.js";
+import type { SessionHandle } from "#channel/session.js";
+import type { Delivery } from "#shared/delivery.js";
+export type { Delivery, DeliveryResult } from "#shared/delivery.js";
+export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -50,13 +53,12 @@ export type {
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
-  GetEventStreamOptions,
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
 } from "#channel/types.js";
 export { SessionStrandedError } from "#channel/session-stranded-error.js";
-export type { Session, SessionHandle } from "#channel/session.js";
+export type { Session, SessionHandle, SessionOperations } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
 export type {
   AudienceCaller,
@@ -291,7 +293,7 @@ export interface Channel<
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
-  ) => Promise<Session>;
+  ) => Promise<Delivery>;
   readonly turnPolicy?: TurnPolicy;
 }
 

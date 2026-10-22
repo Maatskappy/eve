@@ -1,4 +1,5 @@
 import type { MessageContent } from "#shared/message-content.js";
+import type { Delivery } from "#shared/delivery.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
@@ -7,10 +8,6 @@ import { type ChannelCreateResult, createChannelAddressFn } from "#channel/chann
 export type { ChannelCreateResult } from "#channel/channel-address.js";
 import type { Session } from "#channel/session.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  ResetSessionResult,
   Runtime,
   SessionAuthContext,
   SessionCallback,
@@ -42,14 +39,15 @@ interface BaseChannelSendOptions {
 }
 
 /** Options for sending a message from a channel-local continuation address. */
-export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseChannelSendOptions
-  : BaseChannelSendOptions & { readonly state: TState };
+export type ChannelSendOptions<TState = undefined> = BaseChannelSendOptions & {
+  readonly state?: Partial<TState>;
+};
 
 interface BaseChannelRespondOptions<TState = undefined> {
   /** Stable delivery identity, with the same scope and retention as `send()`. */
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
+  readonly outputSchema?: JsonObject;
   readonly context?: readonly string[];
   readonly state?: Partial<TState>;
 }
@@ -73,7 +71,7 @@ export type ChannelCreateOptions<TState = undefined> = [TState] extends [undefin
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
   /** Starts or resumes a turn with a user message. May create a session. */
-  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Session>;
+  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Delivery>;
   /**
    * Creates a session that waits for its first message, without running a
    * turn. When another session owns the address, or claims it concurrently,
@@ -82,21 +80,20 @@ export interface ChannelSource<TState = undefined> {
    * address, then create again.
    */
   create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
+
   /** Answers pending input requests. Never creates a session. */
   respond<const TResponses extends readonly Answer[]>(
     answers: StrictAnswers<TResponses>,
     options: ChannelRespondOptions<TState>,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
   /** Cooperatively cancels the active turn without creating a session. */
-  cancel(options?: { readonly turnId?: string } & SessionControlOptions): Promise<CancelTurnResult>;
+  cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   /** Queues context compaction without creating a session. */
-  compact(options?: SessionControlOptions): Promise<CompactSessionResult>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
   /** Clears model-message history without creating a session. */
-  clear(options?: SessionControlOptions): Promise<ClearSessionResult>;
+  clear(options?: SessionControlOptions): Promise<Delivery>;
   /** Retires the current owner without creating a replacement. */
-  reset(
-    options?: { readonly reason?: string } & SessionControlOptions,
-  ): Promise<ResetSessionResult>;
+  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
 }
 
 /** Binds a raw channel-local continuation address to its current-owner operations. */
@@ -153,6 +150,7 @@ export function createChannelOperations<TState = undefined>(input: {
           return await bound.deliver(
             {
               context: options.context,
+              outputSchema: options.outputSchema,
               answers: validatedAnswers,
               state: options.state,
             },

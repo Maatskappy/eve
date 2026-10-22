@@ -11,7 +11,10 @@ it.each([undefined, "Complete the milk task."])(
     let sent: unknown;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       sent = JSON.parse(String(init?.body));
-      return Response.json({ ok: true, sessionId: "session", status: "accepted" }, { status: 202 });
+      return Response.json(
+        { ok: true, sessionId: "session", deliveryId: "delivery_0" },
+        { status: 202 },
+      );
     });
     const client = new Client({ host: "https://agent.test" });
     const stubs = [

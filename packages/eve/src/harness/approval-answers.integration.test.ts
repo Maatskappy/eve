@@ -148,6 +148,57 @@ describe("approval answers (real AI SDK)", () => {
     expect(parkedSteps(result.session)).toEqual([]);
   });
 
+  // A responder's later answer to the same approval revises their unweighed earlier ones, so the
+  // response policy runs once per person and approval, however many answers they send.
+  it("weighs only each responder's latest unweighed answer to an approval", async () => {
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    const deploy = gated("deploy", response);
+    const notify = gated("notify", response);
+    const fixture = setup([deploy, notify]);
+    const parked = await fixture.step(fixture.session, { message: "Deploy, then tell the team." });
+    const answer = (responseId: string, toolName: string, principalId: string) => ({
+      deliveryId: `d-${responseId}`,
+      interactionId: fixture.approvalOf(toolName),
+      optionId: "approve",
+      responder: { attributes: {}, authenticator: "test", principalId, principalType: "user" },
+      responseId,
+    });
+
+    let result = await fixture.step(parked.session, {
+      answers: [
+        answer("r-bob-1", "deploy", "bob"),
+        answer("r-bob-2", "deploy", "bob"),
+        answer("r-carol", "deploy", "carol"),
+        answer("r-bob-3", "deploy", "bob"),
+        answer("r-bob-notify", "notify", "bob"),
+      ],
+    });
+    while (typeof result.next === "function") result = await fixture.step(result.session);
+
+    const weighed = response.mock.calls.map(([input]) => [
+      input.request.toolName,
+      input.response.principal?.principalId,
+    ]);
+    expect(weighed).toEqual([
+      ["deploy", "carol"],
+      ["deploy", "bob"],
+      ["notify", "bob"],
+    ]);
+    const settled = fixture.events.flatMap((event) =>
+      event.type === "response.settled" &&
+      (event.data.responseId === "r-bob-1" || event.data.responseId === "r-bob-2")
+        ? [event.data]
+        : [],
+    );
+    expect(settled).toEqual([
+      { outcome: "withdrawn", reason: "revised", responseId: "r-bob-1" },
+      { outcome: "withdrawn", reason: "revised", responseId: "r-bob-2" },
+    ]);
+    expect(deploy.execute).toHaveBeenCalledOnce();
+    expect(notify.execute).toHaveBeenCalledOnce();
+    expect(parkedSteps(result.session)).toEqual([]);
+  });
+
   // #4817: an answer the approval can't take is refused with why, and the approval stays open.
   it.each([
     {

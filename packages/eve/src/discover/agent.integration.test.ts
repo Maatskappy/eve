@@ -225,7 +225,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "*/15 * * * *",
-          markdown: "Retry dunning.",
+          content: "Retry dunning.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/billing/dunning/retry.md",
@@ -244,7 +244,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "0 9 * * *",
-          markdown: "Send a morning weather digest.",
+          content: "Send a morning weather digest.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/daily-digest.md",

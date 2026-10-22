@@ -255,6 +255,9 @@ export class ConnectionEventActions {
         .digest("hex");
       const binding: EventBinding = {
         ...caller,
+        ...(this.events.resolution === undefined
+          ? {}
+          : { resolution: structuredClone(this.events.resolution) }),
         id,
         sessionId,
         auth: structuredClone(ctx.get(AuthKey) ?? null),
@@ -272,9 +275,17 @@ export class ConnectionEventActions {
         ctx.require(BundleKey),
         options.abortSignal,
       );
-      return subscription === undefined
-        ? pendingResult(binding)
-        : subscriptionResult(id, subscription);
+      const result =
+        subscription === undefined ? pendingResult(binding) : subscriptionResult(id, subscription);
+      return this.events.resolution === undefined
+        ? result
+        : {
+            ...result,
+            management: {
+              get: `${binding.connectionName}__${GET}`,
+              stop: `${binding.connectionName}__${STOP}`,
+            },
+          };
     });
   }
 }

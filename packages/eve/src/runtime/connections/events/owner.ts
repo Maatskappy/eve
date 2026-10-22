@@ -5,6 +5,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type { ConnectionEventPayload } from "#runtime/connections/events/delivery.js";
 import {
   CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE,
+  CONNECTION_EVENT_STOPPING_NAMESPACE,
   type ConnectionEventSubscribeOutcome,
   type ConnectionEventSubscribeResult,
   type EventBinding,
@@ -64,7 +65,7 @@ export async function startConnectionEventDelivery(
   bundle: CompiledBundle,
 ): Promise<boolean> {
   const watch = await findConnectionEventOwner(payload.bindingId);
-  if (watch === undefined) return false;
+  if (watch === undefined || watch.stopping) return false;
   if (watch.subscription === undefined)
     return resumeWatch(payload.bindingId, { kind: "delivery", payload });
   if (watch.subscription.id !== payload.delivery.subscriptionId) return false;
@@ -102,7 +103,8 @@ export function subscriptionFromOutcome(
 export async function findConnectionEventOwner(
   bindingId: string,
 ): Promise<
-  { owner: EventBinding; subscription: ManagedEventSubscription | undefined } | undefined
+  | { owner: EventBinding; subscription: ManagedEventSubscription | undefined; stopping?: true }
+  | undefined
 > {
   let hook;
   try {
@@ -114,7 +116,25 @@ export async function findConnectionEventOwner(
   const outcome = await readPublishedOutcomeNow(hook.runId);
   // The hook's run is the owner, so it never points at another run.
   if (outcome !== undefined && !("subscription" in outcome)) return undefined;
-  return { owner: (await hook.metadata) as EventBinding, subscription: outcome?.subscription };
+  const stopped = getRun(hook.runId).getReadable({
+    namespace: CONNECTION_EVENT_STOPPING_NAMESPACE,
+  });
+  let stopping: boolean;
+  try {
+    stopping = (await stopped.getTailIndex()) >= 0;
+  } finally {
+    await stopped.cancel();
+  }
+  const result: {
+    owner: EventBinding;
+    subscription: ManagedEventSubscription | undefined;
+    stopping?: true;
+  } = {
+    owner: (await hook.metadata) as EventBinding,
+    subscription: outcome?.subscription,
+  };
+  if (stopping) result.stopping = true;
+  return result;
 }
 
 /** Asks the watch's run to unsubscribe and end; the run repeats unsubscribe until Connect finishes. */

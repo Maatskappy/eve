@@ -737,3 +737,23 @@ describe("buildStepCatalog", () => {
     });
   });
 });
+
+it("keeps previously offered management names callable after a connection leaves the catalog", () => {
+  const { catalog } = catalogContext({
+    connections: [],
+    offered: { connections: true, tools: true, searchableSkills: false, skills: false },
+  });
+  const call = catalog.resolve({
+    toolCallId: "stop",
+    toolName: CALL_TOOL_NAME,
+    input: { name: "issues__events_unsubscribe", input: { id: "a".repeat(64) } },
+  });
+  expect(call?.definition.name).toBe("issues__events_unsubscribe");
+  expect(
+    catalog.resolve({
+      toolCallId: "subscribe",
+      toolName: CALL_TOOL_NAME,
+      input: { name: "issues__events_subscribe_event", input: {} },
+    }),
+  ).toBeUndefined();
+});

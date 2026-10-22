@@ -1,3 +1,4 @@
+import type { DynamicEventResolution } from "./resolution.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionTraceSeed } from "#context/keys.js";
 import type {
@@ -16,6 +17,7 @@ export type EventOwner = {
 
 /** The handler run's input: everything a delivery needs, saved before subscribing. */
 export interface EventBinding extends EventOwner {
+  readonly resolution?: DynamicEventResolution;
   readonly id: string;
   readonly sessionId: string;
   readonly auth: SessionAuthContext | null;
@@ -26,6 +28,9 @@ export interface EventBinding extends EventOwner {
 
 /** The run publishes its subscription once, so callers outside it can read what it owns. */
 export const CONNECTION_EVENT_SUBSCRIPTION_NAMESPACE = "eve.connection-event.subscription";
+
+/** Published before upstream cleanup so receipt and queued delivery steps stop invoking callbacks. */
+export const CONNECTION_EVENT_STOPPING_NAMESPACE = "eve.connection-event.stopping";
 
 /** What a run's own subscribe produced. */
 export type ConnectionEventSubscribeResult =

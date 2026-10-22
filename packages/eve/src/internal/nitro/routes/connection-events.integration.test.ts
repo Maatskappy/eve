@@ -2,11 +2,13 @@ import { eventTracing } from "#internal/testing/event-tracing.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { handleConnectionEventRequest } from "#internal/nitro/routes/connection-events.js";
 
-const { verify, start, load } = vi.hoisted(() => ({
+const { verify, genericVerify, start, load } = vi.hoisted(() => ({
   verify: vi.fn(),
+  genericVerify: vi.fn(),
   start: vi.fn(),
   load: vi.fn(),
 }));
+vi.mock("#compiled/@vercel/connect-events/index.js", () => ({ verifyMcpEvent: genericVerify }));
 vi.mock("#runtime/connections/events/owner.js", () => ({
   startConnectionEventDelivery: start,
 }));
@@ -162,4 +164,25 @@ it("keeps unverified identifiers and error content out of request spans while pr
     logging.mockRestore();
     await tracing.close();
   }
+});
+
+it("verifies a dynamic-only receiver without resolving an account", async () => {
+  const resolver = vi.fn(() => {
+    throw new Error("must not execute during receipt");
+  });
+  load.mockResolvedValue({
+    resolvedAgent: {
+      connections: [],
+      dynamicConnectionResolvers: [{ events: { "session.started": resolver } }],
+    },
+  });
+  genericVerify.mockResolvedValue(envelope);
+  const { connectionName: _name, ...dynamicInput } = input;
+  expect((await handleConnectionEventRequest(dynamicInput, request())).status).toBe(202);
+  expect(genericVerify).toHaveBeenCalledWith(expect.any(Request), { path: "/eve/v1/hooks/issues" });
+  expect(resolver).not.toHaveBeenCalled();
+  genericVerify.mockRejectedValue({ code: "invalid_delivery" });
+  start.mockClear();
+  expect((await handleConnectionEventRequest(dynamicInput, request())).status).toBe(401);
+  expect(start).not.toHaveBeenCalled();
 });

@@ -25,7 +25,7 @@ export interface Experimental_ConnectionEvent {
   readonly cursor: string | null;
 }
 
-/** Opts a static Connect-backed MCP connection into managed webhook events. */
+/** Opts a Connect-backed MCP connection into managed webhook events. */
 export interface Experimental_ConnectionEvents {
   /** Called durably after verification and subscription binding checks. */
   readonly onEvent: (

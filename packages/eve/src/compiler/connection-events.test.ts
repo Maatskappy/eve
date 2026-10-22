@@ -2,8 +2,6 @@ import { expect, it, vi } from "vitest";
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import { resolveDynamicConnectionValue } from "#runtime/resolve-connection.js";
-import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 
 const backend = { createAdapter: vi.fn(), verify: vi.fn() };
 const auth = {
@@ -52,20 +50,4 @@ it("accepts separate event/lifecycle callbacks without invoking them or allocati
   expect(
     normalizeMcpClientConnectionDefinition(definition, "issues").experimental_events,
   ).toBeUndefined();
-});
-
-it("rejects events on dynamic connections whose receiver cannot be mounted at build time", () => {
-  const value = defineMcpClientConnection({
-    ...definition,
-    instanceKey: "issues",
-    experimental_events: { onEvent() {} },
-  });
-  expect(() =>
-    resolveDynamicConnectionValue(value, {
-      connectionName: "issues",
-      sourceId: "issues",
-      sourceKind: "module",
-      logicalPath: "connections/issues.ts",
-    }),
-  ).toThrow("statically authored");
 });

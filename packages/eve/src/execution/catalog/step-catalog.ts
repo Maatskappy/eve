@@ -1,3 +1,4 @@
+import { connectionEventManagementEntry } from "./connection-event-management.js";
 /**
  * The step's catalog: one table of every entry a model step can reach. Direct
  * entries go into the model's tool list next to the catalog tools the session
@@ -304,7 +305,7 @@ function connectionEntryNamed(
       return connectionEntry(registry, connection, name.slice(prefix.length));
     }
   }
-  return undefined;
+  return connectionEventManagementEntry(name);
 }
 
 // ---------------------------------------------------------------------------

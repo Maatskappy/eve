@@ -7,7 +7,7 @@ import type { ConnectionEventSubscribeOutcome, EventBinding } from "./state.js";
 
 const { hooks, runs, started, resumed } = vi.hoisted(() => ({
   hooks: new Map<string, { runId: string; metadata: unknown }>(),
-  runs: new Map<string, { published: unknown[]; outcome: Promise<unknown> }>(),
+  runs: new Map<string, { published: unknown[]; outcome: Promise<unknown>; stopping?: boolean }>(),
   started: vi.fn(async (_reference: unknown, _args: unknown[]) => ({ runId: "watch-run" })),
   resumed: vi.fn(async (_token: string, _value: unknown) => ({})),
 }));
@@ -25,7 +25,7 @@ vi.mock("#internal/workflow/runtime.js", () => ({
     const run = runs.get(runId)!;
     // The run's published subscribe outcome, as its stream delivers it.
     return {
-      getReadable: () =>
+      getReadable: ({ namespace }: { namespace: string }) =>
         Object.assign(
           new ReadableStream({
             async pull(controller) {
@@ -33,7 +33,14 @@ vi.mock("#internal/workflow/runtime.js", () => ({
               controller.close();
             },
           }),
-          { getTailIndex: async () => run.published.length - 1 },
+          {
+            getTailIndex: async () =>
+              namespace === "eve.connection-event.stopping"
+                ? run.stopping
+                  ? 0
+                  : -1
+                : run.published.length - 1,
+          },
         ),
     };
   },
@@ -145,4 +152,16 @@ it("reports a subscribe still in flight when the caller stops waiting, then its 
   });
   publish({ subscription });
   expect(await findConnectionEventOwner(binding.id)).toEqual({ owner: binding, subscription });
+});
+
+it("rejects deliveries after the watch records stopping while cleanup is pending", async () => {
+  const publish = holdWatch();
+  publish({ subscription });
+  runs.get("watch-run")!.stopping = true;
+  expect(await startConnectionEventDelivery(payload, bundle)).toBe(false);
+  expect(started).not.toHaveBeenCalled();
+  expect(await findConnectionEventOwner(binding.id)).toMatchObject({
+    stopping: true,
+    subscription,
+  });
 });

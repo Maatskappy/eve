@@ -1,3 +1,11 @@
+import {
+  defineDynamic,
+  type DynamicConnectionResolveContext,
+} from "#public/definitions/connections/dynamic.js";
+import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { sessionStartedForResolvers } from "#harness/session-machine/resolver-events.js";
+import { connectionEventManagementEntry } from "#execution/catalog/connection-event-management.js";
 import * as workflowRuntime from "#execution/workflow-runtime.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
@@ -9,7 +17,7 @@ import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { afterEach, beforeEach, expect, it, vi, onTestFinished } from "vitest";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
-import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -32,22 +40,29 @@ import type {
   ManagedEventSubscription,
 } from "#shared/connection-events.js";
 
-const { createClient, loadBundle, handlers, retired, workflowRunId } = vi.hoisted(() => ({
-  createClient: vi.fn(),
-  workflowRunId: { current: "wrun_1" },
-  loadBundle: vi.fn(),
-  // Stands in for live handler runs: what each run holds in its own input and state.
-  // A subscription is undefined while its watch's subscribe is still in flight.
-  handlers: new Map<
-    string,
-    { binding: EventBinding; subscription: ManagedEventSubscription | undefined }
-  >(),
-  retired: new Set<string>(),
-}));
+const { createClient, loadBundle, handlers, retired, workflowRunId, savedGet, savedStop } =
+  vi.hoisted(() => ({
+    createClient: vi.fn(),
+    savedGet: vi.fn(),
+    savedStop: vi.fn(),
+    workflowRunId: { current: "wrun_1" },
+    loadBundle: vi.fn(),
+    // Stands in for live handler runs: what each run holds in its own input and state.
+    // A subscription is undefined while its watch's subscribe is still in flight.
+    handlers: new Map<
+      string,
+      { binding: EventBinding; subscription: ManagedEventSubscription | undefined }
+    >(),
+    retired: new Set<string>(),
+  }));
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   getWorkflowMetadata: () => ({ workflowRunId: workflowRunId.current }),
   getWritable: () => new WritableStream(),
+}));
+vi.mock("#compiled/@vercel/connect-events/index.js", () => ({
+  getSubscription: savedGet,
+  unsubscribe: savedStop,
 }));
 vi.mock("#compiled/@ai-sdk/mcp/index.js", () => ({ createMCPClient: createClient }));
 vi.mock("#runtime/connections/events/owner.js", () => ({
@@ -518,7 +533,7 @@ function payload(): ConnectionEventPayload {
     delivery: {
       version: 1,
       deliveryId: "delivery-1",
-      subscriptionId: "sub_0",
+      subscriptionId: handlers.get(binding.id)!.subscription!.id,
       source: { type: "mcp", connectorId: "connector" },
       context: binding.request.context!,
       event: {
@@ -1019,4 +1034,193 @@ it("does not let a sampled webhook override the session's saved sampling decisio
   await dispatch(message);
   expect(callback).toHaveBeenCalledOnce();
   expect(tracing.exporter.getFinishedSpans()).toEqual([]);
+});
+
+async function dynamicWatch(
+  resolver: (
+    context: DynamicConnectionResolveContext,
+  ) => ReturnType<typeof defineMcpClientConnection> | null,
+) {
+  const { manifest, moduleMap } = await compileFromMemory({
+    model: "openai/gpt-5.4",
+    modules: [
+      {
+        logicalPath: "connections/issues.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "session.started": (_event, context) => resolver(context),
+            },
+          }),
+        }),
+      },
+    ],
+  });
+  const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+  const root = graph.root;
+  const bundle: CompiledRuntimeAgentBundle = {
+    ...ctx.require(BundleKey),
+    graph,
+    moduleMap,
+    resolvedAgent: root.agent,
+    hookRegistry: root.hookRegistry,
+    subagentRegistry: root.subagentRegistry,
+    toolRegistry: root.toolRegistry,
+    turnAgent: root.turnAgent,
+  };
+  loadBundle.mockResolvedValue(bundle);
+  ctx.set(BundleKey, bundle);
+  const registry = new ConnectionRegistryImpl([]);
+  ctx.set(ConnectionRegistryKey, registry);
+  await dispatchDynamicConnectionEvent({
+    ctx,
+    event: sessionStartedForResolvers(),
+    resolvers: bundle.resolvedAgent.dynamicConnectionResolvers!,
+  });
+  connection = registry.getConnections()[0]!;
+  actions = new ConnectionEventActions(connection, connection.experimental_events!, async () => ({
+    account: ctx.require(AuthKey)!.principalId,
+  }));
+}
+
+function eventDefinition(instanceKey = "alice-account") {
+  return defineMcpClientConnection({
+    url: connection.url,
+    description: "Issues",
+    instanceKey,
+    auth: connection.authorization,
+    experimental_events: { onEvent: callback, onGap: gap, onTerminated: terminated },
+  });
+}
+
+it("reconstructs dynamic callbacks as the saved resolver and watch creator after a cold step", async () => {
+  const definition = eventDefinition();
+  const seen: string[] = [];
+  ctx.set(InitiatorAuthKey, { ...ctx.require(AuthKey)!, principalId: "carol" });
+  await dynamicWatch((context) => {
+    seen.push(
+      `${context.session.auth.current!.principalId}:${context.session.auth.initiator!.principalId}`,
+    );
+    return definition;
+  });
+  await watch();
+  const before = seen.length;
+  setUser("bob");
+  initial = { ...initial, serializedContext: serializeContext(ctx) };
+  await dispatch(payload());
+  expect(seen.slice(before)).toEqual(["alice:carol"]);
+  expect(callback).toHaveBeenCalledWith(
+    expect.objectContaining({ auth: expect.objectContaining({ principalId: "alice" }) }),
+  );
+  expect(ctx.require(AuthKey)!.principalId).toBe("bob");
+});
+
+it.each(["removed", "account changed", "connector changed", "endpoint changed"])(
+  "retires a dynamic watch without calling a replacement when %s",
+  async (reason) => {
+    const original = eventDefinition();
+    let selected: typeof original | null = original;
+    await dynamicWatch(() => selected);
+    const { id } = await watch();
+    initial = { ...initial, serializedContext: serializeContext(ctx) };
+    if (reason === "removed") selected = null;
+    else if (reason === "account changed") selected = eventDefinition("another-account");
+    else if (reason === "endpoint changed")
+      selected = defineMcpClientConnection({ ...original, url: "https://other.example/mcp" });
+    else {
+      const auth = connection.experimental_events!.authorization;
+      selected = defineMcpClientConnection({
+        ...original,
+        auth: { ...auth, vercelConnect: { ...auth.vercelConnect!, connector: "oauth/other" } },
+      });
+    }
+    await dispatch(payload());
+    expect(callback).not.toHaveBeenCalled();
+    expect(retired.has(id)).toBe(true);
+    savedStop.mockResolvedValue({ cleanupStatus: "complete" });
+    expect(
+      await unsubscribeConnectionEventStep({
+        binding: initial.binding!,
+        serializedContext: initial.serializedContext,
+        subscriptionId: "sub_0",
+      }),
+    ).toBe("done");
+    expect(savedStop).toHaveBeenCalledWith("oauth/issues", { id: "sub_0" }, { timeout: 30_000 });
+  },
+);
+
+it("retries a failed account lookup without retiring the watch", async () => {
+  const definition = eventDefinition();
+  let failing = false;
+  await dynamicWatch(() => {
+    if (failing) throw new Error("account store unavailable");
+    return definition;
+  });
+  await watch();
+  initial = { ...initial, serializedContext: serializeContext(ctx) };
+  failing = true;
+  await expect(dispatch(payload())).rejects.toThrow("account store unavailable");
+  expect(retired.size).toBe(0);
+  failing = false;
+  await dispatch(payload());
+  expect(callback).toHaveBeenCalledOnce();
+});
+
+it("keeps removed-watch management available only to its creator", async () => {
+  const definition = eventDefinition();
+  await dynamicWatch(() => definition);
+  const { id } = await watch();
+  const stop = connectionEventManagementEntry("issues__events_unsubscribe")!;
+  setUser("bob");
+  await expect(
+    contextStorage.run(ctx, () => stop.execute!({ id }, { toolCallId: "stop" } as never)),
+  ).rejects.toThrow("Unknown subscription");
+  expect(retired.size).toBe(0);
+  setUser("alice");
+  expect(
+    await contextStorage.run(ctx, () => stop.execute!({ id }, { toolCallId: "stop" } as never)),
+  ).toEqual({ id, status: "stopping" });
+  expect(retired.has(id)).toBe(true);
+  expect(connectionEventManagementEntry("issues__events_subscribe_unknown")).toBeUndefined();
+});
+
+it("does not execute queued delivery after stopping is durable", async () => {
+  await watch();
+  initial = { ...initial, serializedContext: serializeContext(ctx) };
+  const { findConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
+  vi.mocked(findConnectionEventOwner).mockResolvedValueOnce({
+    owner: initial.binding!,
+    subscription: saved.values().next().value!,
+    stopping: true,
+  });
+  await dispatch(payload());
+  expect(callback).not.toHaveBeenCalled();
+});
+
+it("isolates two users' dynamic watches with the same connection name", async () => {
+  const original = eventDefinition();
+  const resolver = (context: DynamicConnectionResolveContext) =>
+    defineMcpClientConnection({
+      ...original,
+      instanceKey: context.session.auth.current!.principalId,
+    });
+  await dynamicWatch(resolver);
+  const alice = await watch();
+  const aliceState = { ...initial, serializedContext: serializeContext(ctx) };
+  const alicePayload = payload();
+  setUser("bob");
+  await dynamicWatch(resolver);
+  const bob = await watch();
+  const bobState = { ...initial, serializedContext: serializeContext(ctx) };
+  const bobPayload = payload();
+  expect(bob.id).not.toBe(alice.id);
+  initial = aliceState;
+  await dispatch(alicePayload);
+  initial = bobState;
+  await dispatch(bobPayload);
+  expect(
+    callback.mock.calls.map(
+      ([args]) => (args as { auth: { principalId: string } }).auth.principalId,
+    ),
+  ).toEqual(["alice", "bob"]);
 });

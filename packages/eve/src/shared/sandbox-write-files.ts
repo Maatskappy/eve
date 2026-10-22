@@ -31,11 +31,19 @@ export async function writeSandboxFiles(
     await writeFiles(options);
     return;
   }
+  let failure: { readonly error: unknown } | undefined;
   await mapWithConcurrency(options.files, FALLBACK_WRITE_CONCURRENCY, async (file) => {
-    await session.writeBinaryFile({
-      abortSignal: options.abortSignal,
-      content: file.content,
-      path: file.path,
-    });
+    if (failure !== undefined) return;
+    try {
+      await session.writeBinaryFile({
+        abortSignal: options.abortSignal,
+        content: file.content,
+        path: file.path,
+      });
+    } catch (error) {
+      failure ??= { error };
+    }
   });
+  // Cleanup or replacement may start after rejection, so no writes may outlive it.
+  if (failure !== undefined) throw failure.error;
 }

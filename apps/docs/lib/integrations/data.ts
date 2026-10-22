@@ -180,40 +180,19 @@ const channelPresentations: Record<string, ChannelPresentation> = {
 npx create-assistant-ui@latest -t eve my-app
 \`\`\`
 
-To add the adapter to an existing Next.js app, install it with the eve framework:
+For an existing eve app, first add the Next.js Web Chat scaffold if the app does not already have one. The assistant-ui registry item requires that scaffold's \`@/*\` alias and \`@/lib/utils\` helper:
 
 \`\`\`bash
-npm install @assistant-ui/eve @assistant-ui/next @assistant-ui/react eve
+eve add channel/web
+eve registry add @assistant-ui=https://r.assistant-ui.com/{name}.json
+eve add @assistant-ui/eve-chat --overwrite
 \`\`\``,
-    quickStart: `Mount eve and assistant-ui in \`next.config.ts\`, then create the runtime in a client component:
+    quickStart: `The template configures the eve agent, mounts \`withEve(withAui(...))\` in \`next.config.ts\`, and creates the assistant-ui runtime page. The registry item installs the runtime packages, replaces \`app/page.tsx\`, and writes its thread components and \`ask_question\` renderer. \`--overwrite\` replaces existing UI files, so install on a clean tree and review the diff before keeping it.
 
-\`\`\`ts
-import { withAui } from "@assistant-ui/next";
-import { withEve } from "eve/next";
+Use \`eve registry view @assistant-ui/eve-chat\` to inspect the item before installing it. Follow the [assistant-ui eve quickstart](https://www.assistant-ui.com/docs/runtimes/eve/quickstart) for its required CSS and the complete manual setup path.`,
+    configure: `The adapter uses eve's native HTTP channel and its existing session routes; it does not add a server channel or its own authentication. Configure the eve channel to authenticate browser users before production. The default eve policy rejects production browser traffic until you replace it with your application's auth policy.
 
-export default withEve(withAui({}));
-\`\`\`
-
-\`\`\`tsx
-"use client";
-
-import { useEveAgentRuntime } from "@assistant-ui/eve";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Thread } from "@/components/assistant-ui/elements/thread.aui";
-
-export default function Home() {
-  const runtime = useEveAgentRuntime();
-
-  return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <Thread />
-    </AssistantRuntimeProvider>
-  );
-}
-\`\`\`
-
-The [assistant-ui eve quickstart](https://www.assistant-ui.com/docs/runtimes/eve/quickstart) covers installing the thread components and optional renderers for questions and connector authorization.`,
-    configure: `The adapter uses eve's native HTTP channel and its existing session routes; it does not add a server channel or its own authentication. Configure the eve channel to authenticate browser users before production. The default eve policy rejects production browser traffic until you replace it with your application's auth policy. See the [eve channel docs](/docs/channels/eve#authentication) and the [assistant-ui eve runtime docs](https://www.assistant-ui.com/docs/runtimes/eve/overview) for session, approval, and authorization rendering details.`,
+If the app uses connections that can request authorization, mount the \`authorization\` data-part renderer described in the [assistant-ui eve runtime docs](https://www.assistant-ui.com/docs/runtimes/eve/overview#connector-authorization). The standard thread leaves unmatched authorization parts unrendered, so users cannot complete connector sign-in without it.`,
   },
   slack: {
     logo: "slack",

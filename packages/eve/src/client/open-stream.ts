@@ -348,7 +348,14 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
-      readMessageStreamVersion(response.headers);
+      try {
+        readMessageStreamVersion(response.headers);
+      } catch (error) {
+        // A follow stream otherwise stays open on the server, heartbeating to nobody.
+        response.body.cancel().catch(() => {});
+        connectionController.abort();
+        throw error;
+      }
       let closed = false;
       return {
         body: response.body,

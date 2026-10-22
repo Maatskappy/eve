@@ -66,6 +66,25 @@ describe("followStreamLines", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("releases the connection when the stream version is unsupported", async () => {
+    let cancelled = false;
+    let signal: AbortSignal | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      signal = init?.signal ?? undefined;
+      const body = new ReadableStream<Uint8Array>({
+        cancel() {
+          cancelled = true;
+        },
+      });
+      return new Response(body, { headers: { [EVE_STREAM_VERSION_HEADER]: "26" } });
+    });
+    await expect(read({ startIndex: 0 })).rejects.toThrow(
+      "Unsupported message stream version: 26.",
+    );
+    expect(cancelled).toBe(true);
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("asks a bounded read not to follow", async () => {
     const urls: URL[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {

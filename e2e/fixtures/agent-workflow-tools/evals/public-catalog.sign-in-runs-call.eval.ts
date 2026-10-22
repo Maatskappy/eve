@@ -27,19 +27,14 @@ export default defineEval({
     if (required?.type !== "interaction.opened") {
       throw new Error("The protected tool did not produce an authorization challenge.");
     }
-    if (session.sessionId === undefined || session.state === undefined) {
-      throw new Error("The turn did not create a session.");
-    }
-    const resumed = t.target.watchTurn(session.sessionId, {
-      startIndex: session.state.streamIndex,
-    });
+    const resumed = t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
     const callback = fixtureAuthorizationCallback(t.target.url, required.data.request.signIn?.url);
     const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
     if (!response.ok) throw new Error(`Authorization callback failed (${response.status}).`);
 
     const completed = await resumed.result();
     completed.expectOk();
-    completed.noFailedActions();
+    completed.noFailedCalls();
     completed.event("interaction.settled", {
       count: 1,
       data: { interactionId: required.data.interactionId, outcome: "accepted" },

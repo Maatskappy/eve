@@ -737,9 +737,9 @@ export default defineWorkflowTool({
     );
 
     const response = await ctx.agent(target).send(task, { signal: ctx.abortSignal });
-    const { error, message, status } = await response.result();
-    if (status === "failed") throw new Error(`${target} failed: ${error?.message}`);
-    return message ?? null;
+    const { error, reply, status } = await response.result();
+    if (status === "failed") throw new Error(`${target} failed: ${error.message}`);
+    return reply ?? null;
   },
 });
 ```

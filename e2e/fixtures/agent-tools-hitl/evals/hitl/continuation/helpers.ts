@@ -1,10 +1,10 @@
+import type { Interaction } from "eve/events";
 import type {
   EveEvalContext,
   EveEvalEventMatch,
   EveEvalLiveTurn,
   EveEvalSession,
   EveEvalTurn,
-  Interaction,
 } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 

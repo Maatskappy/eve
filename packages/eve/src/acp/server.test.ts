@@ -37,7 +37,7 @@ describe("runAcpServerOnStreams", () => {
     const client = {
       sessions: {
         async create(input: SendTurnInput) {
-          return { response: await session.send(input.message), session };
+          return { delivery: await session.send(input.message), session };
         },
       },
     };

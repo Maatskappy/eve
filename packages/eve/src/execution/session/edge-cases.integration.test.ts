@@ -689,6 +689,10 @@ describe("calls in flight", () => {
           await session.next("Bob's report");
         },
       );
+      expect(ofType(events, "delivery.admitted")).toHaveLength(3);
+      expect(ofType(events, "delivery.admitted").map((event) => event.data.deliveryId)).toContain(
+        "control_0",
+      );
       expect(
         ofType(events, "delivery.settled").find((event) => event.data.deliveryId === "control_0")
           ?.data.outcome,

@@ -118,11 +118,15 @@ export class FakeEveServer {
         { status: 202 },
       );
     }
-    if (method === "POST" && action === "reset" && sessionId !== undefined) {
-      return Response.json({ ok: true, status: "reset", previousSessionId: sessionId });
-    }
-    if (method === "POST" && sessionId !== undefined) {
-      return Response.json({ ok: true, status: "accepted", sessionId });
+    if (method === "POST" && action !== undefined && sessionId !== undefined) {
+      const deliveryId = `control_${this.requests.length}`;
+      const facts: SessionEvent[] = [
+        { type: "delivery.admitted", data: { deliveryId, source: { control: action } } },
+        { type: "delivery.settled", data: { deliveryId, outcome: "applied" } },
+      ];
+      if (action === "reset") facts.push({ type: "session.ended", data: { outcome: "completed" } });
+      this.emit(facts, deliveryId, sessionId);
+      return Response.json({ ok: true, sessionId, deliveryId }, { status: 202 });
     }
     return new Response("Not found", { status: 404 });
   };

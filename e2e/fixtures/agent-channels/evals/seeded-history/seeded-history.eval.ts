@@ -29,7 +29,7 @@ export default defineEval({
 
     const firstMessage =
       "Alice again. What was the code word you gave me earlier? Reply with just the word.";
-    const firstTurn = t.target.watchTurn(created.sessionId!);
+    const firstTurn = t.target.attach(created.sessionId!).watch();
     const first = await postChannel<MessageResponse>(t.target, "/seeded", {
       message: firstMessage,
       sessionRef,
@@ -51,9 +51,11 @@ export default defineEval({
 
     const laterMessage =
       "Alice here. What is the checklist code word now? Reply with just the word.";
-    const laterTurn = t.target.watchTurn(created.sessionId!, {
-      startIndex: (turn.events.at(-1)?.meta.position.line ?? -1) + 1,
-    });
+    const laterTurn = t.target
+      .attach(created.sessionId!, {
+        startIndex: (turn.events.at(-1)?.meta.position.line ?? -1) + 1,
+      })
+      .watch();
     await postChannel<MessageResponse>(t.target, "/seeded", {
       message: laterMessage,
       sessionRef,

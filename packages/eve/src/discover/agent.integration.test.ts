@@ -41,7 +41,10 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
   formatVersion: 1,
   builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1 },
+  requires: {
+    extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+    tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+  },
 });
 
 /**
@@ -222,7 +225,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "*/15 * * * *",
-          markdown: "Retry dunning.",
+          content: "Retry dunning.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/billing/dunning/retry.md",
@@ -241,7 +244,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "0 9 * * *",
-          markdown: "Send a morning weather digest.",
+          content: "Send a morning weather digest.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/daily-digest.md",
@@ -1286,48 +1289,69 @@ describe("discoverAgent (memory)", () => {
     );
   });
 
-  it("rejects a mounted extension that requires an unsupported capability version", async () => {
-    // One past the current epoch is unsupported by construction, so the
-    // fixture keeps rejecting after future capability bumps.
-    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
-    const project = buildMemoryAgentProject({
-      appFiles: {
-        "node_modules/@acme/crm/package.json": JSON.stringify({
-          name: "@acme/crm",
-          eve: { extension: { source: "source", dist: "extension" } },
-          peerDependencies: { eve: "*" },
-        }),
-        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
-          kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "9.0.0",
-          requires: { extension: 1, tool: unsupportedToolVersion },
-        }),
-        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
-        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
-      },
-      agentFiles: {
-        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
-        "instructions.md": "You are a precise assistant.",
-      },
-    });
+  it.each([
+    {
+      // One past the current epoch is unsupported by construction, so the
+      // fixture keeps rejecting after future capability bumps.
+      epoch: "a future",
+      unsupportedToolVersion: EXTENSION_CAPABILITY_VERSIONS.tool + 1,
+      remedy: "Upgrade eve",
+      notRemedy: "Rebuild the extension",
+    },
+    {
+      // The first tool epoch was dropped long before the current one.
+      epoch: "a dropped",
+      unsupportedToolVersion: 1,
+      remedy: "require rebuilding this extension. Rebuild the extension with eve ",
+      notRemedy: "Upgrade eve",
+    },
+  ])(
+    "rejects a mounted extension that requires $epoch capability version",
+    async ({ unsupportedToolVersion, remedy, notRemedy }) => {
+      const project = buildMemoryAgentProject({
+        appFiles: {
+          "node_modules/@acme/crm/package.json": JSON.stringify({
+            name: "@acme/crm",
+            eve: { extension: { source: "source", dist: "extension" } },
+            peerDependencies: { eve: "*" },
+          }),
+          "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+            kind: "eve-extension",
+            formatVersion: 1,
+            builtWithEve: "9.0.0",
+            requires: {
+              extension: EXTENSION_CAPABILITY_VERSIONS.extension,
+              tool: unsupportedToolVersion,
+            },
+          }),
+          "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+          "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
+        },
+        agentFiles: {
+          "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+          "instructions.md": "You are a precise assistant.",
+        },
+      });
 
-    const result = await discoverAgent({
-      agentRoot: project.agentRoot,
-      appRoot: project.appRoot,
-      source: project.source,
-    });
+      const result = await discoverAgent({
+        agentRoot: project.agentRoot,
+        appRoot: project.appRoot,
+        source: project.source,
+      });
 
-    const incompatible = result.diagnostics.find(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-    );
-    expect(incompatible).toBeDefined();
-    expect(incompatible?.message).toContain(`tool contract v${unsupportedToolVersion}`);
-    expect(incompatible?.message).toContain(
-      `versions: ${EXTENSION_CAPABILITY_SUPPORT.tool.map((version) => `v${version}`).join(", ")}`,
-    );
-    expect(result.manifest.resolvedExtensions).toEqual([]);
-  });
+      const incompatible = result.diagnostics.find(
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+      );
+      expect(incompatible).toBeDefined();
+      expect(incompatible?.message).toContain(`tool contract v${unsupportedToolVersion}`);
+      expect(incompatible?.message).toContain(
+        `versions: ${EXTENSION_CAPABILITY_SUPPORT.tool.map((version) => `v${version}`).join(", ")}`,
+      );
+      expect(incompatible?.message).toContain(remedy);
+      expect(incompatible?.message).not.toContain(notRemedy);
+      expect(result.manifest.resolvedExtensions).toEqual([]);
+    },
+  );
 
   it("does not use the npm peer range as the runtime compatibility authority", async () => {
     const project = buildMemoryAgentProject({

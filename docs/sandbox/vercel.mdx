@@ -132,11 +132,12 @@ const sandboxName = sandbox.name;
 
 ## Mount a Drive
 
-A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Create or retrieve the Drive before calling `open()`, then pass it in `mounts` under an absolute path:
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` if you create drives in your app. Create or retrieve the Drive before calling `open()`, then pass its name and mount mode under an absolute path:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
+import { Drive } from "@vercel/sandbox";
 
 const REGION = "iad1";
 
@@ -150,7 +151,7 @@ export default defineSandbox(async () => {
 
   return environment.open({
     mounts: {
-      "/data": drive,
+      "/data": { drive: drive.name, mode: "read-write" },
     },
   });
 });
@@ -167,12 +168,12 @@ To share a point-in-time view across concurrent sandboxes, mount a read-only sna
 ```ts
 return environment.open({
   mounts: {
-    "/data": drive.snapshot(),
+    "/data": { drive: drive.name, mode: "snapshot" },
   },
 });
 ```
 
-Before mounting `drive.snapshot()`, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
+Before mounting a Drive snapshot, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
 
 Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox. See the Vercel documentation for [Drive lifecycle, limits, and pricing](https://vercel.com/docs/sandbox/concepts/drives).
 

@@ -91,8 +91,8 @@ export function createDockerInternalSession(input: {
         `status=$?; rm -f ${shellQuote(pidFilePath)}; exit $status`;
       args.push(containerIdentity, "bash", "-c", wrapped);
 
-      const child = cli.stream(args, { signal: options.abortSignal });
-      options.abortSignal?.addEventListener("abort", () => void killSpawnTree(pidFilePath), {
+      const child = cli.stream(args, { signal: options.signal });
+      options.signal?.addEventListener("abort", () => void killSpawnTree(pidFilePath), {
         once: true,
       });
 
@@ -120,7 +120,7 @@ export function createDockerInternalSession(input: {
           // failures (permissions, directories) which must surface.
           `if [ -e ${quoted} ]; then exec cat ${quoted}; else exit 43; fi`,
         ],
-        { signal: options.abortSignal },
+        { signal: options.signal },
       );
       if (result.exitCode === 43) {
         return null;
@@ -138,7 +138,7 @@ export function createDockerInternalSession(input: {
         "--",
         options.path,
       ];
-      const result = await cli.run(args, { signal: options.abortSignal });
+      const result = await cli.run(args, { signal: options.signal });
       expectDockerSuccess(result, `remove "${options.path}" from sandbox container`);
     },
     async writeFile(options: SandboxWriteFileOptions) {
@@ -152,7 +152,7 @@ export function createDockerInternalSession(input: {
           "-lc",
           `mkdir -p ${shellQuote(posixDirname(options.path))} && cat > ${shellQuote(options.path)}`,
         ],
-        { signal: options.abortSignal, stdin: bytes },
+        { signal: options.signal, stdin: bytes },
       );
       expectDockerSuccess(result, `write "${options.path}" into sandbox container`);
     },

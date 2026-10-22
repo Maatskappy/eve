@@ -33,7 +33,7 @@ export async function writeSandboxFiles(
   }
   await mapWithConcurrency(options.files, FALLBACK_WRITE_CONCURRENCY, async (file) => {
     await session.writeBinaryFile({
-      abortSignal: options.abortSignal,
+      signal: options.signal,
       content: file.content,
       path: file.path,
     });

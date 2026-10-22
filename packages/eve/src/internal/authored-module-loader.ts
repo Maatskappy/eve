@@ -43,7 +43,6 @@ import {
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
-import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import {
   applyWorkflowTransform,
   isAuthoredApplicationModule,
@@ -340,7 +339,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     ...input.manifest.subagents.flatMap((subagent) =>
       subagent.configResolver === undefined
         ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
+        : [],
     ),
   ]);
   const moduleMapSource = createCompiledModuleMapSource({
@@ -368,11 +367,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       source: moduleMapSource,
     }),
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
-    // Before callback stamping, which must see the stub and never the directive.
     createAuthoredWorkflowDirectivePlugin({ appRoot: input.appRoot, recorder: workflowSources }),
-    createDynamicCapabilityTransformPlugin({
-      workflowFunctions: (id) => workflowSources.workflowFunctions(id),
-    }),
     workflowSources.graphPlugin(),
     createExtensionMountPlugin(extensionMounts, extensionOverridePaths(input.manifest)),
     extensionScopePlugin,
@@ -447,7 +442,7 @@ class AuthoredWorkflowSourceRecorder {
   readonly #directiveModules = new Set<string>();
   readonly #imports = new Map<string, readonly string[]>();
   readonly #sources = new Map<string, string>();
-  readonly #workflowFunctions = new Map<string, ReadonlySet<string>>();
+  readonly #workflowModules = new Set<string>();
 
   constructor(appRoot: string) {
     this.#appRoot = appRoot;
@@ -458,12 +453,7 @@ class AuthoredWorkflowSourceRecorder {
     if (manifest.steps !== undefined || manifest.workflows !== undefined) {
       this.#directiveModules.add(id);
     }
-    const workflows = Object.values(manifest.workflows ?? {})[0];
-    if (workflows !== undefined) this.#workflowFunctions.set(id, new Set(Object.keys(workflows)));
-  }
-
-  workflowFunctions(id: string): ReadonlySet<string> | undefined {
-    return this.#workflowFunctions.get(id);
+    if (Object.values(manifest.workflows ?? {})[0] !== undefined) this.#workflowModules.add(id);
   }
 
   sourceModules(): readonly string[] {
@@ -487,7 +477,7 @@ class AuthoredWorkflowSourceRecorder {
   modules(): AuthoredWorkflowModules {
     return {
       directiveModules: [...this.#directiveModules].sort(),
-      workflowModules: [...this.#workflowFunctions.keys()].sort(),
+      workflowModules: [...this.#workflowModules].sort(),
     };
   }
 

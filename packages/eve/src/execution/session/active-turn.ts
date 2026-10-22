@@ -1,5 +1,8 @@
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import { settleCancelDeliveryStep } from "#execution/session/settle-cancel-delivery-step.js";
+import type { ControlOrigin } from "#execution/session/input-queue.js";
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
+import { mapHeldAnswersStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
@@ -24,9 +27,10 @@ import {
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
-import { coalesceDeliveries } from "#harness/messages.js";
+import { coalesceDeliveries, selectDeliveryPayloads } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { answersDeliveryId } from "#shared/answers-delivery-id.js";
 
 export type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
@@ -35,7 +39,7 @@ export type RuntimeEvent =
   | { readonly kind: "steering" }
   /** An `eve__task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
-  /** A delivery or sign-in callback was admitted; a held request may be answered. */
+  /** A delivery or sign-in callback was admitted; a paused turn's request may be answered. */
   | { readonly kind: "input" }
   | "cancelled";
 
@@ -55,6 +59,8 @@ export class ActiveTurn {
   private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller: AbortController;
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  #cancelledBy: ControlOrigin | undefined;
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
   /** Who alone steers the turn: its principal, or its delegated caller. */
@@ -125,9 +131,9 @@ export class ActiveTurn {
   }
 
   /** Admits everything the pump accepted while the last step ran. */
-  async admitBoundary(): Promise<void> {
+  async admitBoundary(settled = false): Promise<void> {
     const pending = this.input.inbox.drain();
-    for (const payload of pending) await this.admit(payload);
+    for (const payload of pending) await this.admit(payload, settled);
   }
 
   /**
@@ -221,28 +227,26 @@ export class ActiveTurn {
    * responder: an approver need not be the turn's own person. Returns
    * `undefined` when no admitted delivery answers one.
    */
-  async takeInputResponses(
-    requestIds: ReadonlySet<string>,
-  ): Promise<DeliverHookPayload | undefined> {
+  async takeAnswers(requestIds: ReadonlySet<string>): Promise<DeliverHookPayload | undefined> {
     for (const sequence of this.admitted) {
       let delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) continue;
-      const responses = delivery.payloads.flatMap((payload) => payload.inputResponses ?? []);
+      const responses = delivery.payloads.flatMap((payload) => payload.answers ?? []);
       if (responses.length === 0) continue;
-      if (!responses.some((response) => requestIds.has(response.requestId))) {
+      if (!responses.some((response) => requestIds.has(response.interactionId))) {
         // Some channels answer with ids only their `deliver` hook resolves,
         // such as Telegram's compact button callbacks.
         if (this.mappedForHeldRequest.has(sequence)) continue;
         this.mappedForHeldRequest.add(sequence);
         const target = delivery;
         const mapped = await this.input.cursor.advance((state) =>
-          mapHeldInputResponsesStep({ delivery: target, requestIds: [...requestIds], ...state }),
+          mapHeldAnswersStep({ delivery: target, requestIds: [...requestIds], ...state }),
         );
         if (mapped.delivery === undefined) continue;
         delivery = mapped.delivery;
       }
       this.admitted.delete(sequence);
-      // Someone else's answers settle the held request, but the rest of their
+      // Someone else's answers settle the paused turn's request, but the rest of their
       // delivery waits for the turn to end, as their messages do.
       const split = isSteeringDelivery(delivery, this.identity, { heldOnPerson: true })
         ? undefined
@@ -269,7 +273,7 @@ export class ActiveTurn {
   }
 
   /** Admits one payload; returns whether it was a delivery or sign-in callback. */
-  private async admit(value: SessionInboxPayload): Promise<boolean> {
+  private async admit(value: SessionInboxPayload, settled = false): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
@@ -285,7 +289,23 @@ export class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return false;
       case "cancel":
-        if (this.cancelsThisTurn(value)) this.abort();
+        if (
+          (!settled || value.kind !== "cancel") &&
+          this.cancelsThisTurn(value) &&
+          this.#cancelledBy === undefined
+        ) {
+          this.#cancelledBy ??= admitted.origin;
+          this.abort();
+        } else if (admitted.origin !== undefined) {
+          const control = controlDeliveryOf(admitted.origin);
+          await this.input.cursor.advance((state) =>
+            settleCancelDeliveryStep({
+              ...state,
+              control,
+              outcome: "ignored",
+            }),
+          );
+        }
         return false;
       case "consumed":
         return value.kind === "authorization-callback";
@@ -326,7 +346,12 @@ export class ActiveTurn {
     return steered;
   }
 
-  /** Stops the turn, as `session.cancel()` does; a hook's `ctx.cancel()` uses it too. */
+  /** The cancel control that stopped this turn, when it named its delivery. */
+  get cancelledBy(): ControlOrigin | undefined {
+    return this.#cancelledBy;
+  }
+
+  /** Also used by hooks on workflow reports while the turn waits. */
   abort(): void {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
@@ -348,15 +373,29 @@ function splitAnswers(delivery: DeliverHookPayload): {
   readonly answers: DeliverHookPayload;
   readonly rest: DeliverHookPayload | undefined;
 } {
-  const answers = delivery.payloads.flatMap((payload) =>
-    payload.inputResponses === undefined ? [] : [{ inputResponses: payload.inputResponses }],
+  const answers = delivery.payloads.flatMap((payload, index) =>
+    payload.answers === undefined ? [] : [{ index, payload: { answers: payload.answers } }],
   );
-  const rest = delivery.payloads.flatMap((payload) => {
-    const { inputResponses: _answers, ...other } = payload;
-    return Object.keys(other).length === 0 ? [] : [other];
+  // Only a message waits for the turn to end. What else a press carries, such as a channel's
+  // state, has nothing left to deliver; queued, it would come back as a delivery the session
+  // already settled.
+  const rest = delivery.payloads.flatMap((payload, index) => {
+    if (payload.message === undefined) return [];
+    const { answers: _answers, ...other } = payload;
+    return [{ index, payload: other }];
   });
+  const selectedAnswers = selectDeliveryPayloads(delivery, answers);
+  const messageIndices = new Set(rest.map(({ index }) => index));
   return {
-    answers: { ...delivery, payloads: answers },
-    rest: rest.length === 0 ? undefined : { ...delivery, payloads: rest },
+    answers: {
+      ...selectedAnswers,
+      deliveryMetadata: selectedAnswers.deliveryMetadata?.map((entry) => ({
+        ...entry,
+        deliveryId: messageIndices.has(answers[entry.payloadIndex]!.index)
+          ? answersDeliveryId(entry.deliveryId)
+          : entry.deliveryId,
+      })),
+    },
+    rest: rest.length === 0 ? undefined : selectDeliveryPayloads(delivery, rest),
   };
 }

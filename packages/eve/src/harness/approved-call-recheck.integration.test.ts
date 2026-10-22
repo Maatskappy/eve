@@ -371,4 +371,48 @@ describe("approved call recheck (real AI SDK)", () => {
       { output: { reason: "A change freeze is in effect.", type: "execution-denied" } },
     ]);
   });
+
+  it.each(["workflow", "agent"])(
+    "fails an approved %s call whose dynamic entry changed before dispatch",
+    async (kind) => {
+      const tool = {
+        ...workflow(
+          "deploy",
+          () => "user-approval" as const,
+          kind === "agent" ? "workflow//./agent/subagents/release//run" : undefined,
+        ),
+        version: "offered",
+      };
+      const fixture = setup(tool);
+      const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+      const request = fixture.events.find((event) => event.type === "interaction.opened");
+
+      // Bob changes the release target while Alice's approval waits.
+      (tool as { version: string }).version = "changed";
+      const start = fixture.events.length;
+      const approved = await fixture.step(initial.session, {
+        answers: [
+          {
+            deliveryId: "delivery-approve",
+            optionId: "approve",
+            interactionId: request?.type === "interaction.opened" ? request.data.interactionId : "",
+            responseId: "response-approve",
+          },
+        ],
+      });
+
+      expect(runtimeWait(approved.session.state)).toBeUndefined();
+      expect(
+        fixture.events.slice(start).filter((event) => event.type === "call.settled"),
+      ).toMatchObject([
+        {
+          data: {
+            callId: "call-0",
+            output:
+              'The tool "deploy" changed since it was offered, so the call didn\'t run. If the task still needs it, request it again.',
+          },
+        },
+      ]);
+    },
+  );
 });

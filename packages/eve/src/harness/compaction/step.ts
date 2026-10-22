@@ -9,12 +9,7 @@ import {
   type StepResult,
   type ToolLoopHarnessConfig,
 } from "#harness/types.js";
-import {
-  type HarnessModelMessage,
-  isUserModelMessage,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
-import type { HistoryViewProjector } from "#shared/history-view.js";
+import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Step } from "#harness/step/context.js";
@@ -24,7 +19,6 @@ import {
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
-import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
 import {
   compactMessages,
   type CompactionSummarizer,
@@ -32,11 +26,11 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { contextStorage } from "#context/container.js";
+import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
@@ -72,8 +66,7 @@ const log = createLogger("harness.tool-loop");
 /** What a step needs from the machine after its model call. */
 /**
  * `session.compact()`: summarizes the history now, then the session waits. The control is a
- * delivery: it's admitted with the change, and applied once the change completes. Between turns,
- * the summary run's participants choose its model.
+ * delivery: it's admitted with the change, and applied once the change completes.
  */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
@@ -85,7 +78,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
     return { next: null, session: step.session };
   }
-  const messages = validateHarnessModelMessages(step.projectHistory(step.session.history));
+  const messages = validateHarnessModelMessages(step.session.history);
   await step.apply(
     [
       controlAdmitted(delivery, "compact"),
@@ -111,9 +104,9 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       auth: step.ctx?.get(AuthKey) ?? null,
       betweenTurns: true,
       change: { announced: true, changeId, summaryRunId: runId },
+      ctx: step.ctx,
       emissionState: step.position(),
       force: true,
-      historyProjector: config.historyProjector,
       messages: [...step.session.history],
       model: resolvedModel.model,
       publish: step.publish,
@@ -239,9 +232,10 @@ async function compactOnce(input: {
     readonly turnId?: string;
     readonly cause?: Cause;
   };
+  /** The step's context, where a memory capture before the compaction reports failing. */
+  readonly ctx?: object;
   readonly emissionState: TurnPosition;
   readonly force?: boolean;
-  readonly historyProjector?: HistoryViewProjector;
   readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
   readonly publish: Publish;
@@ -266,9 +260,7 @@ async function compactOnce(input: {
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
-  const projectedPromptMessages = validateHarnessModelMessages(
-    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
-  );
+  const projectedPromptMessages = validateHarnessModelMessages(promptMessages);
   const needsSummary =
     input.force === true ||
     shouldCompact(
@@ -277,9 +269,7 @@ async function compactOnce(input: {
       input.requestEnvelopeTokens,
       getRequestEnvelopeTokens(session),
     );
-  const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
-
-  if (!needsSummary && !needsMemoryCanonicalization) {
+  if (!needsSummary) {
     return { compacted: false, messages, session };
   }
 
@@ -340,10 +330,6 @@ async function compactOnce(input: {
   };
 
   {
-    const ctx = contextStorage.getStore();
-    if (ctx !== undefined) {
-      prepareMemoryCompaction(ctx, { history: messages, state: session.state });
-    }
     if (change.announced !== true) {
       const inputTokens = getInputTokenCount(
         projectedPromptMessages,
@@ -366,11 +352,7 @@ async function compactOnce(input: {
 
   if (needsSummary) summaryTelemetry = input.prepareTelemetry?.(change.summaryRunId);
 
-  const canonical = canonicalizeMemoryRecords(messages);
-  const ordinary = validateHarnessModelMessages(
-    input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
-      canonical.ordinary,
-  );
+  const ordinary = validateHarnessModelMessages(messages);
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const historyCompaction: CompactionConfig = {
     ...session.compaction,
@@ -385,9 +367,13 @@ async function compactOnce(input: {
           ),
   };
   let compactedOrdinary: ModelMessage[] = [...ordinary];
-  let failure: { readonly error: unknown } | undefined;
+  // A memory capture before compaction ran in the commit that started it. When it failed, the
+  // compaction fails before it rewrites the history the capture couldn't keep.
+  const captureFailure = takeCompactionCaptureFailure(input.ctx);
+  let failure: { readonly error: unknown } | undefined =
+    captureFailure === undefined ? undefined : { error: captureFailure };
   try {
-    if (needsSummary) {
+    if (needsSummary && failure === undefined) {
       compactedOrdinary = await compactMessages(
         [...ordinary],
         historyCompaction,
@@ -425,13 +411,9 @@ async function compactOnce(input: {
     );
     return { compacted: false, failure, messages: input.messages, session };
   }
-  messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
+  messages = validateHarnessModelMessages(compactedOrdinary);
 
   {
-    const ctx = contextStorage.getStore();
-    if (ctx !== undefined) {
-      prepareMemoryCompaction(ctx, { history: messages, state: session.state });
-    }
     // Every summary call that returned left an entry, even without usage.
     const settled: SessionEvent[] =
       summaryUsage.length > 0
@@ -443,39 +425,10 @@ async function compactOnce(input: {
       data: { changeId: change.changeId, kind: "compaction", outcome: "completed" },
       type: "context.settled",
     });
-    await publish(
-      settled,
-      input.historyProjector?.({ messages, state: session.state }) ?? messages,
-    );
-    if (ctx !== undefined) {
-      const commit = drainMemoryCommit(ctx);
-      if (commit !== undefined) {
-        messages = validateHarnessModelMessages(
-          placeRecalledMemory(messages, commit.recalledMessages, input.betweenTurns === true),
-        );
-        session = { ...session, state: commit.state };
-      }
-    }
+    await publish(settled, messages);
   }
 
   return { compacted: true, messages, session: replaceSessionHistory(session, messages) };
-}
-
-/**
- * Memory recalled after a compaction during a turn goes where `turn.started` puts it: before the
- * turn's latest user message, or its replay. Between turns it follows the history, so it still
- * comes before the next turn's input.
- */
-function placeRecalledMemory(
-  messages: readonly ModelMessage[],
-  recalled: readonly ModelMessage[],
-  betweenTurns: boolean,
-): ModelMessage[] {
-  const index = betweenTurns
-    ? -1
-    : messages.findLastIndex((message) => isUserModelMessage(message) && message.kind === "user");
-  if (index === -1) return [...messages, ...recalled];
-  return [...messages.slice(0, index), ...recalled, ...messages.slice(index)];
 }
 
 type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];

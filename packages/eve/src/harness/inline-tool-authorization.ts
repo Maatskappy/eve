@@ -23,12 +23,17 @@ export function resolveInlineAuthorizationInterrupt(input: {
   | undefined {
   if (input.signIns.length === 0) return undefined;
   return {
-    calls: input.signIns.map(({ callId, input: args, signal, toolName }) => {
+    calls: input.signIns.map(({ callId, input: args, signal, toolName, version }) => {
       const action = createRuntimeToolCallActionFromToolCall({
         toolCall: { input: args, toolCallId: callId, toolName },
       });
       return {
-        call: { callId: action.callId, input: action.input, toolName: action.toolName },
+        call: {
+          callId: action.callId,
+          input: action.input,
+          toolName: action.toolName,
+          ...(version !== undefined && { version }),
+        },
         connections: signal.challenges.map((challenge) => challenge.name),
       };
     }),

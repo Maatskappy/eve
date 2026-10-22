@@ -101,7 +101,7 @@ describe("compiler artifacts", () => {
       "console.log(JSON.stringify({",
       '  memory: typeof memoryDefinition.provider?.recall?.["turn.started"] === "function",',
       "  memoryFactoryCalls: globalThis.__memoryFactoryCalls,",
-      '  wrapper: typeof wrapper.default?.events?.["beforeTurn"] === "function",',
+      '  wrapper: typeof wrapper.default?.evaluate === "function",',
       "}));",
     ].join("\n");
     const loaded = await runFile(

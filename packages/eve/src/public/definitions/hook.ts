@@ -1,8 +1,7 @@
-import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { AuthoringEventType } from "#protocol/session-events/authoring.js";
 import type { SessionEvent } from "../../protocol/session-event.js";
 import type { FactPosition } from "../../protocol/session-events/envelope.js";
-import type { SessionView } from "../../protocol/session-projection/session-view.js";
+import type { Memo, Occurrence, SessionFrame } from "../../dynamic/definition.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
 
@@ -31,87 +30,104 @@ export type HookEvent<TKey extends HookEventKey = HookEventType> = TKey extends 
   : HookEventMap[HookEventType];
 
 /**
- * Every hook handler receives this context.
- *
- * Extends {@link SessionContext} with agent and channel metadata.
- * `ctx` is always the last argument.
+ * Every hook handler receives this context: the session as of the commit the event is in, the
+ * handler's occurrence, and the ways a hook acts.
  */
-export interface HookContext extends SessionContext {
+export interface HookContext extends SessionContext, Omit<SessionFrame, "session"> {
+  readonly session: SessionContext["session"] & SessionFrame["session"];
   readonly agent: {
     readonly name: string;
     readonly nodeId?: string;
   };
-  readonly channel: InstrumentationChannel;
   /**
    * Where the event sits on the session's stream: the position of its line, and its index in
    * that line. Positions never change, so a hook can record how far it has handled the stream.
    */
   readonly position: FactPosition;
   /**
-   * The session's immutable observation snapshot as of the whole commit the event is in: what's open, and what the commit
-   * settled. Read what changed from the event, and where things stand from the view.
+   * This handler's run for this fact. Its `idempotencyKey` is the fact's position in the stream,
+   * so a retried step passes the same one.
    */
-  readonly view: SessionView;
+  readonly occurrence: Occurrence;
+  /** Keeps what `fn` returns per key, as in a dynamic value; see {@link Memo}. */
+  readonly memo: Memo;
   /**
-   * Cancels the running turn. The event's remaining subscribers still run,
-   * then the turn settles like `session.cancel()`: `turn.settled` with
-   * `outcome: "cancelled"` and `cause: {hook}`. Returns `void` because the turn stops after the hook
-   * returns; call it before the handler's promise settles.
-   *
-   * eve logs a warning and ignores the call when the event cannot stop a
-   * running turn (terminal facts, context changes, and work events a task's
-   * run causes) or when it arrives after the event's hooks returned.
+   * Stops the running turn before its next model call; it settles `cancelled`, like
+   * `session.cancel()`. Can also stop the turn while its input is being admitted. Acts once on
+   * the turn, so asking again is safe; between turns without an incoming turn, it does nothing.
+   * Throws after the handler has settled.
    */
-  cancel(): void;
+  cancel(reason?: string): void;
 }
 
 /**
- * Side-effect-only handler for one accepted runtime stream event.
- *
- * `TEvent` is one variant of {@link HookEvent}. {@link StreamEventHooks}
- * infers it from the event key. The typed event is the first argument, `ctx`
- * is the last.
+ * Handler for one accepted session event. `TEvent` is one variant of {@link HookEvent}, which
+ * {@link StreamEventHooks} infers from the event key.
  */
 export type StreamEventHook<TEvent> = (event: TEvent, ctx: HookContext) => void | Promise<void>;
 
 /**
- * Map of stream-event subscribers an authored hook file may declare.
- *
- * `*` matches every fact the session commits and runs after the typed handler for that event
- * (if any). Progress (streamed deltas and partial results) reaches a hook only through its own
- * key, such as `content.delta`.
+ * Map of event handlers an authored hook file may declare. `*` runs for every fact the session
+ * commits, after the typed handler for that event (if any). Progress (streamed deltas and partial
+ * results) reaches a hook only through its own key, such as `content.delta`.
  */
 export type StreamEventHooks<TKey extends HookEventKey = HookEventKey> = {
   readonly [TKey_ in TKey]?: StreamEventHook<HookEvent<TKey_>>;
 };
 
 /**
- * Public hook definition authored in `agent/hooks/*.ts`.
- *
- * Hook files declare stream-event subscribers (under `events:`) that
- * fire after eve has accepted and durably recorded each event.
- * Handlers are observe-only: they cannot inject model context. To
- * contribute runtime model messages, use `defineDynamic` +
- * `defineInstructions` in `agent/instructions/`.
+ * Public hook definition authored in `agent/hooks/*.ts`: a map of event handlers, each called
+ * once for each matching fact after eve has durably recorded the commit.
  */
 export interface HookDefinition<TKey extends HookEventKey = HookEventKey> {
-  readonly events?: StreamEventHooks<TKey>;
+  readonly events: StreamEventHooks<TKey>;
 }
 
 type DefinedHookEventKeys<TDefinition extends HookDefinition> = Extract<
-  keyof NonNullable<TDefinition["events"]>,
+  keyof TDefinition["events"],
   HookEventKey
 >;
 
 /**
- * Identity-with-types helper. Returns the passed definition unchanged at
- * runtime while preserving its authored event keys behind the public
- * {@link HookDefinition} boundary and rejecting any key outside `events`.
- * Authors export
- * `defineHook({ events: { "session.started": (event, ctx) => { ... } } })`.
+ * Defines a hook. Each handler runs once for each matching fact a commit carries, before the next
+ * model call. A handler can call `ctx.cancel` or an external service. Pass
+ * `ctx.occurrence.idempotencyKey` to services that support idempotency, since retries can repeat
+ * the handler. A handler that throws during a turn fails the turn; catch optional errors.
+ *
+ * ```ts
+ * export default defineHook({
+ *   events: {
+ *     async "model.settled"(_event, ctx) {
+ *       if (spentUsd(ctx.view) <= 50) return;
+ *       ctx.cancel("Session budget exceeded.");
+ *     },
+ *   },
+ * });
+ * ```
  */
 export function defineHook<const T extends HookDefinition>(
   definition: ExactDefinition<T, HookDefinition>,
 ): HookDefinition<DefinedHookEventKeys<T>> {
-  return definition;
+  assertHookForm(definition, "defineHook()");
+  return definition as HookDefinition<DefinedHookEventKeys<T>>;
+}
+
+/**
+ * Throws unless `value` is a hook: an object with an `events` map and nothing else. The definer,
+ * the compiler, and the runtime loader all use it.
+ */
+export function assertHookForm(value: unknown, subject: string): void {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`${subject} takes an object with events handlers.`);
+  }
+  const { events, ...rest } = value as Record<string, unknown>;
+  const extra = Object.keys(rest).filter((key) => key !== "kind");
+  if (extra.length > 0) {
+    throw new Error(
+      `${subject} takes only events handlers; unknown key(s): ${extra.join(", ")}. A hook acts on a condition from a handler, such as "*", with ctx.cancel.`,
+    );
+  }
+  if (typeof events !== "object" || events === null) {
+    throw new Error(`${subject} requires events: an object of handlers keyed by event type.`);
+  }
 }

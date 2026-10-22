@@ -37,6 +37,11 @@ export interface HarnessToolDefinition {
    */
   readonly rootOnly?: boolean;
   readonly toModelOutput?: (output: unknown) => unknown;
+  /**
+   * The version of a dynamically sourced entry the model was offered. A call made from one
+   * version runs only while the entry still has it.
+   */
+  readonly version?: string;
   /** Present when this tool starts an associated durable workflow. */
   readonly workflowId?: string;
 }

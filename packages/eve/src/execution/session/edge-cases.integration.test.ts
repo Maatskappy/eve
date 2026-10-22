@@ -250,11 +250,7 @@ async function withSession(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        model: defineDynamic({
-          events: {
-            "step.started": () => ({ model: options.model, modelContextWindowTokens: 200_000 }),
-          },
-        }),
+        model: defineDynamic(() => ({ model: options.model, modelContextWindowTokens: 200_000 })),
       }),
       name,
     },
@@ -388,6 +384,7 @@ async function withSession(
         },
         until: (label, matches) => read(label, stream.nextUntil(matches)),
       });
+      await vi.waitFor(() => expectInstrumentationPairs(events, heard));
     } finally {
       stream.dispose();
       await run.cancel().catch(() => {});

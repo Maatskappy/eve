@@ -137,10 +137,6 @@ export function workingTaskIds(session: HarnessSession): readonly string[] {
  */
 export async function appendTaskContext(input: {
   readonly messages: readonly HarnessModelMessage[];
-  readonly projectHistory: (
-    messages: readonly ModelMessage[],
-    state: HarnessSession["state"],
-  ) => readonly ModelMessage[];
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
 }): Promise<{
@@ -153,7 +149,7 @@ export async function appendTaskContext(input: {
     appended.push(createFrameworkUserMessage("task.result", delivery.message));
   }
   const note = resolveTasksNote({
-    messages: input.projectHistory([...input.messages, ...appended], delivery.session.state),
+    messages: [...input.messages, ...appended],
     session: delivery.session,
   });
   if (note !== undefined) appended.push(createFrameworkUserMessage("context.state", note));

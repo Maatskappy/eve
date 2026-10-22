@@ -72,6 +72,7 @@ export interface ToolSignIn {
   readonly input: unknown;
   readonly toolName: string;
   readonly signal: AuthorizationSignal;
+  readonly version?: string;
 }
 
 /** How one call came out: its result for the model, or what it waits on instead. */
@@ -270,7 +271,13 @@ export async function executeToolCall(
       );
     }
     if (!failed && isAuthorizationSignal(output)) {
-      return { settled, signIn: { callId, input: args, signal: output, toolName }, toolResults };
+      const signIn = { callId, input: args, signal: output, toolName };
+      return {
+        settled,
+        signIn:
+          definition.version === undefined ? signIn : { ...signIn, version: definition.version },
+        toolResults,
+      };
     }
     toolResults.push({
       input: args,
@@ -644,7 +651,12 @@ function approvalRequest(
   const label = projectToolStartLabel(definition, input) ?? displayTitle(toolName);
   const prompt = authoredApprovalPrompt(call, definition);
   return {
-    call: { callId, input, toolName },
+    call: {
+      callId,
+      input,
+      toolName,
+      ...(definition?.version !== undefined && { version: definition.version }),
+    },
     interactionId: generateId(),
     request: {
       allowFreeform: false,

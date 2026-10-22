@@ -48,7 +48,10 @@ describe("self-modification setup", () => {
     ).toBe("authored");
     expect(
       classifySelfModificationConfig(
-        'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n',
+        `import { defineSelfModificationConfig } from "eve/self-modification/config";
+
+export default defineSelfModificationConfig({});
+`,
       ),
     ).toBe("authored");
   });

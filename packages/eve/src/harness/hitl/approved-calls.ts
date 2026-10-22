@@ -10,6 +10,8 @@ import {
   type ToolSignIn,
 } from "#harness/call-executor.js";
 import {
+  changedSinceOffered,
+  changedToolMessage,
   failedCall,
   TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
@@ -80,6 +82,13 @@ export async function runApprovedCalls(input: {
       const { call, interactionId } = approval;
       const { callId, toolName } = call;
       const definition = input.tools.get(toolName);
+      if (changedSinceOffered(call, definition)) {
+        const message = changedToolMessage(toolName);
+        const failed = failedCall({ callId, message, toolName });
+        await reportSignIns(approval, message);
+        await input.publish(callSettledFrom(failed.result));
+        return { settled: [{ part: failed.part }], toolResults: [] };
+      }
       if (isRunnableTool(definition)) {
         const responder = input.responderOf?.(approval);
         return await executeToolCall(

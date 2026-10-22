@@ -1,7 +1,6 @@
 [
   "DefinedMemory",
   "MemoryCaptureHandler",
-  "MemoryCompactionCompletedContext",
   "MemoryCompactionRequestedContext",
   "MemoryDefinition",
   "MemoryNamespaceContext",
@@ -21,7 +20,6 @@
   "MemoryTurnCompletedContext",
   "MemoryTurnContext",
   "MemoryTurnStartedContext",
-  "MemoryVisibility",
   "defaultNamespace",
   "defineMemory",
   "defineMemoryProvider"

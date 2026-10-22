@@ -17,17 +17,19 @@ export {
   type ToolModelOutput,
   type ToolModelOutputPart,
 } from "#tools/definition.js";
-export { defineDynamic } from "#dynamic/definition.js";
-export { defineDurableSchema } from "#tools/durable-schema.js";
-export { defineDurableCallback } from "#tools/durable-callbacks.js";
+export { defineDynamic } from "#tools/dynamic.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
-export type { DynamicEvents, DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
 export type {
-  DynamicToolEntry,
-  DynamicToolEvents,
-  DynamicToolSet,
-  DynamicToolResult,
-} from "#tools/dynamic.js";
+  DynamicContext,
+  DynamicKey,
+  DynamicModelContext,
+  DynamicSentinel,
+  DynamicTurn,
+  Memo,
+  Occurrence,
+  SessionFrame,
+} from "#dynamic/definition.js";
+export type { DynamicToolEntry, DynamicToolSet, DynamicToolResult } from "#tools/dynamic.js";
 export {
   toolResultFrom,
   type MatchedConnectionResult,

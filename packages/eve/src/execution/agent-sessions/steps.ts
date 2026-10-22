@@ -47,6 +47,9 @@ import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
+import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
+import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
@@ -75,6 +78,11 @@ export type AgentSessionAddress =
       readonly nodeId: string;
       /** Keys the authored credential functions, as on `child.opened`. */
       readonly resolverId?: string;
+      /**
+       * A dynamic remote agent's binding, which its credentials are built from again: the child
+       * keeps the session it was opened with, whatever the parent's session becomes. Private.
+       */
+      readonly dynamicBinding?: DynamicRemoteBinding;
       readonly sessionId: string;
       readonly url: string;
       /** The child's remote agent protocol, when it speaks an earlier one than this deployment. */
@@ -408,7 +416,15 @@ async function startRemoteSession(
 ): Promise<AgentSessionAddress> {
   const { auth, bundle, context, target } = input;
   const { action } = target;
+  const dynamicBinding = bindingFor(context, action.nodeId);
   const remote = resolveRemoteAgentForAction({
+    credentials:
+      target.dynamicRemoteAgent === undefined
+        ? undefined
+        : await credentialsOf(bundle, action.nodeId, dynamicBinding, {
+            name: action.remoteAgentName,
+            url: target.dynamicRemoteAgent.url,
+          }),
     dynamicRemoteAgent: target.dynamicRemoteAgent,
     nodeId: action.nodeId,
     registry: bundle.subagentRegistry.subagentsByNodeId,
@@ -435,10 +451,11 @@ async function startRemoteSession(
     forwardPrincipal: remote.forwardPrincipal,
     name: action.remoteAgentName,
     nodeId: action.nodeId,
-    resolverId: target.dynamicRemoteAgent?.credentialsStepId ?? action.nodeId,
+    resolverId: action.nodeId,
     sessionId: child.sessionId,
     url: remote.url,
   };
+  if (dynamicBinding !== undefined) address.dynamicBinding = dynamicBinding;
   if (child.earlierProtocol !== undefined) address.earlierProtocol = child.earlierProtocol;
   return address;
 }
@@ -463,12 +480,44 @@ async function resolveSessionRemote(
   const bundle = await loadAgentSessionBundle(context);
   const selection = context.dynamicSelections[address.nodeId];
   const resolved = resolveRemoteAgentForAction({
+    // Credentials come from the binding the child was opened with, and go only to its destination.
+    credentials: await credentialsOf(bundle, address.nodeId, address.dynamicBinding, address),
     dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
     nodeId: address.nodeId,
     registry: bundle.subagentRegistry.subagentsByNodeId,
     remoteAgentName: address.name,
   });
   return { ...resolved, url: address.url };
+}
+
+/** The binding a dynamic remote agent with credentials keeps for a child opened now. */
+function bindingFor(
+  context: AgentSessionContext,
+  nodeId: string,
+): DynamicRemoteBinding | undefined {
+  const selection = context.dynamicSelections[nodeId];
+  return selection?.kind === "remote" && selection.remoteAgent.credentials === true
+    ? selection.binding
+    : undefined;
+}
+
+/**
+ * A dynamic remote agent's credentials, built from `binding` for `destination`. `undefined` for
+ * one without credentials, which keeps no binding.
+ */
+async function credentialsOf(
+  bundle: CompiledBundle,
+  nodeId: string,
+  binding: DynamicRemoteBinding | undefined,
+  destination: { readonly name: string; readonly url: string },
+): Promise<RemoteAgentCredentials | undefined> {
+  if (binding === undefined) return undefined;
+  return await remoteAgentCredentials({
+    binding,
+    destination,
+    nodeId,
+    resolvers: bundle.subagentRegistry.dynamicResolvers,
+  });
 }
 
 async function loadAgentSessionBundle(context: AgentSessionContext): Promise<CompiledBundle> {

@@ -27,7 +27,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by fact type, with `*` matching every fact. Subscribe to any fact in the v27 catalog documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress records (`content.delta`, `call.input`, `call.progress`) reach only handlers keyed on their type, never `*`. Handlers can call external services and cancel the running turn. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -87,7 +87,11 @@ interface HookContext extends SessionContext {
   readonly position: { readonly line: number; readonly index: number };
   /** Immutable session snapshot as of the whole commit the event is in. */
   readonly view: SessionView;
-  cancel(): void;
+  readonly turn: DynamicTurn | null;
+  readonly now: Date;
+  readonly occurrence: { readonly idempotencyKey: string; readonly abortSignal: AbortSignal };
+  readonly memo: Memo;
+  cancel(reason?: string): void;
 }
 ```
 
@@ -112,6 +116,8 @@ durable session and filesystem for the next callback. On Vercel, the current
 handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
+
+`ctx.turn` is the latest turn, including a settled one, or `null` before the first turn. `ctx.now` is the commit time. `ctx.memo(key, fn)` follows the [dynamic-value memo rules](./dynamic-capabilities#memo-rules). Hooks do not receive assembled conversation history.
 
 `ctx.view` is the session's state as of the event's whole commit, folded by the same code as
 `eve/events`. Read what changed from the event, and where things stand from the view: for
@@ -195,7 +201,7 @@ export default defineHook({
 
 A consumer that re-reads the stream gets the same positions, so ingesting an event twice is safe. Hooks are still at-least-once: if the step that published a line is interrupted after its hooks ran, a retry can run them again for the same position, and the key above absorbs that.
 
-A side effect that must happen once per turn or call — a charge, an email, a ticket — keys well on the fact's own identity, such as `turnId` on `turn.settled` or `callId` on `call.settled`. Each is introduced once and settles once.
+Pass `ctx.occurrence.idempotencyKey` to services that support idempotency. It identifies this handler's fact position and stays stable on retries. For one effect per turn or call, use that resource's identity instead, such as `turnId` or `callId`. Effects such as one alert per session still need author-managed durable state. `ctx.memo` caches observations, not effect receipts; its records can be discarded on deployment changes.
 
 See [Positions](../concepts/sessions-runs-and-streaming#positions) for the full contract.
 
@@ -206,19 +212,19 @@ When a session commits facts while it runs, the step that owns the session does 
 1. Write. The line is written to the durable stream.
 2. Channel delivery. The channel adapter handler runs for each fact.
 3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-4. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
+4. Before an ordinary model call, dynamic functions compute the model and capabilities from the latest committed session. They do not subscribe to events.
 
 Hooks always run after the line is durably recorded, so if a hook throws, the stream stays consistent.
 
 ## What happens when a hook throws
 
-eve logs a thrown or rejected handler with the hook slug, subscription, event type, position, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `model.requested`, and failure settlements. Throwing from a hook does not reject work or veto a turn. To stop the running turn, call [`ctx.cancel()`](#cancel-the-running-turn-from-a-hook).
+An unhandled error fails the running turn before its next model call or as it would settle. Between turns there is no active turn to fail, so eve logs the error without changing an earlier outcome. Catch errors from optional audit or metrics work if the turn should continue. To stop without a failure, call [`ctx.cancel(reason?)`](#cancel-the-running-turn-from-a-hook).
 
 A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.ended`, or `child.opened` fact fails, the workflow runtime retries the publishing step.
 
 ## Cancel the running turn from a hook
 
-Call `ctx.cancel()` when a hook finds that the turn cannot proceed. For example, a `turn.started` hook that cannot load the caller's credentials can stop the turn before the model runs, instead of letting every tool call fail:
+Call `ctx.cancel(reason?)` when a hook finds that the turn cannot proceed. For example, a `turn.started` hook that cannot load the caller's credentials can stop the turn before the model runs, instead of letting every tool call fail:
 
 ```ts title="agent/hooks/require-credentials.ts"
 import { defineHook } from "eve/hooks";
@@ -234,7 +240,7 @@ export default defineHook({
           error,
           sessionId: ctx.session.id,
         });
-        ctx.cancel();
+        ctx.cancel("Workspace credentials are unavailable.");
       }
     },
   },
@@ -247,9 +253,9 @@ A plain-text message that answers a pending question, such as one from `ask_ques
 
 The same goes for the `call.progress` a workflow tool reports while the turn waits on it: `ctx.cancel()` from its hook cancels the turn, and the run's result never reaches the model.
 
-`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
+`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: a call from work the handler did not await throws.
 
-`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on settlements that would give their work a second end (`turn.settled`, `delivery.settled`, `interaction.settled`, `response.settled`, `task.ended`, `session.ended`), on `turn.paused`, `task.started`, and `child.opened`, and during clear or compact requests.
+`ctx.cancel()` targets the currently running turn and does nothing between turns. Repeated requests cancel that turn only once; they never cancel a later turn. Hook-side `ctx.compact` and `ctx.once` are not available. Client and channel session compaction APIs are unchanged.
 
 ## Subagent isolation
 

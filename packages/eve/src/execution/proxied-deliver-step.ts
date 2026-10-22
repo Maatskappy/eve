@@ -248,6 +248,7 @@ async function routeProxiedDeliver(
         const headers = await resolveRemoteAgentStreamHeaders({
           bundle: ctx.require(BundleKey),
           name: remote.name,
+          dynamicBinding: remote.dynamicBinding,
           resolverId: remote.resolverId,
           url: remote.url,
         });

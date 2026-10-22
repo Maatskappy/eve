@@ -199,7 +199,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 }
 ```
 
-`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here. To compute the same form for an input schema in your own code, such as in a test, call `serializeModelInputSchema(schema)` from `eve/tools`; it returns JSON Schema data and does not add `taskId`.
+`toolInputSchemas` covers only tools compiled from tool files. It does not include provider-managed tools such as `web_search`, dynamic tools, connection tools, the tools eve generates at runtime for each subagent and remote agent, or the `eve__task_wait` and `eve__task_cancel` tools. Model providers can also transform a schema before the model reads it; those changes are not reflected here.
 
 ## `eve build`
 
@@ -356,7 +356,7 @@ Invokes an existing agent without opening the terminal UI. It emits JSON after t
 | `--resume`              | flag   | off      | Read a previous resumable result from stdin     |
 | `--scope <team>`        | string | current  | Vercel team that owns the URL target            |
 
-`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input. An `authorization-required` result lists every unresolved challenge; complete them, then resume without text. Pass headers and scope again when resuming. Paused invocations exit `3`; failures exit `1`. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
+`--resume` reads a complete previous result from stdin, including its delivery ID. Results use `working`, `awaiting-input`, `completed`, `failed`, or `cancelled`; `sessionEnded` separately reports whether the session has ended. Supply text for a follow-up after a settled request while its session remains open, or to answer a question. An `awaiting-input` result lists open `interactions`, sign-ins included; when only sign-ins are open, complete them, then resume without text to follow the original turn to its next input request or completion. If another sign-in appears, complete it and resume the new result without text again. Pass headers and scope again when resuming. Awaiting-input invocations exit `3`; failed or cancelled requests exit `1`. Deployment authentication failures are CLI errors, not request statuses. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `working` result before exiting.
 
 ### `eve remote info`
 
@@ -382,7 +382,7 @@ A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.0
 
 `eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs list`; `eve logs list --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
 
-`eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
+`eve logs --events` resolves session events (`session.started`, `turn.settled`, content deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
 Each log has a same-named `.dump` sibling holding environment diagnostics and session stats as one JSON document. `eve logs --dump` (with or without a log id) prepends that document to the JSONL log body; the combined output is a valid JSON value stream (`eve logs --dump | jq -c .`), one self-contained report to attach to an issue. When a log has no dump, the flag is silently a no-op.
 

@@ -499,7 +499,7 @@ export async function ensureSandboxAccess(
           await close();
         } finally {
           await provider.implementation.onSessionEnd(context, state, {
-            abortSignal: options?.abortSignal,
+            signal: options?.signal,
             reason: "deleted",
           });
         }

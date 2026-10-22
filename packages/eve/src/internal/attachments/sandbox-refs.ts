@@ -34,6 +34,16 @@ const INLINE_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 /** Providers reject an image wider or taller than this, failing the whole request. */
 const INLINE_IMAGE_MAX_SIDE_PX = 8000;
 
+/**
+ * Above this many images and PDFs in one request, Anthropic applies a
+ * stricter per-side limit to every image in it, including images from
+ * earlier turns, and rejects the whole request when one exceeds it.
+ */
+export const MANY_MEDIA_REQUEST_THRESHOLD = 20;
+
+/** The stricter per-side limit, at the value that holds on every platform. */
+export const MANY_MEDIA_IMAGE_MAX_SIDE_PX = 2000;
+
 /** Upper bound, in bytes, on inbound PDFs that hydrate as inline bytes. */
 const INLINE_PDF_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -138,6 +148,14 @@ export function inlinesSandboxRefAsBytes(ref: SandboxRef): boolean {
   }
   if (ref.mediaType === "application/pdf") return ref.size <= INLINE_PDF_MAX_BYTES;
   return false;
+}
+
+/** Whether an image is too large to inline in a request above {@link MANY_MEDIA_REQUEST_THRESHOLD}. */
+export function exceedsManyMediaImageSide(ref: SandboxRef): boolean {
+  return (
+    INLINE_IMAGE_MEDIA_TYPES.has(ref.mediaType) &&
+    Math.max(ref.width ?? 0, ref.height ?? 0) > MANY_MEDIA_IMAGE_MAX_SIDE_PX
+  );
 }
 
 /**

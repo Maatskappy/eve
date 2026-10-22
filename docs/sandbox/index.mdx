@@ -165,6 +165,8 @@ Before every model call, eve reads the referenced files back from the sandbox. E
 
 Other files, such as CSV, HEIC, audio, and video, reach the model as the label alone. eve checks image and PDF media types against the file's bytes when it stages the file. A file whose bytes don't match its declared image or PDF type is staged as `application/octet-stream`, so a provider never receives bytes it would reject.
 
+Providers apply a stricter per-image limit once a request carries more than 20 images and PDFs, and reject the whole request when one image exceeds it. Because every model call resends earlier attachments, one such image would fail every later call in the session. When a request has more than 20 images and PDFs, eve sends images larger than 2000 pixels per side as their label alone, with a note that the agent can resize a copy in the sandbox and open it with `read_file`.
+
 To let the agent answer voice notes and other audio, add a tool that transcribes the staged file. See [Voice notes](/docs/patterns/voice-notes).
 
 If a referenced file is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.

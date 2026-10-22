@@ -25,8 +25,11 @@ import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attac
 import {
   decodeSandboxRef,
   encodeSandboxRef,
+  exceedsManyMediaImageSide,
   inlinesSandboxRefAsBytes,
   isSandboxRefUrl,
+  MANY_MEDIA_IMAGE_MAX_SIDE_PX,
+  MANY_MEDIA_REQUEST_THRESHOLD,
   type SandboxRef,
 } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
@@ -179,6 +182,13 @@ export async function stageToolResultMedia<T extends ModelMessage>(
  * decision is pure in the ref, so each message renders identically on every
  * call and the provider's prompt cache stays valid. The returned messages
  * must not be written back to session history, which stays ref-only.
+ *
+ * The one exception: once the request carries more than
+ * {@link MANY_MEDIA_REQUEST_THRESHOLD} images and PDFs, images over
+ * {@link MANY_MEDIA_IMAGE_MAX_SIDE_PX} per side render as a label with a note,
+ * because a provider would reject the whole request and every later one in
+ * the session. That rendering changes once, when the session crosses the
+ * threshold.
  */
 export async function hydrateSandboxAttachments(
   input: readonly ModelMessage[],
@@ -197,15 +207,42 @@ export async function hydrateSandboxAttachments(
   }
 
   const sandbox = await activeSandbox(sandboxAccess);
+  const manyMedia = countInlineSandboxRefs(messages) > MANY_MEDIA_REQUEST_THRESHOLD;
   return Promise.all(
     messages.map(async (message) => {
       if (!messageContainsSandboxRef(message)) {
         return message;
       }
-      const content = await hydrateMessageContent(message.content, sandbox);
+      const content = await hydrateMessageContent(message.content, sandbox, manyMedia);
       return { ...message, content } as ModelMessage;
     }),
   );
+}
+
+function countInlineSandboxRefs(messages: readonly ModelMessage[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (isSandboxRefFilePart(part)) {
+        if (inlinesSandboxRefAsBytes(decodeSandboxRef(part.data as URL))) count += 1;
+        continue;
+      }
+      if (part.type !== "tool-result") continue;
+      for (const entry of contentOutputParts(part.output)) {
+        if (!isToolOutputRefFile(entry) || entry.data.type !== "url") continue;
+        if (inlinesSandboxRefAsBytes(decodeSandboxRef(entry.data.url))) count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+/** The label an attachment renders as when its bytes stay out of the request, or `null` when they follow. */
+function labelOnlySandboxRef(ref: SandboxRef, manyMedia: boolean): TextPart | null {
+  if (!inlinesSandboxRefAsBytes(ref)) return renderSandboxRefAsTextPart(ref);
+  if (manyMedia && exceedsManyMediaImageSide(ref)) return renderManyMediaOversizedRef(ref);
+  return null;
 }
 
 /**
@@ -353,6 +390,7 @@ function isSandboxRefFilePart(part: unknown): part is FilePart {
 async function hydrateMessageContent(
   content: unknown,
   sandbox: SandboxSession | null,
+  manyMedia: boolean,
 ): Promise<unknown> {
   if (!Array.isArray(content)) {
     return content;
@@ -361,10 +399,11 @@ async function hydrateMessageContent(
     content.map(async (part): Promise<unknown[]> => {
       if (isSandboxRefFilePart(part)) {
         const ref = decodeSandboxRef(part.data as URL);
-        const label = renderSandboxRefAsTextPart(ref);
-        if (!inlinesSandboxRefAsBytes(ref)) {
-          return [label];
+        const labelOnly = labelOnlySandboxRef(ref, manyMedia);
+        if (labelOnly !== null) {
+          return [labelOnly];
         }
+        const label = renderSandboxRefAsTextPart(ref);
         const bytes = await readSandboxRefBytes(ref, sandbox);
         return bytes === null
           ? [renderMissingSandboxRef(ref)]
@@ -372,7 +411,12 @@ async function hydrateMessageContent(
       }
       if ((part as { type?: unknown }).type === "tool-result") {
         const toolResult = part as ToolResultPart;
-        return [{ ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox) }];
+        return [
+          {
+            ...toolResult,
+            output: await hydrateToolOutput(toolResult.output, sandbox, manyMedia),
+          },
+        ];
       }
       return [part];
     }),
@@ -383,6 +427,7 @@ async function hydrateMessageContent(
 async function hydrateToolOutput(
   output: ToolResultOutput,
   sandbox: SandboxSession | null,
+  manyMedia: boolean,
 ): Promise<ToolResultOutput> {
   if (output.type !== "content" || !output.value.some(isToolOutputRefFile)) {
     return output;
@@ -391,8 +436,9 @@ async function hydrateToolOutput(
     output.value.map(async (part): Promise<ToolOutputContentPart[]> => {
       if (!isToolOutputRefFile(part) || part.data.type !== "url") return [part];
       const ref = decodeSandboxRef(part.data.url);
+      const labelOnly = labelOnlySandboxRef(ref, manyMedia);
+      if (labelOnly !== null) return [labelOnly];
       const label = renderSandboxRefAsTextPart(ref);
-      if (!inlinesSandboxRefAsBytes(ref)) return [label];
       const bytes = await readSandboxRefBytes(ref, sandbox);
       if (bytes === null) return [renderMissingSandboxRef(ref)];
       return [
@@ -500,6 +546,17 @@ function createReturnedFilesMessage(files: readonly FilePart[]): ModelMessage {
  */
 function renderSandboxRefAsTextPart(ref: SandboxRef): TextPart {
   return { text: `Attached file ${ref.path} (${ref.mediaType})`, type: "text" };
+}
+
+function renderManyMediaOversizedRef(ref: SandboxRef): TextPart {
+  return {
+    text:
+      `${renderSandboxRefAsTextPart(ref).text}. Not shown: this conversation has more than ` +
+      `${MANY_MEDIA_REQUEST_THRESHOLD} images and PDFs, so images larger than ` +
+      `${MANY_MEDIA_IMAGE_MAX_SIDE_PX} pixels per side are left out. To view it, resize a copy ` +
+      `to at most ${MANY_MEDIA_IMAGE_MAX_SIDE_PX} pixels per side in the sandbox and open it with read_file.`,
+    type: "text",
+  };
 }
 
 async function stageFilePart(

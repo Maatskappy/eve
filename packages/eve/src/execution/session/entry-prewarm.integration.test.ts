@@ -96,21 +96,19 @@ describe("idle session prewarm handoff", () => {
         expect(
           events.filter(
             (event) =>
-              event.type === "message.received" &&
-              event.data.message === "Alice writes during preparation.",
+              event.type === "delivery.admitted" && event.data.deliveryId === "typing-race",
           ),
         ).toHaveLength(1);
-        expect(
-          events.some(
-            (event) =>
-              event.type === "message.completed" &&
-              event.data.message?.includes("Alice writes") === true,
-          ),
-        ).toBe(true);
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "content.completed",
+            data: expect.objectContaining({ value: expect.stringContaining("Alice writes") }),
+          }),
+        );
         expect((await waitForCommandHookOwner(token)).runId).not.toBe(anchor.runId);
         await workflowRuntime.dispatchSession({
           sessionId: anchor.runId,
-          command: { kind: "reset" },
+          command: { deliveryId: "reset-delivery", kind: "reset" },
         });
         await anchor.returnValue;
       } finally {
@@ -187,6 +185,12 @@ describe("idle session prewarm handoff", () => {
                 step.stepName.includes("invokeAgent") || step.stepName.endsWith("//runTurnStep"),
             ),
           ).toBe(false);
+          if (!conversation) {
+            await workflowRuntime.dispatchSession({
+              sessionId: anchor.runId,
+              command: { kind: "clear", deliveryId: "before-first-message" },
+            });
+          }
           // A retry inspected before handoff must not move the successor backwards.
           await resumeHook(token, {
             kind: "session-prewarm",
@@ -202,18 +206,20 @@ describe("idle session prewarm handoff", () => {
             ),
           });
           const events = await stream.nextTurn();
-          expect(
-            events.some(
-              (event) =>
-                event.type === "message.completed" &&
-                event.data.message?.includes("Alice confirms") === true,
-            ),
-          ).toBe(true);
+          if (!conversation) {
+            expect(events.some((event) => event.type === "context.started")).toBe(false);
+          }
+          expect(events).toContainEqual(
+            expect.objectContaining({
+              type: "content.completed",
+              data: expect.objectContaining({ value: expect.stringContaining("Alice confirms") }),
+            }),
+          );
           expect((await waitForCommandHookOwner(token)).runId).toBe(successorId);
           expect(await deadline(successorId!)).toEqual(preparedDeadline);
           await workflowRuntime.dispatchSession({
             sessionId: anchor.runId,
-            command: { kind: "reset" },
+            command: { deliveryId: "reset-delivery", kind: "reset" },
           });
           await expect(anchor.returnValue).resolves.toEqual({ output: "" });
         } finally {

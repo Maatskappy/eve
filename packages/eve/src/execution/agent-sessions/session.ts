@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
@@ -10,6 +12,7 @@ import {
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
+  stopLateAgentSessionStep,
   type AgentSessionMessage,
   type OpenedAgentSession,
 } from "#execution/agent-sessions/steps.js";
@@ -18,6 +21,7 @@ import { disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { parseJsonValue } from "#shared/json.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { serializeOutputSchema } from "#tools/schema-emission.js";
 import type {
@@ -104,12 +108,10 @@ class RunAgentSession implements AgentSession {
   }
 
   async send<TOutput = unknown>(
-    message: string,
+    message: MessageContent<string | URL>,
     options: AgentSendOptions<TOutput> = {},
   ): Promise<AgentResponse<TOutput>> {
-    if (typeof message !== "string" || message.trim() === "") {
-      throw new TypeError(`ctx.agent("${this.#name}").send() requires a non-empty message.`);
-    }
+    message = normalizeAgentMessage(message);
     // The reply's shape and the child's output mode must agree on whether a
     // schema was requested, and an empty one requests none.
     const outputSchema = normalizeRequestedOutputSchema(
@@ -125,6 +127,8 @@ class RunAgentSession implements AgentSession {
         message,
         outputSchema,
         replyTo: reply.hook.token,
+        // The run's current call: a serving run forwards each call it receives.
+        servedCallId: this.#run.from.callId,
       });
     } catch (error) {
       this.#awaited.splice(this.#awaited.indexOf(reply), 1);
@@ -173,6 +177,11 @@ class RunAgentSession implements AgentSession {
                           resolverId: address.resolverId,
                           url: address.url,
                           sessionId: address.sessionId,
+                          ...(address.dynamicBinding !== undefined && {
+                            dynamicBinding: parseJsonValue(
+                              JSON.parse(JSON.stringify(address.dynamicBinding)),
+                            ),
+                          }),
                         }
                       : undefined,
                   ),
@@ -228,6 +237,7 @@ class RunAgentSession implements AgentSession {
    */
   async #open(message: AgentSessionMessage): Promise<OpenedAgentSession> {
     const { agentContext: context, from } = this.#run;
+    let opened: OpenedAgentSession | undefined;
     try {
       const address = await openAgentSessionStep({
         ...message,
@@ -236,12 +246,13 @@ class RunAgentSession implements AgentSession {
         model: this.#options.model,
         name: this.#name,
       });
-      const opened = { address, context, key: this.#key };
+      opened = { address, context, key: this.#key };
       this.#sessions.push(opened);
-      await this.#run.owner.send({ from, kind: "agent-started", session: address });
+      await this.#run.owner.send({ context, from, kind: "agent-started", session: address });
       return opened;
     } catch (error) {
       this.#opened = undefined;
+      if (opened !== undefined) await stopLateAgentSessionStep(opened).catch(() => undefined);
       throw error;
     }
   }
@@ -273,10 +284,10 @@ function unwrapTurnEnd(end: AgentTurnEnd): AgentMessageResult<unknown> {
   return end.result;
 }
 
-const NO_REPLY = { data: undefined, message: undefined } as const;
+const NO_REPLY = { data: undefined, reply: undefined } as const;
 
-function failedTurn(error: unknown): AgentMessageResult<unknown> {
-  return { ...NO_REPLY, error: { message: toErrorMessage(error) }, status: "failed" };
+function failedTurn(error: unknown, sessionEnded = false): AgentMessageResult<unknown> {
+  return { ...NO_REPLY, sessionEnded, error: { message: toErrorMessage(error) }, status: "failed" };
 }
 
 function toAgentMessageResult(
@@ -287,14 +298,14 @@ function toAgentMessageResult(
   const { outcome } = result;
   switch (outcome.result.kind) {
     case "failed":
-      return failedTurn(outcome.result.error);
+      return failedTurn(outcome.result.error, outcome.kind === "terminal");
     case "cancelled":
-      return { ...NO_REPLY, status: "waiting" };
+      return { ...NO_REPLY, sessionEnded: outcome.kind === "terminal", status: "cancelled" };
     case "succeeded": {
       const { output } = outcome.result;
-      const status = outcome.kind === "terminal" ? "completed" : "waiting";
-      if (expectsData) return { data: output, message: undefined, status };
-      return { data: undefined, message: typeof output === "string" ? output : undefined, status };
+      const common = { status: "completed" as const, sessionEnded: outcome.kind === "terminal" };
+      if (expectsData) return { data: output, reply: undefined, ...common };
+      return { data: undefined, reply: typeof output === "string" ? output : undefined, ...common };
     }
   }
 }

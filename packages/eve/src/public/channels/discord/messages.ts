@@ -198,7 +198,10 @@ export function createDiscordGatewayRoute(input: {
       const channelSession = isDirectMessage
         ? undefined
         : await resolveSession(
-            discordContinuationToken(parsed.channelId, WHOLE_CHANNEL_CONVERSATION),
+            discordContinuationToken({
+              channelId: parsed.channelId,
+              conversationId: WHOLE_CHANNEL_CONVERSATION,
+            }),
           );
       const message: DiscordGatewayMessage = {
         ...parsed,
@@ -223,7 +226,7 @@ export function createDiscordGatewayRoute(input: {
       // Bots receive only 1:1 DMs over the Gateway, never group DMs.
       if (isDirectMessage) {
         state.audience = discordAudience(1);
-        state.directMessage = true;
+        state.channelType = 1;
       }
 
       let result: DiscordMessageResult;
@@ -250,8 +253,9 @@ export function createDiscordGatewayRoute(input: {
           const replyTo = message.referencedMessageId;
           if (
             replyTo !== undefined &&
-            (await resolveSession(discordContinuationToken(message.channelId, replyTo))) !==
-              undefined
+            (await resolveSession(
+              discordContinuationToken({ channelId: message.channelId, conversationId: replyTo }),
+            )) !== undefined
           ) {
             return replyTo;
           }
@@ -287,14 +291,17 @@ export function createDiscordGatewayRoute(input: {
         username: message.author.username,
       });
       const session = await from(
-        discordContinuationToken(state.channelId ?? message.channelId, state.conversationId),
+        discordContinuationToken({
+          channelId: state.channelId ?? message.channelId,
+          conversationId: state.conversationId,
+        }),
       ).send(discordCommandContent(content, message.attachments), {
         auth: result.auth,
         context: [contextBlock, ...(result.context ?? [])],
         state,
         title: result.title,
       });
-      return Response.json({ accepted: true, sessionId: session.id }, { status: 202 });
+      return Response.json({ accepted: true, sessionId: session.sessionId }, { status: 202 });
     },
   );
 }

@@ -102,6 +102,26 @@ The session routes use only durable session IDs. Create a session explicitly, th
 
 `GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy and returns agent-info version 6. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
 
+### Request validation
+
+Session creation, follow-up message and input-response requests, and session controls reject
+unknown top-level JSON fields with `400 Bad Request`. The error names the unknown fields and
+lists the accepted fields for that route. Field names are case-sensitive: `outputschema` is
+not `outputSchema`. Invalid requests do not create sessions, dispatch messages, or apply controls.
+
+Fields accepted on one route are not automatically valid on another. For example, `operationId`
+is accepted on session creation but rejected on follow-up messages. The compact and clear routes
+accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; reset accepts `reason`.
+
+Open payload objects such as `clientContext` keep their existing contracts. Delegated requests
+with a `callback` also recognize the retired `activityObserver` field as an explicit legacy no-op.
+This does not allow arbitrary advisory fields. Authentication and existing value validation still
+apply, including permission checks for forwarded principals and tool stubs.
+
+A newer client sending an unsupported field to an older server with strict validation fails
+rather than silently losing the requested behavior. Correct the field or upgrade the server;
+do not automatically remove behavior-changing options and retry.
+
 ### Start and continue a session
 
 Create a conversation session before its first message with a bodyless request:
@@ -415,7 +435,7 @@ Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an o
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 
-The stream records added entries in `delivery.consumed.history`, alongside the delivery's new message parts. Each entry has the same `role`, `text`, and optional `id` you passed. Histories consumed in one line precede that line's merged messages, matching model input. `transcriptOf()` from `eve/client` includes them, so its `{ role, text }` messages can be passed straight back as `history` to branch a session. The default client reducer renders them ahead of that turn's message with `metadata.imported` set and your `id` in `metadata.historyId`, so you can rejoin your own annotations. Message ids stay unique even when a later call reuses an `id`. After that, the entries are ordinary history: compaction, `clear()`, and handoffs treat them like any other turn.
+The stream records the entries on the `delivery.consumed` of the message that brought them, in `data.history`, with the same `role`, `text`, and `id` you passed. History from `create()` is recorded with the first message the channel accepts. When one turn takes in several messages at once, the model reads all of their history before what they sent. `transcriptOf()` from `eve/client` reads the entries in that order, so its `{ role, text }` messages can be passed straight back as `history` to branch a session. Frontend `messages` show them ahead of their message with `metadata.imported` set and your `id` in `metadata.historyId`, so you can rejoin your own annotations. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one, and their message ids stay unique even when a later call reuses an `id`. After that, the entries are ordinary history: compaction, `clear()`, and handoffs treat them like any other turn.
 
 ## Clients
 

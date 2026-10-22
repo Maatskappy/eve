@@ -32,12 +32,13 @@ describe("Browser Use connection setup", () => {
 });
 
 describe("Stacktree connection setup", () => {
-  it("generates the required Bearer authorization header", () => {
+  it("keeps the installed approval and Bearer authorization policy in the gallery", () => {
     const integration = getIntegration("stacktree")!;
-    const quickStart = buildConnectionSetup(integration).variants["mcp:apiKey"];
+    const quickStart = integration.quickStart!;
 
-    expect(quickStart).toContain('"authorization": `Bearer ${process.env.STACKTREE_API_KEY!}`');
-    expect(quickStart).not.toContain("@vercel/connect");
+    expect(quickStart).toContain("authorization: `Bearer ${process.env.STACKTREE_API_KEY!}`");
+    expect(quickStart).toContain('import { always } from "eve/tools/approval"');
+    expect(quickStart).toContain("approval: always()");
   });
 });
 

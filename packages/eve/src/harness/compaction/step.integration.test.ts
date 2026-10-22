@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, StaticModelReferenceKey } from "#context/keys.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -79,7 +80,7 @@ const lookup = (preamble?: string): StreamResult =>
     { input: "{}", toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" },
     finish("tool-calls"),
   ]);
-const lookupTool = {
+const lookupTool: HarnessToolDefinition = {
   description: "Looks up the sources.",
   execute: async () => "Two cases.",
   inputSchema: jsonSchema({ type: "object" }),

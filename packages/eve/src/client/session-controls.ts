@@ -30,7 +30,10 @@ export async function sendClientControl(input: {
     readonly reason?: string;
   };
 }): Promise<DeliveryReceipt> {
-  const { signal, ...body } = input.options ?? {};
+  const { signal, turnId, reason } = input.options ?? {};
+  // Controls reject unknown fields, and option objects passed by variable skip
+  // excess-property checks, so each body carries only its own control fields.
+  const body = input.kind === "cancel" ? { turnId } : input.kind === "reset" ? { reason } : {};
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
   const response = await fetch(

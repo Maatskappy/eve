@@ -93,6 +93,7 @@ const ALICE = {
   principalId: "alice",
   principalType: "user" as const,
 };
+const BOB = { ...ALICE, principalId: "bob" };
 
 type Prompt = LanguageModelV4CallOptions["prompt"];
 type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
@@ -208,6 +209,7 @@ function heldReply(text: string, release: Promise<void>, before?: string): Strea
 interface ToolSpec {
   readonly name: string;
   readonly approval?: boolean;
+  readonly allowOtherResponders?: boolean;
   readonly inputSchema?: z.ZodType;
   readonly execute?: (input: unknown) => unknown;
 }
@@ -225,6 +227,7 @@ interface Session {
   readonly send: (message: string) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
   readonly answer: (interactionId: string, optionId: string) => Promise<void>;
+  readonly answerAndSend: (interactionId: string, message: string) => Promise<string>;
   readonly control: (
     kind: "cancel" | "clear" | "compact" | "reset",
     extra?: object,
@@ -262,7 +265,15 @@ async function withSession(
       ...options.tools.map((tool) => ({
         loadNamespace: async () => ({
           default: defineTool({
-            approval: tool.approval === true ? { request: always() } : undefined,
+            approval:
+              tool.approval === true
+                ? {
+                    request: always(),
+                    ...(tool.allowOtherResponders && {
+                      response: () => ({ status: "allowed" as const }),
+                    }),
+                  }
+                : undefined,
             description: `Run ${tool.name}.`,
             execute: async (input) => {
               ran.push(tool.name);
@@ -343,6 +354,19 @@ async function withSession(
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { answers: [{ interactionId, optionId }] },
           });
+        },
+        async answerAndSend(interactionId, message) {
+          const delivery = createChannelDeliveryMetadata({
+            channelKind: "http",
+            channelName: "test",
+          });
+          await resumeHook(commandInbox, {
+            auth: BOB,
+            kind: "send",
+            delivery,
+            payload: { answers: [{ interactionId, optionId: "approve" }], message },
+          });
+          return delivery.deliveryId;
         },
         async control(kind, extra = {}) {
           await resumeHook(commandInbox, {
@@ -903,6 +927,60 @@ describe("approvals off the happy path", () => {
     ]);
     expect(settlements(events)).toEqual(["call_deploy:rejected"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  it("separates another person's answer from their queued message", async () => {
+    let messageId = "";
+    const { events, ran } = await withSession(
+      "edge-split-answer-message",
+      {
+        message: "Deploy it.",
+        model: scriptedModel((prompt) =>
+          prompt.said("Bob follows up")
+            ? "Thanks, Bob."
+            : prompt.results.length > 0
+              ? "Deployed."
+              : [{ toolName: "deploy" }],
+        ),
+        tools: [{ approval: true, allowOtherResponders: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("asks Alice for approval");
+        messageId = await session.answerAndSend(session.approvals()[0]!, "Bob follows up.");
+        await session.next("Alice's approved turn finishes");
+        expect(
+          ofType(session.events(), "delivery.consumed").map((event) => event.data.deliveryId),
+        ).not.toContain(messageId);
+        await session.send("Alice starts the next turn.");
+        await session.until(
+          "Bob's message has its turn",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === messageId,
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "accepted",
+    ]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    const answerId = `answers_${messageId}`;
+    for (const id of [answerId, messageId]) {
+      expect(
+        events
+          .filter(
+            (event) =>
+              (event.type === "delivery.admitted" ||
+                event.type === "delivery.consumed" ||
+                event.type === "delivery.settled") &&
+              event.data.deliveryId === id,
+          )
+          .map((event) => event.type),
+      ).toEqual(["delivery.admitted", "delivery.consumed", "delivery.settled"]);
+    }
+    expect(ofType(events, "response.submitted").map((event) => event.data.deliveryId)).toEqual([
+      answerId,
+    ]);
   });
 
   it("runs a call once when its approval is answered twice; the late answer reads as text", async () => {

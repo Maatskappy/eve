@@ -1,3 +1,4 @@
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { takeLeadingAppliedRunMessages } from "#execution/session-workflow-tool-run.js";
@@ -153,6 +154,7 @@ describe("createSessionInbox", () => {
       turnId: "turn-1",
     };
     const opened: SessionInboxPayload = {
+      context: { parent: { sessionId: "parent" } } as AgentSessionContext,
       from,
       kind: "agent-started",
       session: {

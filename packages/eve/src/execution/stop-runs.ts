@@ -48,22 +48,28 @@ export function waitedCallRuns(session: {
 }
 
 /**
- * Stops runs, the same way whoever stops them: each is told to stop, a run the stop ends gets
- * until the deadline to finish cleaning up, and one still running then is cancelled outright.
- * So is a run that couldn't be told, such as one that hasn't registered its control hook yet.
+ * Stops runs, the same way whoever stops them: each is told to stop, and a run that couldn't be
+ * told, such as one that hasn't registered its control hook yet, is cancelled outright. By default
+ * a run the stop ends gets until the deadline to finish cleaning up, and one still running then is
+ * cancelled outright too. With `waitForEnd: false` nothing waits: a told run that never finishes
+ * is not cancelled here, and keeps running until it ends on its own or its session ends.
  * Returns the runs cancelled outright, which never report how they ended.
  */
 export async function stopRuns(
   targets: readonly RunStopTarget[],
   stop: RunStop,
+  options: { readonly waitForEnd?: boolean } = {},
 ): Promise<readonly string[]> {
   const signalled = await Promise.all(
     targets.map(async (target) => ({ target, told: await tell(target.run, stop) })),
   );
   const ending = signalled.filter(({ target }) => target.ends);
-  const lingering = await runsStillRunning(
-    ending.filter(({ told }) => told).map(({ target }) => target.run.runId),
-  );
+  const lingering =
+    options.waitForEnd === false
+      ? []
+      : await runsStillRunning(
+          ending.filter(({ told }) => told).map(({ target }) => target.run.runId),
+        );
   const unreachable = ending.filter(({ told }) => !told).map(({ target }) => target.run.runId);
   const cancelled = await Promise.all(
     [...unreachable, ...lingering].map(async (runId) =>

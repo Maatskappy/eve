@@ -363,7 +363,9 @@ Some delegated usage doesn't count against the parent: a `ctx.agent` turn
 still running when its workflow tool finishes or is cancelled; the `ctx.agent`
 usage of an `execute` tool whose parent turn is cancelled while it waits; and
 what a cancelled agent task's own subagents spend after the task reports its
-cancelled turn, until the task's next reply.
+cancelled turn. A cancelled agent task ends and sends no further reply. Usage
+reported by the cancelled run up to that point still counts against the parent
+when its usage report or final outcome arrives.
 
 ## Workflow world
 

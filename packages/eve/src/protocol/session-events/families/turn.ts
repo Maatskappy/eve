@@ -13,11 +13,11 @@ export interface TurnStartedData {
 }
 
 /**
- * The turn waits on people: the interactions only they can settle. The session announces it in
- * the commit that leaves the turn so, and again when someone new is asked. A reader following
- * the stream from a cursor stops here without folding what came before; one that folds reads
- * the same from `waiting(view, turnId)`. Nothing announces the turn going on: its next model run
- * or consumed delivery shows it.
+ * The turn waits on interactions: answers, approvals, or sign-ins that resume its work.
+ * The session announces it in the commit that leaves the turn so, and again when someone new
+ * is asked. A reader following the stream from a cursor stops here without folding what came
+ * before; one that folds reads the same from `waiting(view, turnId)`. Nothing announces the turn
+ * going on: its next model run or consumed delivery shows it.
  */
 export interface TurnPausedData {
   readonly turnId: string;

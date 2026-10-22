@@ -16,19 +16,18 @@ import { assistantHasReport } from "../report-evidence";
 import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
-// eve estimates this fixture's request envelope (instructions, task system
-// block, and 10 advertised tools; with nothing deferred and no skills or
-// connections, the agent has no catalog tools) at 2,273
-// tokens. This allowance sits 230.25 tokens below that estimate, the offset the
-// cases have always run with, so the threshold leaves them a ~670-token history
-// budget. When eve's fixed instructions or tools change, re-measure: log what
-// `estimateRequestEnvelope` (packages/eve/src/harness/request-envelope.ts)
-// returns while `EVE_E2E_MODEL=mock pnpm exec eve eval --strict
-// content-output-file-stub` runs in this fixture, subtract 230.25, and round up.
+// Offline compilation of this fixture and its mock-model tool catalog gives a
+// 2,297-token request envelope (instructions, task block, 10 advertised tools).
+// With the 2,043-token pressure allowance, the 2,983-token threshold leaves
+// 686 tokens for history. The staged 2000x2000 file exchange after stubbing
+// estimates at 255 history tokens + 406 compaction-prompt overhead: it needs
+// 2,958 total, leaving 25 tokens of headroom. The raw file (5,019 history
+// tokens) and review/handoff reports still exceed the threshold and summarize.
+// Re-measure the compiled envelope and staged candidate if instructions or tools change.
 const TEST_REQUEST_ENVELOPE_TOKENS = 2_043;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
-const TEST_HISTORY_BUDGET_TOKENS = 900;
+const TEST_HISTORY_BUDGET_TOKENS = 940;
 const COMPACTION_PRESSURE_USAGE = { inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + 4_096 };
 const MAX_TOOL_CALLS = 10;
 

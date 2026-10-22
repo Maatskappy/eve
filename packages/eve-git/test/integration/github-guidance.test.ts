@@ -10,7 +10,7 @@ import gh from "../../extension/tools/gh.ts";
 const context = {
   model: null,
   session: { id: "guidance-test", auth: { current: null, initiator: null } },
-  channel: {},
+  channel: { kind: "http" as const, metadata: {} },
   messages: [],
 };
 

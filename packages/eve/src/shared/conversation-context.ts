@@ -1,4 +1,4 @@
-import type { InstrumentationChannelKind } from "#public/channels/index.js";
+import type { InstrumentationChannelKind } from "#shared/instrumentation-channel.js";
 import { ContextKey } from "#context/key.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import { isNonEmptyString } from "#shared/guards.js";

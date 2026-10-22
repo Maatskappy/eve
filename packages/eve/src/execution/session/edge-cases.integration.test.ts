@@ -956,6 +956,46 @@ describe("approvals off the happy path", () => {
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
 
+  it("settles a cancel that arrives as its turn ends as ignored", async () => {
+    const hold = gate();
+    const held = gate();
+    const { events } = await withSession(
+      "edge-cancel-at-end",
+      {
+        hooks: {
+          hold: defineHook({
+            events: {
+              "turn.settled": async () => {
+                held.open();
+                await hold.wait;
+              },
+            },
+          }),
+        },
+        message: "Hi.",
+        model: scriptedModel(() => "Hello."),
+        tools: [],
+      },
+      async (session) => {
+        try {
+          await held.wait;
+          await session.control("cancel");
+        } finally {
+          hold.open();
+        }
+        await session.until(
+          "the cancel settles",
+          (event) => event.type === "delivery.settled" && event.data.deliveryId === "control_0",
+        );
+      },
+    );
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    expect(
+      ofType(events, "delivery.settled").find((event) => event.data.deliveryId === "control_0")
+        ?.data.outcome,
+    ).toBe("ignored");
+  });
+
   it("cancels a turn waiting on approval: the request closes, a late answer runs nothing", async () => {
     const { events, ran } = await withSession(
       "edge-approval-then-cancel",

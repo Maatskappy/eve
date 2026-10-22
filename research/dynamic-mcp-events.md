@@ -132,8 +132,9 @@ verified webhook -> saved watch -> reconstruct exact connection -> callback
    dependency failure retries through the existing durable workflow policy;
    it is not evidence of account removal. A successful resolution returning
    `null`, a missing entry, or a changed instance disables callback execution
-   and retires that watch. Missing authored code after a deploy has the same
-   outcome. Trace the reason without logging credentials or event payloads.
+   and retires that watch. A missing resolver has the same outcome while the
+   receiver remains mounted. Stop watches before deleting the last dynamic
+   resolver, or keep a resolver returning `null` until they retire. Trace the reason without logging credentials or event payloads.
    Do not invoke a replacement connection's `onTerminated` as a fallback.
 
 Recovery uses `sessionStartedForResolvers` with the saved runtime identity,
@@ -147,17 +148,19 @@ crash and must deduplicate effects using `deliveryId`.
 
 ## Stopping a removed connection
 
-Callback reconstruction must not be required to disable delivery. Keep the
-previously discovered `<connection>__events_get_subscription` and
-`<connection>__events_unsubscribe` names callable through `eve__tool`, taking the
-saved watch ID. Include those exact management names in the subscribe result so
-the model can retain them even after the connection leaves the catalog. This
-first version does not add cross-session watch listing or rediscovery.
+Callback reconstruction must not be required to disable delivery. Dynamic
+subscribe results return two dedicated management names, `eve__event_watch_get`
+and `eve__event_watch_stop`, callable through `eve__tool` with the saved eve
+watch ID. Keep these names distinct from connection tools so a replacement
+account or a same-named static connection cannot capture the call. This first
+version does not add cross-session watch listing or rediscovery.
 
-A management-only catalog fallback validates the watch ID, original connection
-name, root-agent scope, and current execution principal against its saved owner.
-It cannot expose the removed connection's catalog or subscribe action. A changed
-account with the same name must not authorize access to another user's watch.
+These are creator-authorized housekeeping operations, independent of the current
+connection's discovery, auth, tool filters, and approval closures. Existing
+connection get/stop actions retain those controls. Validate root-agent scope,
+the watch ID, and the current execution principal against the saved owner before
+using its connector and subscription ID. Do not expose removed catalogs or
+create subscriptions through this path.
 
 The watch workflow records stopping durably before upstream cleanup. Subsequent
 receipt and queued callback execution must observe that marker. A callback
@@ -201,6 +204,7 @@ receiver in a deterministic fixture without real Bird credentials.
   events. Reuse that owner if it lands first. This proposal only adds dynamic
   connection support; it does not introduce another subscription primitive.
 
-Review the initial session-only scope, the management names retained in watch
-results, and the use of project-authorized cleanup for saved watch IDs. Shared callbacks are the supported authoring
-contract, not a promise that arbitrary closures can be serialized or recovered.
+Review the initial session-only scope, creator-authorized management independent
+of connection tool policies, and project-authorized cleanup for saved watch IDs.
+Shared callbacks are the supported authoring contract, not a promise that
+arbitrary closures can be serialized or recovered.

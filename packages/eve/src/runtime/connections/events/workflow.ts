@@ -14,7 +14,7 @@ import {
 } from "#runtime/connections/events/lifecycle-step.js";
 
 export type ConnectionEventWatchMessage =
-  | { readonly kind: "retire"; readonly subscriptionId?: string }
+  | { readonly kind: "retire" }
   /** A delivery that reached the receiver before this run published its subscription. */
   | { readonly kind: "delivery"; readonly payload: ConnectionEventPayload };
 
@@ -60,11 +60,7 @@ export async function connectionEventWorkflow(input: {
   while (true) {
     const message = await (expiry === undefined ? hook : Promise.race([hook, expiry]));
     if (message === undefined) return;
-    if (message.kind === "retire") {
-      // A delayed delivery must not retire a replacement watch with the same binding id.
-      if (message.subscriptionId === undefined || message.subscriptionId === subscriptionId) break;
-      continue;
-    }
+    if (message.kind === "retire") break;
     // Connect verifies the destination, not the subscription: only this run's own runs.
     if (message.payload.delivery.subscriptionId === subscriptionId)
       await startConnectionEventDeliveryStep({

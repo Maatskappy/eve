@@ -110,7 +110,7 @@ export async function dispatchConnectionEventStep(input: {
           reason: "binding_unavailable",
         },
       );
-      await retireConnectionEventOwner(input.binding.id, delivery.subscriptionId);
+      await retireConnectionEventOwner(input.binding.id, watch.runId);
     }
     return;
   }
@@ -119,6 +119,7 @@ export async function dispatchConnectionEventStep(input: {
   if (
     current === undefined ||
     current.stopping ||
+    current.runId !== watch.runId ||
     current.subscription?.id !== delivery.subscriptionId
   )
     return;
@@ -170,5 +171,5 @@ export async function dispatchConnectionEventStep(input: {
     },
   );
   if ("control" in delivery && delivery.control.type === "terminated")
-    await retireConnectionEventOwner(binding.id, delivery.subscriptionId);
+    await retireConnectionEventOwner(binding.id, watch.runId);
 }

@@ -87,7 +87,9 @@ vi.mock("#runtime/connections/events/owner.js", () => ({
   }),
   findConnectionEventOwner: vi.fn(async (bindingId: string) => {
     const handler = handlers.get(bindingId);
-    return handler && { owner: handler.binding, subscription: handler.subscription };
+    return (
+      handler && { runId: "watch-run", owner: handler.binding, subscription: handler.subscription }
+    );
   }),
   // The run unsubscribes and ends on its own; this records that it was asked to.
   retireConnectionEventOwner: vi.fn(async (bindingId: string) => {
@@ -781,7 +783,7 @@ it("ends the watch after its terminated callback", async () => {
   expect(terminated).toHaveBeenCalledTimes(1);
   expect(retired.has(initial.binding!.id)).toBe(true);
   const { retireConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
-  expect(retireConnectionEventOwner).toHaveBeenCalledWith(initial.binding!.id, "sub_0");
+  expect(retireConnectionEventOwner).toHaveBeenCalledWith(initial.binding!.id, "watch-run");
   expect(callback).not.toHaveBeenCalled();
 });
 
@@ -1234,6 +1236,8 @@ it("keeps opted-in saved-watch management available to its creator in a fresh em
   ).toEqual({ id, status: "stopping" });
   expect(retired.has(id)).toBe(true);
   expect(connectionEventManagementEntry("eve__event_watch_subscribe")).toBeUndefined();
+  const { retireConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
+  expect(retireConnectionEventOwner).toHaveBeenCalledWith(id, "watch-run");
 });
 
 it("does not execute queued delivery after stopping is durable", async () => {
@@ -1241,12 +1245,31 @@ it("does not execute queued delivery after stopping is durable", async () => {
   initial = { ...initial, serializedContext: serializeContext(ctx) };
   const { findConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
   vi.mocked(findConnectionEventOwner).mockResolvedValueOnce({
+    runId: "watch-run",
     owner: initial.binding!,
     subscription: saved.values().next().value!,
     stopping: true,
   });
   await dispatch(payload());
   expect(callback).not.toHaveBeenCalled();
+});
+
+it("reports durable stopping through the live connection without querying Connect", async () => {
+  const { id } = await watch();
+  vi.mocked(adapter.getSubscription).mockResolvedValue(saved.values().next().value!);
+  const { findConnectionEventOwner } = await import("#runtime/connections/events/owner.js");
+  vi.mocked(findConnectionEventOwner).mockResolvedValueOnce({
+    runId: "watch-run",
+    owner: initial.binding!,
+    subscription: saved.values().next().value!,
+    stopping: true,
+  });
+  expect(
+    await contextStorage.run(ctx, () =>
+      actions.execute("events_get_subscription", { id }, { callId: "get" }),
+    ),
+  ).toEqual({ id, status: "stopping", cleanupStatus: "pending" });
+  expect(adapter.getSubscription).not.toHaveBeenCalled();
 });
 
 it.each(["stopping", "ended", "replaced"])(
@@ -1286,6 +1309,7 @@ it.each(["stopping", "ended", "replaced"])(
       handlers.set(id, { ...previous, subscription: { ...previous.subscription!, id: "sub_new" } });
     } else
       vi.mocked(findConnectionEventOwner).mockResolvedValueOnce({
+        runId: "watch-run",
         owner: initial.binding!,
         subscription: handlers.get(id)!.subscription,
         stopping: true,

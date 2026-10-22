@@ -30,7 +30,11 @@ import {
   type EventBinding,
   type EventOwner,
 } from "#runtime/connections/events/state.js";
-import type { ManagedEventSubscription } from "#shared/connection-events.js";
+import {
+  manageSavedWatch,
+  pendingResult,
+  subscriptionResult,
+} from "#runtime/connections/events/management.js";
 
 const GET = "events_get_subscription";
 const STOP = "events_unsubscribe";
@@ -185,38 +189,24 @@ export class ConnectionEventActions {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
     // Discovery also runs in the harness. Load the workflow runtime only when executing an action.
-    const { findConnectionEventOwner, startConnectionEventOwner, retireConnectionEventOwner } =
+    const { findConnectionEventOwner, startConnectionEventOwner } =
       await import("#runtime/connections/events/owner.js");
     if (name === GET || name === STOP) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
-      const bindingId = args.id;
-      const handler = await findConnectionEventOwner(bindingId);
-      if (handler === undefined || !sameEventOwner(handler.owner, caller))
-        throw new Error("Unknown subscription for this caller and account.");
-      // The watch's run unsubscribes, and repeats it until Connect finishes cleaning up.
-      if (name === STOP) {
-        if (!(await retireConnectionEventOwner(bindingId)))
-          throw new Error("Unknown subscription for this caller and account.");
-        return { id: bindingId, status: "stopping" as const };
-      }
-      if (handler.subscription === undefined) return pendingResult(handler.owner);
-      const subscriptionId = handler.subscription.id;
-      const events = await backend.createAdapter({
-        principal,
-        connection: { url: this.connection.url },
-        destination: { path: connectionEventDestination(this.connection.connectionName) },
-      });
-      const subscription = await withConnectionEventSpan(
-        {
-          ctx,
-          connectionName: this.connection.connectionName,
-          bindingId,
-          subscriptionId,
-          operation: "get",
+      return manageSavedWatch({
+        ctx,
+        id: args.id,
+        operation: name === STOP ? "stop" : "get",
+        authorize: (binding) => sameEventOwner(binding, caller),
+        getSubscription: async (_binding, subscriptionId) => {
+          const events = await backend.createAdapter({
+            principal,
+            connection: { url: this.connection.url },
+            destination: { path: connectionEventDestination(this.connection.connectionName) },
+          });
+          return events.getSubscription({ id: subscriptionId, options: { timeout: 30_000 } });
         },
-        () => events.getSubscription({ id: subscriptionId, options: { timeout: 30_000 } }),
-      );
-      return subscriptionResult(bindingId, subscription);
+      });
     }
     return this.withClient(async (events) => {
       const definition = (await this.catalog(events)).find(
@@ -315,17 +305,6 @@ function subscribeInputSchema(
       },
     },
   };
-}
-
-/** Model-facing ids are eve's binding ids: they locate the handler that owns the watch. */
-function subscriptionResult(bindingId: string, subscription: ManagedEventSubscription) {
-  return { ...subscription, id: bindingId, subscriptionId: subscription.id };
-}
-
-/** A watch whose subscribe is still in flight: its id already works with get and stop. */
-function pendingResult(binding: EventBinding) {
-  const { name, arguments: eventArguments } = binding.request;
-  return { id: binding.id, name, arguments: eventArguments, status: "pending" as const };
 }
 
 /** JSON with object keys sorted, so equal arguments hash equally. */

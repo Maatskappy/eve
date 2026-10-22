@@ -640,6 +640,24 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(handle.sessionId).toBe("wrun_REGION1");
   });
 
+  it("cancels and rejects a run that did not take the reserved id", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    // A Workflow version that mints run ids without consulting the World.
+    startMock.mockResolvedValue({ runId: "wrun_UPSTREAM" });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        input: { message: "hello" },
+        sessionId: "wrun_RESERVED",
+      }),
+    ).rejects.toThrow("instead of reserved session wrun_RESERVED");
+    expect(cancelRunMock).toHaveBeenCalledWith(world, "wrun_UPSTREAM", expect.anything());
+  });
+
   it("returns an MCP invocation without checking continuation ownership", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);

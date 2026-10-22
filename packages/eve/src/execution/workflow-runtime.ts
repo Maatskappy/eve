@@ -28,6 +28,7 @@ import {
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  cancelRun,
   getHookByToken,
   getRun,
   getWorld,
@@ -235,6 +236,9 @@ export function createWorkflowRuntime(config: {
         continuationToken: input.continuationToken,
       });
       throw error;
+    }
+    if (input.sessionId !== undefined && run.runId !== input.sessionId) {
+      await abandonUnreservedRun(run.runId, input.sessionId);
     }
 
     let sessionId = run.runId;
@@ -595,6 +599,26 @@ function withReservedRunId(world: WorkflowWorld, sessionId: string): WorkflowWor
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
+}
+
+/**
+ * The reservation relies on `start()` minting through `World.createRunId`,
+ * which `@workflow/core` does not promise. Authored code already saw the
+ * reserved id, so a run on any other id is cancelled rather than adopted.
+ */
+async function abandonUnreservedRun(runId: string, reservedSessionId: string): Promise<never> {
+  try {
+    await cancelRun(await getWorld(), runId, {
+      cancelReason: "Session started on an id other than the one reserved for it.",
+    });
+  } catch (error) {
+    logError(log, "failed to cancel a run started on an unreserved id", error, { runId });
+  }
+  throw new Error(
+    `Workflow started session ${runId} instead of reserved session ${reservedSessionId}. ` +
+      "The installed @workflow/core no longer mints run ids through World.createRunId; " +
+      "update reserveSessionId for this version.",
+  );
 }
 
 /** Starts a workflow on the deployment executing this call. */

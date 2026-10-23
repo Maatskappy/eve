@@ -41,6 +41,11 @@ test("without github config, GitHub goes through the shell's gh and git", async 
   assert.match(skill.markdown, /gh pr create --draft/u);
 });
 
+test("rejects the removed github.org option instead of dropping it", () => {
+  const legacy = { connector: "github/acme-bot", org: "acme", broker: async () => {} };
+  assert.throws(() => extension({ github: legacy }), /Invalid extension config.*org/su);
+});
+
 test("with github config, GitHub goes through the brokered gh tool and signed commits", async () => {
   extension({ github: { connector: "github/acme-bot", broker: async () => {} } });
   const { content, skill, tool } = await resolve();

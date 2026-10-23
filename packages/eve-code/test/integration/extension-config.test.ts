@@ -20,7 +20,7 @@ test("applies firewall defaults independently", () => {
   assert.equal(extension.config.vercel?.delivery, "firewall");
 });
 
-test("rejects empty connector names and organizations", () => {
+test("rejects empty connector names", () => {
   assert.throws(
     () => extension({ github: { connector: "", broker: async () => {} } }),
     /Invalid extension config/u,

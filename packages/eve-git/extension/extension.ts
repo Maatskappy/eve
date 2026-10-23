@@ -35,6 +35,7 @@ export default defineExtension({
          */
         authorize: fn<GitHubAuthorize>().optional(),
       })
+      .strict()
       .optional(),
   }),
 });

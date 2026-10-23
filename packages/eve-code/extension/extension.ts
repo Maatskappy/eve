@@ -34,6 +34,7 @@ export default defineExtension({
         attribution: fn<GitHubAttribution>().optional(),
         authorize: fn<GitHubAuthorize>().optional(),
       })
+      .strict()
       .optional(),
     vercel: z
       .object({

@@ -226,6 +226,10 @@ async function mintWatchToken(repo: string): Promise<string> {
   if (token.length === 0) {
     throw new Error(`Connect returned an empty GitHub token for ${repo}.`);
   }
+  // Watches run outside any session, so there is no caller to pass.
+  if (github.authorize && !(await github.authorize({ auth: null, repository: repo, token }))) {
+    throw new Error(`Pull request watch is not authorized to access ${repo}.`);
+  }
   return token;
 }
 

@@ -21,6 +21,13 @@ export default defineExtension({
     github: z
       .object({
         connector: z.string().min(1),
+        /** Removed. Restrict organizations with `authorize`. */
+        org: z
+          .undefined({
+            error:
+              'was removed. The GitHub App installation is now the boundary; restrict organizations with authorize, e.g. authorize: ({ repository }) => repository.startsWith("acme/").',
+          })
+          .optional(),
         broker: fn<GitHubLeaseBroker>(),
         /**
          * Resolves the person each turn publishes for. Their

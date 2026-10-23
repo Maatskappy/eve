@@ -43,7 +43,11 @@ test("without github config, GitHub goes through the shell's gh and git", async 
 
 test("rejects the removed github.org option instead of dropping it", () => {
   const legacy = { connector: "github/acme-bot", org: "acme", broker: async () => {} };
-  assert.throws(() => extension({ github: legacy }), /Invalid extension config.*org/su);
+  assert.throws(
+    // @ts-expect-error `org` is typed as removed, too.
+    () => extension({ github: legacy }),
+    /Invalid extension config: github\.org: was removed\..*restrict organizations with authorize/u,
+  );
 });
 
 test("with github config, GitHub goes through the brokered gh tool and signed commits", async () => {

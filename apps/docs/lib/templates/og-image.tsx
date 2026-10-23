@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
+import type { ReactNode } from "react";
 import type { TemplateManifestEntry } from "./manifest";
 import { dotMatrixSrc, HeaderScene, loadOgPreviewAssets, ogPalette, scaleTree } from "./og-preview";
 
@@ -11,9 +12,15 @@ const HEIGHT = 628;
 const MARGIN = 64;
 const TEXT_WIDTH = 504;
 
-/** The card header starts here and runs off the right and bottom edges, at 2x card scale. */
+/**
+ * The card header, at 2x card scale, runs off the right edge and fades out
+ * over its last `SCENE_FADE` so only the first exchange shows, rather than
+ * a mostly empty window running to the bottom of the image.
+ */
 const SCENE_LEFT = 616;
 const SCENE_TOP = 64;
+const SCENE_HEIGHT = 400;
+const SCENE_FADE = 0.15;
 const SCENE_SCALE = 2;
 /** The eve-plus-integrations placeholder has no window to bleed, so it centers vertically. */
 const PLACEHOLDER_SCALE = 2.4;
@@ -41,6 +48,17 @@ const fonts = Promise.all(
 
 const palette = ogPalette;
 
+type Fonts = Awaited<typeof fonts>;
+
+const renderPng = async (node: ReactNode, width: number, height: number, fontData: Fonts) => {
+  const response = new ImageResponse(<div style={{ display: "flex" }}>{node}</div>, {
+    fonts: fontData,
+    height,
+    width,
+  });
+  return `data:image/png;base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}`;
+};
+
 /**
  * Text on the left like the site's other OG images, and the template's
  * gallery card header (its sample conversation, or the eve-plus-integrations
@@ -55,8 +73,28 @@ export const createTemplateOgImage = async (
   const scale = template.preview ? SCENE_SCALE : PLACEHOLDER_SCALE;
   const sceneLeft = template.preview ? SCENE_LEFT : SCENE_LEFT - 40;
   const sceneTop = template.preview ? SCENE_TOP : 0;
-  const sceneWidth = (WIDTH - sceneLeft) / scale;
-  const sceneHeight = (HEIGHT - sceneTop) / scale;
+  const sceneWidth = WIDTH - sceneLeft;
+  const sceneHeight = template.preview ? SCENE_HEIGHT : HEIGHT;
+  // next/og leaves borders out of `mask-image`, so masking the live tree would
+  // keep every border solid through the fade. Render the header to a PNG
+  // first, then fade the image.
+  const scene = await renderPng(
+    scaleTree(
+      <HeaderScene
+        assets={assets}
+        height={sceneHeight / scale}
+        // Slack and GitHub windows sit 8px higher than the others, as on the card, which puts them at the top edge.
+        inset={[8, -12, -20, 0]}
+        palette={palette}
+        template={template}
+        width={sceneWidth / scale}
+      />,
+      scale,
+    ),
+    sceneWidth,
+    sceneHeight,
+    fontData,
+  );
 
   return new ImageResponse(
     <div
@@ -88,29 +126,22 @@ export const createTemplateOgImage = async (
         style={{ left: 0, position: "absolute", top: 0 }}
         width={WIDTH}
       />
-      <div
+      {/* oxlint-disable-next-line nextjs/no-img-element -- next/og only renders img */}
+      <img
+        alt=""
+        height={sceneHeight}
+        src={scene}
         style={{
-          display: "flex",
-          height: sceneHeight * scale,
           left: sceneLeft,
+          // Fade the conversation out toward the bottom, like the card.
+          ...(template.preview && {
+            maskImage: `linear-gradient(to bottom, #000 ${(1 - SCENE_FADE) * 100}%, transparent)`,
+          }),
           position: "absolute",
           top: sceneTop,
-          width: sceneWidth * scale,
         }}
-      >
-        {scaleTree(
-          <HeaderScene
-            assets={assets}
-            dots={false}
-            height={sceneHeight}
-            inset={[0, -12, -20, 0]}
-            palette={palette}
-            template={template}
-            width={sceneWidth}
-          />,
-          scale,
-        )}
-      </div>
+        width={sceneWidth}
+      />
       <svg
         height={42}
         style={{ left: MARGIN, position: "absolute", top: MARGIN }}

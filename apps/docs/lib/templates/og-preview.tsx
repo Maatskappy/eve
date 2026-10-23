@@ -287,74 +287,39 @@ interface SceneProps {
   palette: Palette;
   template: TemplateManifestEntry;
   width: number;
-  /** Where the conversation starts fading, as a fraction of the scene height. */
-  fadeFrom?: number;
-  /** Show the dot matrix behind the window. */
-  dots?: boolean;
   /** Window inset from the scene edges, in scene pixels: top, right, bottom, left. */
   inset?: [number, number, number, number];
 }
 
 /**
- * The gallery card header at card scale (`width` × `height` CSS pixels):
- * dots plus a conversation window, or the eve-plus-integrations placeholder.
- * Wrap it in a `transform: scale()` box to size it for the OG canvas.
+ * The gallery card header's foreground at card scale (`width` × `height` CSS
+ * pixels): a conversation window, or the eve-plus-integrations placeholder.
+ * Size it for the OG canvas with `scaleTree`.
  */
 export const HeaderScene = ({
   assets,
-  dots = true,
-  fadeFrom = 0.7,
   height,
   inset = [20, -12, -20, 24],
   palette,
   template,
   width,
 }: SceneProps) => {
-  const dotLayer = dots ? (
-    // oxlint-disable-next-line nextjs/no-img-element -- next/og only renders img
-    <img
-      alt=""
-      height={height}
-      src={dotMatrixSrc({
-        color: palette.dot,
-        fade: Math.max(176, height * 0.9),
-        height,
-        seed: template.title,
-        width,
-      })}
-      style={{ left: 0, position: "absolute", top: 0 }}
-      width={width}
-    />
-  ) : null;
   const preview = template.preview;
-  if (!preview) {
-    return (
-      <div style={{ display: "flex", height, position: "relative", width }}>
-        {dotLayer}
-        <Placeholder integrations={template.integrations} palette={palette} />
-      </div>
-    );
-  }
   return (
-    <div
-      style={{
-        display: "flex",
-        height,
-        maskImage: `linear-gradient(to bottom, #000 ${fadeFrom * 100}%, transparent)`,
-        position: "relative",
-        width,
-      }}
-    >
-      {dotLayer}
-      <Conversation
-        agent={preview.agent ?? template.title}
-        assets={assets}
-        context={preview.context}
-        inset={inset}
-        messages={preview.messages}
-        palette={palette}
-        preview={preview}
-      />
+    <div style={{ display: "flex", height, position: "relative", width }}>
+      {preview ? (
+        <Conversation
+          agent={preview.agent ?? template.title}
+          assets={assets}
+          context={preview.context}
+          inset={inset}
+          messages={preview.messages}
+          palette={palette}
+          preview={preview}
+        />
+      ) : (
+        <Placeholder integrations={template.integrations} palette={palette} />
+      )}
     </div>
   );
 };
@@ -362,11 +327,7 @@ export const HeaderScene = ({
 const insetStyle = ([top, right, bottom, left]: [number, number, number, number]) =>
   ({ bottom, left, position: "absolute", right, top }) satisfies CSSProperties;
 
-/**
- * A window with a hairline border. next/og leaves borders out of
- * `mask-image`, so a CSS border would stay solid through the fade; the
- * border is drawn as the outer box's background instead.
- */
+/** A window: hairline border, rounded corners, and clipped content. */
 const Frame = ({
   children,
   inner,
@@ -383,25 +344,15 @@ const Frame = ({
   <div
     style={{
       ...outer,
-      backgroundColor: palette.border,
+      ...inner,
+      border: `1px solid ${palette.border}`,
       borderRadius: radius,
       display: "flex",
-      padding: 1,
+      flexDirection: "column",
+      overflow: "hidden",
     }}
   >
-    <div
-      style={{
-        ...inner,
-        borderRadius: radius - 1,
-        display: "flex",
-        flexDirection: "column",
-        flexGrow: 1,
-        overflow: "hidden",
-        position: "relative",
-      }}
-    >
-      {children}
-    </div>
+    {children}
   </div>
 );
 

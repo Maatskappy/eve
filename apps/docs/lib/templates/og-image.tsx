@@ -18,9 +18,10 @@ const TEXT_WIDTH = 504;
  * a mostly empty window running to the bottom of the image.
  */
 const SCENE_LEFT = 616;
-const SCENE_TOP = 64;
-const SCENE_HEIGHT = 400;
-const SCENE_FADE = 0.15;
+const SCENE_HEIGHT = 410;
+/** Centers the header vertically on the canvas. */
+const SCENE_TOP = (HEIGHT - SCENE_HEIGHT) / 2;
+const SCENE_FADE = 0.22;
 const SCENE_SCALE = 2;
 /** The eve-plus-integrations placeholder has no window to bleed, so it centers vertically. */
 const PLACEHOLDER_SCALE = 2.4;
@@ -60,11 +61,12 @@ const renderPng = async (node: ReactNode, width: number, height: number, fontDat
 };
 
 /**
- * Text on the left like the site's other OG images, and the template's
- * gallery card header (its sample conversation, or the eve-plus-integrations
- * placeholder) bleeding off the right. Type follows Geist's scale:
- * `text-label-20` for "Template", `text-heading-64` for the title, and
- * `text-copy-24` for the tagline.
+ * Text on the left and the template's gallery card header (its sample
+ * conversation, or the eve-plus-integrations placeholder) bleeding off the
+ * right, like vercel.com's blog, changelog, and templates OG images. Sizes
+ * follow Geist's scale: `text-label-20` for "Template", `text-heading-72`
+ * metrics for the title (in regular weight, as those OG images set titles),
+ * and `text-copy-24` for the tagline.
  */
 export const createTemplateOgImage = async (
   template: TemplateManifestEntry,
@@ -143,10 +145,10 @@ export const createTemplateOgImage = async (
         width={sceneWidth}
       />
       <svg
-        height={42}
+        height={49}
         style={{ left: MARGIN, position: "absolute", top: MARGIN }}
         viewBox="0 0 64 56"
-        width={48}
+        width={56}
       >
         <path d="M32 0L64 56H0L32 0Z" fill={palette.fg} />
       </svg>
@@ -168,10 +170,10 @@ export const createTemplateOgImage = async (
         <div
           style={{
             display: "flex",
-            fontSize: 64,
-            fontWeight: 600,
-            letterSpacing: "-3.84px",
-            lineHeight: "64px",
+            fontSize: 72,
+            fontWeight: 400,
+            letterSpacing: "-4.32px",
+            lineHeight: "72px",
             marginTop: 16,
             textWrap: "balance",
           }}

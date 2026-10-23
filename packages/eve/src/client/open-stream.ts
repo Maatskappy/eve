@@ -8,6 +8,7 @@ import {
   ClientSessionStrandedError,
   createClientError,
 } from "#client/client-error.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
@@ -36,9 +37,9 @@ interface ResolvedStreamReconnectPolicy {
 const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 30_000;
 
 /** Backoff between reconnects after a transport failure. Following readers retry forever. */
-const RECONNECT_BACKOFF = { baseDelayMs: 250, maxDelayMs: 5_000 } as const;
+export const RECONNECT_BACKOFF = { baseDelayMs: 250, maxDelayMs: 5_000 } as const;
 
-const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
+export const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
   reconnect: true,
   retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
   streamOpenReconnectPolicy: { baseDelayMs: 250, maxAttempts: 12, maxDelayMs: 5_000 },
@@ -52,6 +53,17 @@ const NO_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
     maxAttempts: 1,
   },
 };
+
+export function isRetryableStreamError(
+  error: unknown,
+  statuses: ReadonlySet<number> = DEFAULT_STREAM_RECONNECT_POLICY.retryableErrorStatuses,
+): boolean {
+  if (error instanceof ClientSessionStrandedError) return false;
+  if (SessionNotActiveError.is(error)) return statuses.has(409);
+  if (error instanceof ClientError)
+    return error.code !== "session_version_unsupported" && statuses.has(error.status);
+  return isStreamDisconnectError(error);
+}
 
 function resolveRetryPolicy(
   policy: StreamReconnectRetryPolicy | undefined,
@@ -84,6 +96,10 @@ function resolveStreamReconnectPolicy(
  * Internal configuration for following a durable event stream.
  */
 interface FollowStreamInput {
+  /** Validates reader provenance before consuming any stream data. */
+  readonly onOpen?: (headers: Headers) => void;
+  /** Committed source progress, including lines that materialize no recognized events. */
+  readonly onPosition?: (position: number) => void;
   /** Called once after consuming the durable tail captured when the connection opens. */
   readonly onCaughtUp?: () => void;
   readonly baseUrl: string;
@@ -95,6 +111,7 @@ interface FollowStreamInput {
   readonly redirect?: ClientRedirectPolicy;
   /** eve stream route path, such as a session stream or a parent-origin subagent stream. */
   readonly path: string;
+  readonly searchParams?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
   /** The position of the first line to read. Negative values count back from the tail. */
   readonly startIndex: number;
@@ -174,6 +191,12 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
       }
       if (startIndex < 0) startIndex = Math.max(0, tailIndex + 1 + startIndex);
     }
+    try {
+      input.onOpen?.(connection.headers);
+    } catch (error) {
+      connection.close();
+      throw error;
+    }
     if (noteProgress()) {
       connection.close();
       return;
@@ -191,6 +214,7 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
             switch (record.record.$eve) {
               case "position":
                 if (record.record.next > startIndex) startIndex = record.record.next;
+                input.onPosition?.(startIndex);
                 if (noteProgress()) return;
                 break;
               case "stream.lease-ended":
@@ -222,6 +246,7 @@ export async function* followStreamLines(input: FollowStreamInput): AsyncGenerat
             failures = 0;
             reconnectDelayMs = RECONNECT_BACKOFF.baseDelayMs;
             yield { line: record.kind === "invalid" ? undefined : record.line, position };
+            input.onPosition?.(startIndex);
             if (noteProgress()) return;
           }
         }
@@ -275,6 +300,7 @@ export async function* followStreamIterable(
 
 /** An opened connection: the response body plus the tail index from the response header, if any. */
 interface OpenedStream {
+  readonly headers: Headers;
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
   readonly tailIndex: number | undefined;
@@ -297,7 +323,7 @@ export async function openStreamBody(
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
 
-  const searchParams: Record<string, string> = {};
+  const searchParams: Record<string, string> = { ...input.searchParams };
   if (input.startIndex !== 0) {
     searchParams.startIndex = String(input.startIndex);
   }
@@ -358,6 +384,7 @@ export async function openStreamBody(
       }
       let closed = false;
       return {
+        headers: response.headers,
         body: response.body,
         close: () => {
           if (closed) return;
@@ -379,11 +406,7 @@ export async function openStreamBody(
 
     const error = createClientError(response.status, lastBody, response.headers);
     // 409 is retryable by default, but a stranded or earlier-eve session's 409 is final.
-    if (
-      error instanceof ClientSessionStrandedError ||
-      (error instanceof ClientError && error.code === "session_version_unsupported") ||
-      !retryPolicy.retryableErrorStatuses.has(response.status)
-    ) {
+    if (!isRetryableStreamError(error, retryPolicy.retryableErrorStatuses)) {
       throw error;
     }
 

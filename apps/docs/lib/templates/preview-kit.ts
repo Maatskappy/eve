@@ -241,9 +241,18 @@ export const GITHUB_COLORS: Palette<
   },
 };
 
-/** iOS Messages. */
+/** iOS Messages, including the liquid-glass controls in its header. */
 export const IMESSAGE_COLORS: Palette<
-  "sent" | "received" | "muted" | "avatarTop" | "avatarBottom"
+  | "sent"
+  | "received"
+  | "muted"
+  | "avatarTop"
+  | "avatarBottom"
+  | "avatarRing"
+  | "glassBg"
+  | "glassDrop"
+  | "glassEdge"
+  | "glassRing"
 > = {
   light: {
     sent: "#0a84ff",
@@ -251,6 +260,11 @@ export const IMESSAGE_COLORS: Palette<
     muted: "#8e8e93",
     avatarTop: "#a6abb8",
     avatarBottom: "#858994",
+    avatarRing: "rgba(0,0,0,0.05)",
+    glassBg: "rgba(255,255,255,0.7)",
+    glassDrop: "rgba(0,0,0,0.08)",
+    glassEdge: "rgba(255,255,255,0.9)",
+    glassRing: "rgba(0,0,0,0.06)",
   },
   dark: {
     sent: "#0a84ff",
@@ -258,8 +272,19 @@ export const IMESSAGE_COLORS: Palette<
     muted: "#8e8e93",
     avatarTop: "#a6abb8",
     avatarBottom: "#858994",
+    avatarRing: "rgba(255,255,255,0.15)",
+    glassBg: "rgba(255,255,255,0.12)",
+    glassDrop: "rgba(0,0,0,0.5)",
+    glassEdge: "rgba(255,255,255,0.25)",
+    glassRing: "rgba(255,255,255,0.08)",
   },
 };
+
+/** References to `paletteVars` variables, for inline styles in the browser. */
+export const paletteVarRefs = <Keys extends string>(prefix: string, palette: Palette<Keys>) =>
+  Object.fromEntries(
+    (Object.keys(palette.light) as Keys[]).map((key) => [key, `var(--${prefix}-${key})`]),
+  ) as Record<Keys, string>;
 
 /**
  * CSS custom properties for a palette, as `light-dark()` pairs, named
@@ -293,6 +318,29 @@ export const OCTICONS = {
   ],
   kebab: [
     "M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
+  ],
+};
+
+/** Lucide icons (ISC, lucide.dev) the previews use, as 24px stroke paths. */
+export const LUCIDE = {
+  terminal: ["M12 19h8", "m4 17 6-6-6-6"],
+  wrench: [
+    "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z",
+  ],
+  chevronRight: ["m9 18 6-6-6-6"],
+  mic: [
+    "M12 19v3",
+    "M19 10v2a7 7 0 0 1-14 0v-2",
+    "M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z",
+  ],
+  phoneOff: [
+    "M10.1 13.9a14 14 0 0 0 3.732 2.668 1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2 18 18 0 0 1-12.728-5.272",
+    "M22 2 2 22",
+    "M4.76 13.582A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 .244.473",
+  ],
+  braces: [
+    "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1",
+    "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1",
   ],
 };
 

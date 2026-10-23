@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import type { ReactNode } from "react";
 import type { TemplateManifestEntry } from "./manifest";
-import { dotMatrixSrc, HeaderScene, loadOgPreviewAssets, ogPalette, scaleTree } from "./og-preview";
+import { dotMatrixSrc, HeaderScene, loadOgPreviewAssets, ogTheme, scaleTree } from "./og-preview";
 import { APP_WINDOW_RAISE, WINDOW_INSET } from "./preview-kit";
 
 const WIDTH = 1200;
@@ -48,7 +48,7 @@ const fonts = Promise.all(
   })),
 );
 
-const palette = ogPalette;
+const { colors } = ogTheme;
 
 type Fonts = Awaited<typeof fonts>;
 
@@ -88,7 +88,6 @@ export const createTemplateOgImage = async (
         height={sceneHeight / scale}
         // Flush left, and low enough that Slack and GitHub, which sit higher, start at the top edge.
         inset={{ ...WINDOW_INSET, left: 0, top: APP_WINDOW_RAISE }}
-        palette={palette}
         template={template}
         visibleHeight={(sceneHeight * (1 - SCENE_FADE)) / scale}
         width={sceneWidth / scale}
@@ -103,8 +102,8 @@ export const createTemplateOgImage = async (
   return new ImageResponse(
     <div
       style={{
-        backgroundColor: palette.bg100,
-        color: palette.fg,
+        backgroundColor: colors.background100,
+        color: colors.gray1000,
         display: "flex",
         fontFamily: "Geist",
         height: "100%",
@@ -118,7 +117,7 @@ export const createTemplateOgImage = async (
         height={HEIGHT}
         // Dots fade in from the left so they stay out from behind the title.
         src={dotMatrixSrc({
-          color: palette.dot,
+          color: colors.gray1000,
           fade: Infinity,
           fadeLeft: 900,
           gap: 16,
@@ -152,7 +151,7 @@ export const createTemplateOgImage = async (
         viewBox="0 0 64 56"
         width={56}
       >
-        <path d="M32 0L64 56H0L32 0Z" fill={palette.fg} />
+        <path d="M32 0L64 56H0L32 0Z" fill={colors.gray1000} />
       </svg>
       <div
         style={{
@@ -166,7 +165,7 @@ export const createTemplateOgImage = async (
           width: TEXT_WIDTH,
         }}
       >
-        <div style={{ color: palette.gray900, display: "flex", fontSize: 20, lineHeight: "32px" }}>
+        <div style={{ color: colors.gray900, display: "flex", fontSize: 20, lineHeight: "32px" }}>
           Template
         </div>
         <div
@@ -185,7 +184,7 @@ export const createTemplateOgImage = async (
         {template.tagline ? (
           <div
             style={{
-              color: palette.gray900,
+              color: colors.gray900,
               display: "flex",
               fontSize: 24,
               lineHeight: "36px",

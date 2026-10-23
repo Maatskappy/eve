@@ -14,8 +14,6 @@ const report: AgentFeedbackReport = {
   triggerReason: "unexpected-behavior",
   setup: {
     deployTarget: "vercel",
-    channel: "slack",
-    connection: "linear",
     relevantFeatures: ["schedules"],
   },
   steps: ["Deploy an agent with a Slack channel", "Reply in an existing thread after redeploy"],
@@ -48,21 +46,22 @@ describe("report hash", () => {
 describe("reviewReport", () => {
   it("drops removed lines and blank optional fields", () => {
     const reviewed = reviewReport(
-      { ...report, setup: { ...report.setup, connection: "  " } },
+      { ...report, setup: { ...report.setup, relevantFeatures: ["  "] } },
       { steps: [true, false], observed: [false, true], comparison: false },
     );
 
-    expect(reviewed.data).toMatchObject({
+    expect(reviewed).toMatchObject({
       steps: ["Deploy an agent with a Slack channel"],
       observed: ["No error is logged"],
       comparison: undefined,
-      setup: { connection: undefined },
+      setup: { relevantFeatures: undefined },
     });
   });
 
-  it("reports the steps list once every step is removed", () => {
-    const reviewed = reviewReport(report, { ...includeEverything(report), steps: [false, false] });
-    expect(reviewed.error?.issues).toMatchObject([{ path: ["steps"], code: "too_small" }]);
+  it("is invalid once every step is removed", () => {
+    expect(
+      reviewReport(report, { ...includeEverything(report), steps: [false, false] }),
+    ).toBeUndefined();
   });
 });
 
@@ -74,8 +73,6 @@ describe("formatReport", () => {
       Setup:
       Trigger: Unexpected behavior
       Deploy target: Vercel
-      Channel: slack
-      Connection: linear
       Relevant features: schedules
       Frequency: Reproduced
       Outcome: Worked around

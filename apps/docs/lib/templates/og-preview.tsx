@@ -13,7 +13,10 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { integrationIcons } from "@/app/[lang]/templates/integration-icons";
+import {
+  grayscaleIntegrationIcons,
+  integrationIcons,
+} from "@/app/[lang]/templates/integration-icons";
 import { resolveLogo } from "../og-logo";
 import type {
   TemplateIntegration,
@@ -210,10 +213,13 @@ const EveLogo = ({ color, height }: { color: string; height: number }) => (
 
 const IntegrationIcon = ({
   color,
+  grayscale = false,
   integration,
   size,
 }: {
   color?: string;
+  /** Use the icon set meant for grayscale, like the card's placeholder tiles. */
+  grayscale?: boolean;
   integration: TemplateIntegration;
   size: number;
 }) => {
@@ -225,7 +231,7 @@ const IntegrationIcon = ({
       </div>
     );
   }
-  const Icon = integrationIcons[integration];
+  const Icon = (grayscale ? grayscaleIntegrationIcons : integrationIcons)[integration];
   return (
     <div style={{ color, display: "flex" }}>{resolveLogo(<Icon height={size} width={size} />)}</div>
   );
@@ -1702,7 +1708,7 @@ const Placeholder = ({
       <div style={{ color: palette.gray700, fontSize: 14 }}>+</div>
       {integrations.slice(0, 4).map((integration) => (
         <div key={integration} style={{ ...tile, filter: "grayscale(1)" }}>
-          <IntegrationIcon color={palette.fg} integration={integration} size={20} />
+          <IntegrationIcon color={palette.fg} grayscale integration={integration} size={20} />
         </div>
       ))}
     </div>

@@ -26,7 +26,7 @@ import type {
   TemplateIntegration,
   TemplateManifestEntry,
 } from "@/lib/templates/manifest";
-import { integrationIcons } from "./integration-icons";
+import { grayscaleIntegrationIcons } from "./integration-icons";
 import { TemplatePreview } from "./template-preview";
 
 const ALL = "all" as const;
@@ -127,7 +127,7 @@ const TemplateCard = ({
       </p>
       <ul aria-label="Integrations" className="mt-auto flex items-center gap-2 pt-4">
         {entry.integrations.map((integration) => {
-          const Icon = integrationIcons[integration];
+          const Icon = grayscaleIntegrationIcons[integration];
           return (
             <li
               className="flex size-4 items-center justify-center text-gray-700 grayscale"

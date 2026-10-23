@@ -16,7 +16,7 @@ import type {
   TemplatePreviewMessage,
   TemplatePreviewThread,
 } from "@/lib/templates/manifest";
-import { integrationIcons } from "./integration-icons";
+import { grayscaleIntegrationIcons, integrationIcons } from "./integration-icons";
 
 /** Slack's UI typeface. Loaded only for the Slack preview. */
 const lato = Lato({
@@ -968,7 +968,7 @@ const Placeholder = ({ integrations }: { integrations: TemplateIntegration[] }) 
       </Tile>
       <span className="text-gray-700">+</span>
       {integrations.slice(0, MAX_PLACEHOLDER_ICONS).map((integration) => {
-        const Icon = integrationIcons[integration];
+        const Icon = grayscaleIntegrationIcons[integration];
         return (
           <Tile key={integration}>
             <Icon className="size-5 grayscale" />

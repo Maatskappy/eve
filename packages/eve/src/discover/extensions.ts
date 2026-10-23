@@ -1,11 +1,10 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
-  droppedExtensionCapabilityReason,
+  checkExtensionVersionCompatibility,
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
-  findUnsupportedExtensionCapabilities,
-  type UnsupportedExtensionCapability,
   parseExtensionCompatibilityManifest,
+  UnsupportedExtensionManifestVersionError,
 } from "#compiler/extension-compatibility.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
@@ -56,11 +55,9 @@ const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
 export const DISCOVER_EXTENSION_COMPATIBILITY_INVALID = "discover/extension-compatibility-invalid";
 
 /**
- * Emitted when this eve cannot consume one of the extension capabilities the
- * distribution requires.
+ * Emitted when the consumer cannot load this extension distribution.
  */
-export const DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE =
-  "discover/extension-capability-incompatible";
+export const DISCOVER_EXTENSION_VERSION_INCOMPATIBLE = "discover/extension-version-incompatible";
 
 /**
  * Emitted when an extension source tree declares agent-level config (`agent.ts`),
@@ -195,6 +192,17 @@ export async function locateExtensionMount(input: {
       compatibilityPath,
     );
   } catch (error) {
+    if (error instanceof UnsupportedExtensionManifestVersionError) {
+      return {
+        diagnostics: [
+          createDiscoverErrorDiagnostic({
+            code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+            message: `Extension "${location.packageName}" uses an old epoch-based distribution manifest at "${compatibilityPath}". Rebuild the extension with this eve release or install a compatible extension release.`,
+            sourcePath: compatibilityPath,
+          }),
+        ],
+      };
+    }
     return {
       diagnostics: [
         createDiscoverErrorDiagnostic({
@@ -206,16 +214,22 @@ export async function locateExtensionMount(input: {
     };
   }
 
-  const unsupportedCapabilities = findUnsupportedExtensionCapabilities(compatibility);
-  if (unsupportedCapabilities.length > 0) {
+  const incompatible = checkExtensionVersionCompatibility(
+    compatibility,
+    resolveInstalledPackageInfo().version,
+  );
+  if (incompatible !== undefined) {
     return {
-      diagnostics: unsupportedCapabilities.map((unsupported) =>
+      diagnostics: [
         createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-          message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. ${incompatibleCapabilityRemedy(unsupported)}`,
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message:
+            incompatible.kind === "newer-eve"
+              ? `Extension "${location.packageName}" was built with eve ${incompatible.minimumVersion}. Upgrade eve to ${incompatible.minimumVersion} or later, or install an extension built with your eve version.`
+              : `Extension "${location.packageName}" requires distribution contract ${incompatible.contractMajor}, which this eve does not support. Rebuild the extension with this eve or install a compatible extension release.`,
           sourcePath: compatibilityPath,
         }),
-      ),
+      ],
     };
   }
 
@@ -346,25 +360,6 @@ export async function locateExtensionMountPackage(input: {
     },
     diagnostics: [],
   };
-}
-
-/** An older contract needs a rebuilt extension; only a newer one needs a newer eve. */
-function incompatibleCapabilityRemedy(unsupported: UnsupportedExtensionCapability): string {
-  if (!unsupported.supportedVersions.some((version) => version > unsupported.requiredVersion))
-    return `Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`;
-  const eve = `eve ${resolveInstalledPackageInfo().version} or later`;
-  const dropped = droppedExtensionCapabilityReason(
-    unsupported.capability,
-    unsupported.requiredVersion,
-  );
-  const reason = dropped === undefined ? "" : `${dropped} `;
-  return `${reason}Rebuild the extension with ${eve}, or install a compatible extension release.`;
-}
-
-function formatSupportedVersions(versions: readonly number[]): string {
-  return versions.length === 0
-    ? "versions: none"
-    : `versions: ${versions.map((v) => `v${v}`).join(", ")}`;
 }
 
 async function resolvePackageRoot(input: {

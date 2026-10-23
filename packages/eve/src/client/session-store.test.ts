@@ -4,6 +4,7 @@ import {
   delivery,
   openInteractions,
   turn,
+  position,
 } from "#protocol/session-projection/public-view.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,13 +16,16 @@ import {
 } from "#client/session-store.js";
 import { Client } from "#client/client.js";
 import { testTurnFacts } from "#internal/testing/events.js";
+import { convertLegacyEvents } from "#internal/legacy-events.js";
+import { KITCHEN_SINK } from "#execution/v26-history.fixtures.js";
+import { createV26HistoryReader } from "#execution/v26-history.js";
 import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/session-http.js";
-import type { SessionEvent } from "#protocol/session-event.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 
 const stores: SessionStore[] = [];
 function store(options: SessionStoreInit = {}) {
@@ -116,6 +120,20 @@ function texts(current: SessionStore) {
   );
 }
 const initialSession = { sessionId: "session_1", streamIndex: 0 };
+const savedV26 = KITCHEN_SINK.slice(0, 9).filter(
+  (record) => (record as { type: string }).type !== "reasoning.completed",
+);
+
+function savedLegacyHistory(server: ReturnType<typeof agent>): SessionStreamEvent[] {
+  const reader = createV26HistoryReader();
+  server.log.push(
+    ...savedV26.map(
+      (record, position) =>
+        `${JSON.stringify(reader.read(record, position) ?? { $eve: "position", next: position + 1 })}\n`,
+    ),
+  );
+  return JSON.parse(JSON.stringify(convertLegacyEvents(savedV26))) as SessionStreamEvent[];
+}
 const personWait: SessionEvent[] = [
   { type: "model.settled", data: { runId: "run_0", outcome: "completed" } },
   {
@@ -410,6 +428,124 @@ describe("SessionStore acceptance and observation", () => {
       expect(received).toHaveBeenCalledTimes(8 - savedFacts);
     },
   );
+
+  it("retains converted history's source coverage beyond its last materialized fact", async () => {
+    const server = agent();
+    const converted = savedLegacyHistory(server);
+    expect(savedV26).toHaveLength(8);
+    expect(converted).toHaveLength(11);
+    expect(converted.at(-1)?.meta).toMatchObject({ position: { line: 6 }, next: 8 });
+    const current = store({
+      initialEvents: converted,
+      initialSession: { sessionId: "fixture", streamIndex: 8 },
+    });
+    expect(position(current.snapshot.view)).toBe(8);
+    expect(current.snapshot.session).toEqual({ sessionId: "fixture", streamIndex: 8 });
+    expect(fetch).not.toHaveBeenCalled();
+    const hydrated = current.snapshot.events;
+    await current.resume();
+    expect(server.reads.map(({ start }) => start)).toEqual([8]);
+    expect(current.snapshot.session?.streamIndex).toBe(8);
+    expect(current.snapshot.events).toBe(hydrated);
+    detachSessionStore(current);
+    attachSessionStore(current);
+    await vi.waitFor(() => expect(server.reads).toHaveLength(2));
+    expect(server.reads.map(({ start }) => start)).toEqual([8, 8]);
+    expect(current.snapshot.session?.streamIndex).toBe(8);
+  });
+
+  it("does not use a handle cursor to extend a native history prefix", async () => {
+    const server = agent();
+    const facts = testTurnFacts(0, "Sunny.", ["d_0"]);
+    server.append(facts);
+    const saved = facts
+      .slice(0, 4)
+      .flatMap((fact, line) =>
+        eventsOfLine(linesOf([fact], "2026-10-10T00:00:00.000Z")[0]!, line, ""),
+      );
+    const current = store({
+      initialEvents: saved,
+      initialSession: { ...initialSession, streamIndex: 1_000 },
+      followWhile: () => false,
+    });
+    expect(current.snapshot.session?.streamIndex).toBe(4);
+    await current.resume();
+    expect(server.reads[0]?.start).toBe(4);
+    expect(current.snapshot.session?.streamIndex).toBe(8);
+    expect(current.snapshot.events).toHaveLength(8);
+  });
+
+  it("keeps source coverage before a partially hydrated native commit", async () => {
+    const server = agent();
+    const converted = savedLegacyHistory(server);
+    const facts = testTurnFacts(1, "Later.", ["later"]);
+    const at = "2026-10-10T00:00:00.000Z";
+    server.append(facts, true);
+    const partial = eventsOfLine(linesOf(facts, at)[0]!, 8, at).slice(0, 2);
+    const current = store({
+      initialEvents: [...converted, ...partial],
+      initialSession: { ...initialSession, streamIndex: 1_000 },
+      followWhile: () => false,
+    });
+    const received = vi.fn();
+    current.setCallbacks({ onEvent: received });
+    expect(position(current.snapshot.view)).toBe(8);
+    expect(current.snapshot.session?.streamIndex).toBe(8);
+    await current.resume();
+    expect(server.reads[0]?.start).toBe(8);
+    expect(current.snapshot.session?.streamIndex).toBe(9);
+    expect(current.snapshot.events).toHaveLength(11 + facts.length);
+    expect(received).toHaveBeenCalledTimes(facts.length - partial.length);
+  });
+
+  it("retains covered source lines when detaching in the next native commit", async () => {
+    const server = agent();
+    const converted = savedLegacyHistory(server);
+    server.append(testTurnFacts(1, "Later.", ["later"]), true);
+    const session = new Client({ baseUrl: "https://eve.test" }).sessions.attach("session_1", {
+      streamIndex: 1_000,
+    });
+    const current = store({ session, initialEvents: converted, followWhile: () => false });
+    let interrupted = false;
+    current.setCallbacks({
+      onEvent: () => {
+        if (interrupted) return;
+        interrupted = true;
+        detachSessionStore(current);
+      },
+    });
+    await expect(current.resume()).rejects.toMatchObject({ name: "AbortError" });
+    expect(current.snapshot.session?.streamIndex).toBe(8);
+    await current.resume();
+    expect(server.reads.map(({ start }) => start)).toEqual([8, 8]);
+    expect(current.snapshot.session?.streamIndex).toBe(9);
+    expect(current.snapshot.events).toHaveLength(19);
+    current.newSession();
+    expect(current.snapshot.events).toEqual([]);
+    expect(current.snapshot.session?.streamIndex).toBe(0);
+  });
+
+  it.each([
+    { next: -1 },
+    { next: 0.5 },
+    { next: Number.POSITIVE_INFINITY },
+    { next: Number.MAX_SAFE_INTEGER + 1 },
+    { next: 0 },
+    { next: 1, endOfLine: false },
+  ])("rejects invalid or uncommitted source coverage %j", (meta) => {
+    const events = eventsOfLine(linesOf(testTurnFacts(0, "Sunny.", ["d_0"]), "")[0]!, 0, "");
+    const last = events.at(-1)!;
+    events[events.length - 1] = { ...last, meta: { ...last.meta, ...meta } };
+    expect(() => store({ initialEvents: events, initialSession })).toThrow(/Saved `meta.next`/);
+  });
+
+  it("rejects history that contradicts its source coverage", () => {
+    const converted = convertLegacyEvents(savedV26);
+    const extra = eventsOfLine(linesOf(testTurnFacts(1, "Later.", ["later"]), "")[0]!, 7, "");
+    expect(() => store({ initialEvents: [...converted, ...extra], initialSession })).toThrow(
+      /overlap source lines already covered/,
+    );
+  });
 
   it("rejects saved events from before eve 27 instead of advancing the cursor", () => {
     const legacy = [

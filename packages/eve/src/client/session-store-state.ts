@@ -30,6 +30,7 @@ export interface SessionStoreSnapshot extends ConversationState {
   /** The latest session creation, stream, resume, or turn failure. */
   readonly error: Error | undefined;
   readonly events: readonly SessionStreamEvent[];
+  /** Fixed identity and next covered source line, including lines that emitted no events. */
   readonly session: ClientSessionState | undefined;
   readonly status: SessionStoreStatus;
 }
@@ -61,8 +62,12 @@ export interface SessionStoreInit {
   readonly auth?: ClientAuth;
   readonly headers?: HeadersValue;
   readonly baseUrl?: string;
-  /** Ordered prefix of the session stream used to rehydrate projected state. */
+  /**
+   * Ordered prefix of this session's stream. Preserve reader metadata, including `meta.next`
+   * when source lines emitted no events. Partial commits replay from their first source line.
+   */
   readonly initialEvents?: readonly SessionStreamEvent[];
+  /** Positions the session handle; it does not extend the source coverage of `initialEvents`. */
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
   /**

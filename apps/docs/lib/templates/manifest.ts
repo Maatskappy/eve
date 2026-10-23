@@ -28,13 +28,15 @@ export type TemplateIntegration =
 
 export type TemplateSource = "GitHub" | "Vercel Templates";
 
-export type TemplatePreviewSurface = "imessage" | "slack" | "voice" | "web";
+export type TemplatePreviewSurface = "github" | "imessage" | "slack" | "voice" | "web";
 
 export interface TemplatePreviewMessage {
   from: "agent" | "user";
   /**
-   * Plain text. On the `slack` surface, `code`, [label](url), and @mentions
-   * render in Slack's styles; other surfaces show text as written.
+   * Plain text. On the `slack` and `github` surfaces, `code`, [label](url),
+   * and @mentions render in that app's styles (`github` also links #123
+   * references); other surfaces show text as written. For a `labeled`
+   * event, the label name.
    */
   text: string;
   /**
@@ -45,6 +47,11 @@ export interface TemplatePreviewMessage {
   tools?: string[];
   /** Slack only: something the agent posts under the text. */
   attachment?: TemplatePreviewAttachment;
+  /**
+   * GitHub only: render a timeline event instead of a comment. `labeled`
+   * shows "<user> added the <text> label".
+   */
+  event?: "labeled";
 }
 
 /**
@@ -84,7 +91,22 @@ export interface TemplatePreview {
   icon?: string;
   /** Slack channel name, or the web chat or voice app URL shown in the window header. */
   context?: string;
+  /** GitHub only: the issue or pull request the conversation happens on. */
+  thread?: TemplatePreviewThread;
+  /**
+   * GitHub only: show the messages as a review thread on this added line
+   * instead of the issue timeline.
+   */
+  review?: { line: number; code: string };
   messages: TemplatePreviewMessage[];
+}
+
+export interface TemplatePreviewThread {
+  kind: "issue" | "pull";
+  number: number;
+  title: string;
+  /** Pull requests only: show the gray Draft state instead of Open. */
+  draft?: boolean;
 }
 
 export interface TemplateGitHubSource {
@@ -289,6 +311,7 @@ export const templateManifest: TemplateManifestEntry[] = [
   {
     slug: "eve-discord-agent",
     title: "Discord Agent",
+    tagline: "Answers and catch-ups in Discord threads",
     setupPrompt:
       "Set up the eve Discord agent template in my current workspace using https://github.com/vercel/eve/tree/main/apps/templates/eve-discord-agent-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the Discord bot, Vercel Connect, and Vercel Daemon setup steps.",
     description:
@@ -646,6 +669,23 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/subagents/implementer/tools/push_branch.ts",
       "agent/subagents/reviewer/agent.ts",
     ],
+    preview: {
+      surface: "github",
+      agent: "foreman",
+      icon: "/templates/icons/foreman.png",
+      thread: { kind: "issue", number: 471, title: "Checkout returns 500 on empty carts" },
+      messages: [
+        { from: "user", event: "labeled", text: "factory" },
+        {
+          from: "agent",
+          text: "Classified as a bug: `pricing.ts` reads the first item of an empty cart. Analysis is next.",
+        },
+        {
+          from: "agent",
+          text: "Draft PR #483 is ready. It guards empty carts and adds a regression test.",
+        },
+      ],
+    },
   },
   {
     slug: "marketing-team-eve-template",
@@ -761,6 +801,16 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/skills/triaging-issues/SKILL.md",
       "agent/subagents/researcher/agent.ts",
     ],
+    preview: {
+      surface: "github",
+      agent: "kody",
+      thread: { kind: "pull", number: 482, title: "Show currency on the order summary" },
+      review: { line: 42, code: "const currency = items[0].currency;" },
+      messages: [
+        { from: "user", text: "@kody is this safe when the cart is empty?" },
+        { from: "agent", text: "No, `items[0]` throws on an empty cart. Same crash as #471." },
+      ],
+    },
   },
   {
     slug: "typefully-eve-template",

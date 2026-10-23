@@ -297,15 +297,6 @@ interface SceneProps {
 }
 
 /**
- * Messages through the agent's first reply. The OG image shows one exchange,
- * so a long preview doesn't leave half a message in the fade.
- */
-const firstExchange = (messages: TemplatePreviewMessage[]) => {
-  const reply = messages.findIndex((message) => message.from === "agent" && !message.event);
-  return reply === -1 ? messages : messages.slice(0, reply + 1);
-};
-
-/**
  * The gallery card header's foreground at card scale (`width` × `height` CSS
  * pixels): a conversation window, or the eve-plus-integrations placeholder.
  * Size it for the OG canvas with `scaleTree`.
@@ -319,10 +310,7 @@ export const HeaderScene = ({
   visibleHeight,
   width,
 }: SceneProps) => {
-  const preview = template.preview && {
-    ...template.preview,
-    messages: firstExchange(template.preview.messages),
-  };
+  const preview = template.preview;
   return (
     <div style={{ display: "flex", height, position: "relative", width }}>
       {preview ? (

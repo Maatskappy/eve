@@ -13,9 +13,9 @@ const MARGIN = 64;
 const TEXT_WIDTH = 504;
 
 /**
- * The card header, at 2x card scale, shows the preview's first exchange. It
- * runs off the right edge and fades out over its last `SCENE_FADE`, low
- * enough that tables, charts, and the Voice call controls stay clear of it.
+ * The card header, at 2x card scale, runs off the right edge and fades out
+ * over its last `SCENE_FADE`, low enough that tables, charts, and the Voice
+ * call controls stay clear of it.
  */
 const SCENE_LEFT = 616;
 const SCENE_HEIGHT = 520;

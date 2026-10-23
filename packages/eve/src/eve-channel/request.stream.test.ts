@@ -84,18 +84,66 @@ describe("createSessionStreamResponse", () => {
     });
   });
 
-  it("refuses a stream an earlier eve recorded instead of serving it as version 27", async () => {
-    const v26 = (type: string) => ({ data: { turnId: "turn_1" }, meta: { at }, type });
-    const { session } = sessionOf([v26("message.received"), line("a")], { open: true });
+  it("serves a stream an earlier eve recorded as v27 lines, keeping stored positions", async () => {
+    const v26 = (type: string, data: object) => ({
+      data: { sequence: 0, turnId: "turn_0", ...data },
+      meta: { at, deliveryIds: ["delivery_1"] },
+      type,
+    });
+    const { session, starts } = sessionOf([
+      { data: {}, meta: { at }, type: "session.started" },
+      v26("turn.started", {}),
+      v26("message.received", { message: "Alice asks." }),
+      v26("message.appended", { messageDelta: "Hi", stepIndex: 0 }),
+    ]);
     const response = await createSessionStreamResponse(
-      new Request("https://eve.test/eve/v1/session/session_1/stream?startIndex=1"),
+      new Request("https://eve.test/eve/v1/session/session_1/stream?follow=false&startIndex=2"),
       session,
     );
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      code: "session_version_unsupported",
-      error: expect.stringContaining("Start a new session."),
-    });
+    expect(response.status).toBe(200);
+    // Each v26 line reads in light of those before it, so the read starts at the first.
+    expect(starts.at(-1)).toBe(0);
+    expect(await records(response)).toEqual([
+      { $eve: "heartbeat" },
+      {
+        at,
+        facts: [
+          {
+            data: {
+              deliveryId: "delivery_1",
+              parts: [{ kind: "text", text: "Alice asks." }],
+              turnId: "turn_0",
+            },
+            scope: { turnId: "turn_0" },
+            type: "delivery.consumed",
+          },
+        ],
+      },
+      // A streamed delta reads as no line; the marker keeps the reader's cursor on stored lines.
+      { $eve: "position", next: 4 },
+    ]);
+  });
+
+  it("ends a follow of an earlier eve's session at the tail once nothing owns it", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const followed = async (hasRunnableOwner: boolean) => {
+      // A source read without following closes at the tail; a followed one stays open.
+      const { follows, session } = sessionOf([v26], { open: hasRunnableOwner });
+      const response = await createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/session_1/stream"),
+        { ...session, hasRunnableOwner: async () => hasRunnableOwner } as Session,
+      );
+      return { follows, response };
+    };
+
+    const ended = await followed(false);
+    // Read without following, so the source closes at the tail and readers stop.
+    expect(ended.follows.at(-1)).toBe(false);
+    expect((await records(ended.response)).at(-1)).toEqual({ $eve: "stream.ended" });
+
+    const live = await followed(true);
+    expect(live.follows.at(-1)).toBe(true);
+    await live.response.body?.cancel();
   });
 
   it("serves a fresh stream with no lines yet without a version check failing it", async () => {

@@ -15,7 +15,8 @@ import type {
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
-import { isV26Line } from "#protocol/v26-transcript-lines.js";
+import { isV26Line } from "#protocol/v26-lines.js";
+import { v26LineStream } from "#execution/v26-history.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
@@ -347,23 +348,24 @@ export async function createSessionStreamResponse(
       void early?.then((lines) => lines.cancel()).catch(() => {});
       throw error;
     }
-    if (await earlierEve) {
-      void early?.then((lines) => lines.cancel()).catch(() => {});
-      return Response.json(
-        {
-          code: "session_version_unsupported",
-          error:
-            "This session was started on an earlier eve version, and this deployment can't " +
-            "stream it. Start a new session.",
-          ok: false,
-        },
-        { headers: { "cache-control": "no-store" }, status: 409 },
-      );
-    }
     const from =
       early === undefined ? Math.max(0, tailIndex + 1 + (startIndex ?? 0)) : (startIndex ?? 0);
-    const lines = await (early ??
-      internalSession(session).getLineStream({ follow, startIndex: from }));
+    let lines: ReadableStream<unknown>;
+    let lineLimit = includeTailIndex ? Math.max(0, tailIndex - from + 1) : undefined;
+    if (await earlierEve) {
+      // An eve before v27 recorded it: read every v26 line, each in light of those before it.
+      void early?.then((opened) => opened.cancel()).catch(() => {});
+      // With no owner left to write to it, following would only reconnect each lease to read the
+      // whole history again: end at the tail with `stream.ended`, so readers stop.
+      const live = follow && (await internalSession(session).hasRunnableOwner());
+      if (follow && !live) lineLimit = undefined;
+      lines = v26LineStream(
+        await internalSession(session).getLineStream({ follow: live, startIndex: 0 }),
+        from,
+      );
+    } else {
+      lines = await (early ?? internalSession(session).getLineStream({ follow, startIndex: from }));
+    }
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -375,14 +377,7 @@ export async function createSessionStreamResponse(
     if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
-    return new Response(
-      serializeLines(
-        lines,
-        request.signal,
-        includeTailIndex ? Math.max(0, tailIndex - from + 1) : undefined,
-      ),
-      { headers },
-    );
+    return new Response(serializeLines(lines, request.signal, lineLimit), { headers });
   } catch (error) {
     const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;

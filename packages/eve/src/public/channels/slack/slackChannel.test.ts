@@ -3459,6 +3459,71 @@ describe("slackChannel() inbound mention pipeline", () => {
     );
   });
 
+  it("adds the Slack messages a mention links to, including their tables", async () => {
+    const linkedTs = "1700000500.000200";
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      const url = String(request);
+      const json = (value: unknown) =>
+        new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+      if (url.includes("conversations.info")) {
+        return json({ ok: true, channel: { id: "C0SOURCE01", is_private: false } });
+      }
+      if (url.includes("conversations.replies")) {
+        return json({
+          ok: true,
+          messages: [
+            {
+              bot_id: "B_REPORT",
+              text: "Ratings",
+              ts: linkedTs,
+              blocks: [
+                {
+                  type: "data_table",
+                  caption: "PR ratings",
+                  rows: [
+                    [
+                      { type: "raw_text", text: "PR" },
+                      { type: "raw_text", text: "Rating" },
+                    ],
+                    [
+                      { type: "raw_text", text: "#4866" },
+                      { type: "raw_number", value: 3 },
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+        });
+      }
+      return json({ ok: true, ts: "1700000001.000001" });
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: "1700000600.000001",
+        text: "<@U_BOT> compare with <https://acme.slack.com/archives/C0SOURCE01/p1700000500000200>",
+        ts: "1700000600.000001",
+        type: "app_mention",
+        user: "U_CURRENT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
+    expect(message).toContain(
+      '<linked_message url="https://acme.slack.com/archives/C0SOURCE01/p1700000500000200">',
+    );
+    expect(message).toContain("channel_id: C0SOURCE01");
+    expect(message).toContain("#4866 | 3");
+  });
+
   it("adds prior thread replies as history when a mention starts the thread's session", async () => {
     const threadTs = "1700000000.000001";
     const currentTs = "1700000000.000004";

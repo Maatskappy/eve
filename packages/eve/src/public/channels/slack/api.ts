@@ -766,7 +766,7 @@ function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
   return data;
 }
 
-function parseThreadMessage(
+export function parseThreadMessage(
   raw: Record<string, unknown>,
   threadRootTs: string,
   identity: {

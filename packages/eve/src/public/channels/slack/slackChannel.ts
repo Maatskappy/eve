@@ -30,6 +30,7 @@ import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
   fetchSlackThreadWindow,
+  parseThreadMessage,
   slackContinuationToken,
   type SlackBotToken,
   type SlackHandle,
@@ -81,9 +82,11 @@ import {
 } from "#public/channels/slack/inbound.js";
 import {
   formatSlackInboundMessage,
+  formatSlackLinkedMessages,
   formatSlackThreadContext,
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
+import { loadLinkedSlackMessages } from "#public/channels/slack/linked-messages.js";
 import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
 import {
   loadThreadContextMessages,
@@ -1339,6 +1342,7 @@ async function dispatchSlackMessage(input: {
     resolvesTypedInput: input.resolvesTypedInput,
     result,
     sessionOperations,
+    slack,
     thread,
     threadContext: input.threadContext,
     uploadPolicy: input.uploadPolicy,
@@ -1463,6 +1467,7 @@ async function deliverSlackMessage(input: {
   readonly message: SlackMessage;
   readonly resolvesTypedInput: boolean;
   readonly result: Exclude<SlackInboundResult, null>;
+  readonly slack: Pick<SlackHandle, "request">;
   readonly thread: SlackThread;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
@@ -1484,6 +1489,20 @@ async function deliverSlackMessage(input: {
     const threadContext = seedsHistory ? undefined : formatSlackThreadContext(priorMessages);
     const history =
       input.result.history ?? (seedsHistory ? slackThreadSessionHistory(priorMessages) : undefined);
+    const linkedMessages = formatSlackLinkedMessages(
+      await loadLinkedSlackMessages({
+        channelId: message.channelId,
+        knownTs: new Set([message.ts, ...priorMessages.map((prior) => prior.ts)]),
+        parse: (raw) =>
+          parseThreadMessage(raw, typeof raw.ts === "string" ? raw.ts : "", {
+            appId: undefined,
+            botUserId: input.botUserId,
+          }),
+        raw: message.raw,
+        request: input.slack.request,
+        text: message.text,
+      }),
+    );
     const fileParts = await collectInboundFileParts({
       botUserId: input.botUserId,
       fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
@@ -1505,7 +1524,9 @@ async function deliverSlackMessage(input: {
     };
     const attributedMessage = formatSlackInboundMessage(inboundContext, message);
     const turnMessage = buildSlackTurnMessage(
-      threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
+      [threadContext, attributedMessage, linkedMessages]
+        .filter((part): part is string => part !== undefined)
+        .join("\n\n"),
       fileParts,
     );
 

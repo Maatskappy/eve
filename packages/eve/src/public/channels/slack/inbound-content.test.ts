@@ -176,6 +176,35 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toBe("Error budget\napi | 97%");
   });
 
+  it("extracts a data_table string caption, raw_number values, and action_cell fallbacks", () => {
+    const result = resolveSlackInboundMrkdwn("", {
+      blocks: [
+        {
+          type: "data_table",
+          caption: "PR ratings",
+          rows: [
+            [
+              { type: "raw_text", text: "PR" },
+              { type: "raw_text", text: "Rating" },
+              { type: "raw_text", text: "Status" },
+            ],
+            [
+              { type: "raw_text", text: "#4866" },
+              { type: "raw_number", value: 3 },
+              {
+                type: "action_cell",
+                element: { type: "button", text: { type: "plain_text", text: "Open" } },
+                fallback: { type: "raw_text", text: "changed" },
+              },
+            ],
+          ],
+        },
+      ],
+    });
+
+    expect(result).toBe("PR ratings\nPR | Rating | Status\n#4866 | 3 | changed");
+  });
+
   it("renders rich_text mentions as mrkdwn tokens", () => {
     const result = resolveSlackInboundMrkdwn("", {
       blocks: [

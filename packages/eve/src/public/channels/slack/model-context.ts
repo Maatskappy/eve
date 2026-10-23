@@ -1,5 +1,6 @@
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
+import type { SlackLinkedMessage } from "#public/channels/slack/linked-messages.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
@@ -94,6 +95,35 @@ export function formatSlackThreadContext(
       }),
     ),
     "</slack_thread_context>",
+  ].join("\n");
+}
+
+/**
+ * Renders Slack messages the inbound message links to, each tagged with the
+ * permalink it was resolved from. Returns `undefined` when nothing resolved.
+ */
+export function formatSlackLinkedMessages(
+  linked: readonly SlackLinkedMessage[],
+): string | undefined {
+  if (linked.length === 0) return undefined;
+
+  return [
+    "<slack_linked_messages>",
+    ...linked.map(({ channelId, message, url }) =>
+      [
+        `<linked_message url="${url}">`,
+        formatSlackModelMessage({
+          channelId,
+          content: message.markdown,
+          senderId: message.user ?? message.botId,
+          senderType: slackThreadSenderType(message),
+          threadTs: message.threadTs,
+          ts: message.ts,
+        }),
+        "</linked_message>",
+      ].join("\n"),
+    ),
+    "</slack_linked_messages>",
   ].join("\n");
 }
 

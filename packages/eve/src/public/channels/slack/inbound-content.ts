@@ -223,7 +223,12 @@ function appendCardLines(lines: string[], card: Record<string, unknown>): void {
 }
 
 function appendTableLines(lines: string[], block: Record<string, unknown>): void {
-  appendTextObjectLine(lines, block.caption);
+  // Slack documents data_table's caption as a plain string.
+  if (typeof block.caption === "string" && block.caption.length > 0) {
+    lines.push(block.caption);
+  } else {
+    appendTextObjectLine(lines, block.caption);
+  }
   if (!Array.isArray(block.rows)) return;
   for (const row of block.rows) {
     if (!Array.isArray(row)) continue;
@@ -236,6 +241,8 @@ function appendTableLines(lines: string[], block: Record<string, unknown>): void
 
 function tableCellToPlain(cell: unknown): string {
   if (!isObject(cell)) return "";
+  // A data_table button cell shows its fallback cell where buttons don't render.
+  if (cell.type === "action_cell") return tableCellToPlain(cell.fallback);
   if (cell.type === "rich_text") return richTextPartsToPlain(cell.elements);
   if (typeof cell.text === "string") return cell.text;
   if (typeof cell.value === "number" || typeof cell.value === "string") {

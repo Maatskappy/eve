@@ -142,6 +142,8 @@ The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when ava
 
 When a Slack message includes a link preview, eve includes its attachment text in `<content>` alongside the sender's message, including when the link has words around it. Shared Slack messages work the same way: eve extracts the forwarded message body from Slack's message-unfurl attachment and keeps any top-level comment.
 
+Slack sends the event before it unfurls links, so a message that links to another Slack message usually arrives without the linked content. eve reads up to three linked messages itself, with the same Block Kit rendering (tables, data tables, sections, and attachments), and adds them after the sender's message in a `<slack_linked_messages>` block, one `<linked_message url="…">` per link. A link into the current conversation always resolves. A link into another conversation resolves only when `conversations.info` confirms a public channel, so content from private channels and DMs never reaches a different audience. Reads use `conversations.replies` and need the matching history scope (`channels:history` for public channels). Links Slack already unfurled in the payload, messages already in thread context, and links eve cannot read are skipped.
+
 #### Restrict who can invoke the agent
 
 A valid Slack signature proves that Slack sent the event. It does not decide which channel or person your agent should trust. Fail closed in the inbound handler before returning auth, especially when the app is installed in a shared Slack Connect channel:

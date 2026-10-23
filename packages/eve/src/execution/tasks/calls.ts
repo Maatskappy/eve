@@ -4,8 +4,8 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
-/** How long a turn waits at most. A wait that omits `timeoutSeconds`, or asks for more, ends here so a task that never reports can't hold a turn open for good. */
-export const TASK_WAIT_MAX_TIMEOUT_MS = 30 * 60 * 1_000;
+/** How long a wait that omits `timeoutSeconds` lasts, so a task that never reports can't hold a turn open for good. */
+export const TASK_WAIT_DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000;
 
 /**
  * Calls to the task tools. They defer out of the model step like
@@ -49,11 +49,13 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
       } else if (part.toolName === TASK_WAIT_TOOL_NAME) {
         // Seconds, to match `sleep`.
         const timeoutSeconds: unknown = Reflect.get(input, "timeoutSeconds");
-        const requestedMs = typeof timeoutSeconds === "number" ? timeoutSeconds * 1_000 : Infinity;
         calls.push({
           callId: part.toolCallId,
           kind: TASK_WAIT_TOOL_NAME,
-          timeoutMs: Math.min(requestedMs, TASK_WAIT_MAX_TIMEOUT_MS),
+          timeoutMs:
+            typeof timeoutSeconds === "number"
+              ? timeoutSeconds * 1_000
+              : TASK_WAIT_DEFAULT_TIMEOUT_MS,
         });
       }
     }

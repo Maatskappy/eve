@@ -11,8 +11,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | ---------------------------------------------- | ------------------------------------------------------ |
 | `eve init [target]`                            | Create a new agent, or add one to an existing project  |
 | `eve dev`                                      | Start the local development server and terminal UI     |
-| `eve remote connect --url <url>`               | Open the terminal UI for an existing agent             |
-| `eve remote invoke --url <url> [prompt]`       | Invoke an existing agent without a terminal UI         |
+| `eve remote connect --url <url>`               | Open the terminal UI or print one remote response      |
 | `eve remote info --url <url>`                  | Inspect an existing agent                              |
 | `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
 | `eve info`                                     | Inspect the local application                          |
@@ -326,7 +325,7 @@ Use `eve remote` only with an explicit existing agent URL:
 
 ```bash
 eve remote connect --url https://agent.example.com
-eve remote invoke --url https://agent.example.com "Summarize station telemetry"
+eve remote connect --url https://agent.example.com --print "Summarize station telemetry"
 eve remote info --url https://agent.example.com
 ```
 
@@ -336,27 +335,12 @@ eve remote info --url https://agent.example.com
 
 ```bash
 eve remote connect --url <url> [-H "Name: value"]
+eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
+
+Without `--print`, `connect` requires a terminal and opens the interactive UI. Pass `--print` and a prompt to send one message without a terminal UI. eve writes only the final assistant text to stdout, then exits. It writes errors to stderr and exits nonzero if the turn fails, is cancelled, needs input or authorization, or the stream ends before the turn settles. The error includes the session ID when the server has accepted the message. To answer that session's pending request, use the client API; `eve remote connect` opens a new conversation instead. `--print` does not answer pending requests or continue a session. For scripted multi-turn sessions, use the `eve/client` API. `--input` only pre-fills the interactive UI and cannot be used with `--print`.
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
-
-### `eve remote invoke`
-
-```bash
-eve remote invoke --url <url> [prompt] [--resume] [-H "Name: value"] [--scope <team>]
-```
-
-Invokes an existing agent without opening the terminal UI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
-
-| Option                  | Type   | Default  | Description                                     |
-| ----------------------- | ------ | -------- | ----------------------------------------------- |
-| `<url>`                 | string | required | Existing eve agent URL                          |
-| `[prompt]`              | string | none     | Prompt, follow-up, or answer to a pending input |
-| `-H, --header <header>` | string | none     | Request header for the URL target; repeatable   |
-| `--resume`              | flag   | off      | Read a previous resumable result from stdin     |
-| `--scope <team>`        | string | current  | Vercel team that owns the URL target            |
-
-`--resume` reads a complete previous result from stdin, including its delivery ID. Results use `working`, `awaiting-input`, `completed`, `failed`, or `cancelled`; `sessionEnded` separately reports whether the session has ended. Supply text for a follow-up after a settled request while its session remains open, or to answer a question. An `awaiting-input` result lists open `interactions`, sign-ins included; when only sign-ins are open, complete them, then resume without text to follow the original turn to its next input request or completion. If another sign-in appears, complete it and resume the new result without text again. Pass headers and scope again when resuming. Awaiting-input invocations exit `3`; failed or cancelled requests exit `1`. Deployment authentication failures are CLI errors, not request statuses. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `working` result before exiting.
 
 ### `eve remote info`
 

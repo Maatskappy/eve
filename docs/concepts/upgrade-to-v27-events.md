@@ -16,7 +16,11 @@ import { convertLegacyEvents } from "eve/internal/legacy-events";
 const events = convertLegacyEvents(saved);
 ```
 
-The result is what a reader of the session's stream gets today, at the same positions, so `conversationOf(events)` renders it and the next stored line is `saved.length`. A session saved mid-turn stays unfinished. Convert each session separately: the function throws for an array that doesn't start at `session.started`, that holds a second session, or that holds current events. `convertLegacyEvents` is a migration aid with no compatibility promise and will be removed in a later release.
+The result contains the same facts at their original source positions, so `conversationOf(events)` renders it and the next stored line is `saved.length`. Some source records, such as a settled `session.waiting`, produce no facts. When those records end the saved history, the converter preserves their coverage in the last event's reader metadata, `meta.next`, without moving its `meta.position` or adding facts.
+
+Save the converted events with their metadata unchanged and pass them as `SessionStore`'s `initialEvents`. Its published `session.streamIndex` and resume requests use that covered source prefix, which can extend past `position(view)`. A separate `initialSession.streamIndex`, potentially advanced by another reader, does not prove coverage and cannot make the store skip unread data. A partial multi-fact line still replays from its start. If you converted and saved history with a version that omitted this coverage metadata, reconvert the original v26 archive to recover it; do not infer it from event counts.
+
+A session saved mid-turn stays unfinished. Convert each session separately: the function throws for an array that doesn't start at `session.started`, that holds a second session, or that holds current events. `convertLegacyEvents` is a migration aid with no compatibility promise and will be removed in a later release.
 
 ## Event mapping
 

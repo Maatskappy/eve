@@ -109,7 +109,9 @@ export function v26LineStream(
  * The events one session's saved v26 events read as, for an application that kept them: the
  * events a v27 reader of the session's stream would read from them, at the same positions. They
  * must be the session's events from its first, one per stored line, in order, as a v26 client
- * read them from position 0; the next stored line is then at `records.length`.
+ * read them from position 0; the next stored line is then at `records.length`. If trailing
+ * records emit nothing, the last event's `meta.next` retains that source coverage without
+ * changing any event's original position. Save the returned reader metadata unchanged.
  */
 export function convertLegacyEvents(records: readonly unknown[]): SessionStreamEvent[] {
   if (!isSessionStarted(records[0])) {
@@ -138,6 +140,9 @@ export function convertLegacyEvents(records: readonly unknown[]): SessionStreamE
     const line = history.read(record, position);
     if (line !== undefined) events.push(...reader.read(line, position));
   });
+  const last = events.at(-1);
+  if (last !== undefined && records.length > last.meta.position.line + 1)
+    events[events.length - 1] = { ...last, meta: { ...last.meta, next: records.length } };
   return events;
 }
 

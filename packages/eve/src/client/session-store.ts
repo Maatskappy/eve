@@ -62,6 +62,7 @@ export class SessionStore {
   #session: ClientSession | undefined;
   #error: Error | undefined;
   #events: readonly SessionStreamEvent[];
+  #sourceCoverage = 0;
   #snapshot: SessionStoreSnapshot;
   #observedSession: ClientSessionState | undefined;
   #inLine = false;
@@ -87,9 +88,7 @@ export class SessionStore {
           baseUrl: init.baseUrl ?? "",
         }));
     this.#conversationClient = new ConversationClient(() => this.#publish());
-    this.#events = (init.initialEvents ?? []).filter((event) =>
-      this.#conversationClient.hydrate(event),
-    );
+    this.#events = (init.initialEvents ?? []).filter((event) => this.#hydrate(event));
     this.#messageSubmissions = new OptimisticMessageSubmissions(
       (submissions) => this.#conversationClient.showSubmissions(submissions),
       init.optimistic ?? true,
@@ -120,6 +119,29 @@ export class SessionStore {
       this.#observers -= 1;
       if (!this.#mounted && this.#observers === 0) this.#deactivateObservation();
     };
+  }
+
+  #hydrate(event: SessionStreamEvent): boolean {
+    if (!this.#conversationClient.hydrate(event)) return false;
+    const { next, position, endOfLine } = event.meta;
+    if (position.line < this.#sourceCoverage)
+      throw new TypeError(
+        "Saved events overlap source lines already covered by `meta.next`. " +
+          "Save the ordered events as eve read them, or read the session again from position 0.",
+      );
+    if (next !== undefined) {
+      if (endOfLine !== true || !Number.isSafeInteger(next) || next < position.line + 1)
+        throw new TypeError(
+          "Saved `meta.next` must cover a complete source line with a safe integer cursor. " +
+            "Save the events as eve read them, or read the session again from position 0.",
+        );
+      this.#sourceCoverage = next;
+    }
+    return true;
+  }
+
+  get #streamIndex(): number {
+    return Math.max(this.#sourceCoverage, this.#conversationClient.view.position);
   }
 
   setCallbacks(callbacks: SessionStoreCallbacks): void {
@@ -257,7 +279,7 @@ export class SessionStore {
       return Promise.reject(new Error("eve session has pending submissions."));
     const lifetime = this.#controller;
     this.#error = undefined;
-    const stream = this.#ensureStream({ startIndex: this.#conversationClient.view.position });
+    const stream = this.#ensureStream();
     const promise = stream.caughtUp
       .then(() => {
         if (lifetime === this.#controller) this.#error ??= this.#recordedFailure();
@@ -381,6 +403,7 @@ export class SessionStore {
     this.#accepted.clear();
     this.#finishedTurns.clear();
     this.#events = [];
+    this.#sourceCoverage = 0;
     this.#conversationClient.reset();
     this.#messageSubmissions.reset();
     this.#error = undefined;
@@ -490,7 +513,7 @@ export class SessionStore {
     this.#followAgents();
     const lifetime = this.#controller;
     return this.#conversationClient.stream(this.#session, {
-      startIndex: this.#conversationClient.view.position,
+      startIndex: this.#streamIndex,
       ...options,
       onEvent: (event, historical) => {
         if (lifetime === this.#controller) this.#acceptServerEvent(event, historical);
@@ -617,11 +640,11 @@ export class SessionStore {
     this.#publish();
   }
 
-  /** Other Delivery/session readers may have read further than this store's committed prefix. */
+  /** Source coverage belongs to this store's prefix, never to another reader's handle. */
   get #sessionState(): ClientSessionState | undefined {
     if (this.#session === undefined) return (this.#observedSession = undefined);
     const sessionId = this.#session.id;
-    const streamIndex = this.#conversationClient.view.position;
+    const streamIndex = this.#streamIndex;
     if (
       this.#observedSession?.sessionId !== sessionId ||
       this.#observedSession.streamIndex !== streamIndex

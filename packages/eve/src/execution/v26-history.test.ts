@@ -201,7 +201,7 @@ describe("v26LineStream", () => {
 });
 
 describe("convertLegacyEvents", () => {
-  it("reads saved events as the session's stream serves them, at their stored positions", async () => {
+  it("keeps served facts and positions while retaining saved source coverage", async () => {
     const reader = createEventReader();
     const served: SessionStreamEvent[] = [];
     let position = 0;
@@ -209,6 +209,11 @@ describe("convertLegacyEvents", () => {
       if (isStoredLine(value)) served.push(...reader.read(value, position));
       position += 1;
     }
+    const last = served.at(-1)!;
+    served[served.length - 1] = {
+      ...last,
+      meta: { ...last.meta, next: KITCHEN_SINK.length },
+    };
     expect(convertLegacyEvents(KITCHEN_SINK)).toEqual(served);
   });
 
@@ -225,6 +230,7 @@ describe("convertLegacyEvents", () => {
     // Each event keeps its stored line; the trailing delta reads as none, so the last is earlier.
     expect(lines).toEqual(lines.toSorted((a, b) => a - b));
     expect(lines.at(-1)).toBe(12);
+    expect(events.at(-1)?.meta.next).toBe(saved.length);
     const tables = sessionTables(conversationOf(events).view);
     expect(tables.turns["turn_1"]?.status).toBe("running");
     expect(tables.session.status).not.toBe("ended");

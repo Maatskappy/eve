@@ -13,15 +13,15 @@ const MARGIN = 64;
 const TEXT_WIDTH = 504;
 
 /**
- * The card header, at 2x card scale, runs off the right edge and fades out
- * over its last `SCENE_FADE` so only the first exchange shows, rather than
- * a mostly empty window running to the bottom of the image.
+ * The card header, at 2x card scale, shows the preview's first exchange. It
+ * runs off the right edge and fades out over its last `SCENE_FADE`, low
+ * enough that tables, charts, and the Voice call controls stay clear of it.
  */
 const SCENE_LEFT = 616;
-const SCENE_HEIGHT = 410;
+const SCENE_HEIGHT = 520;
 /** Centers the header vertically on the canvas. */
 const SCENE_TOP = (HEIGHT - SCENE_HEIGHT) / 2;
-const SCENE_FADE = 0.22;
+const SCENE_FADE = 0.2;
 const SCENE_SCALE = 2;
 /** The eve-plus-integrations placeholder has no window to bleed, so it centers vertically. */
 const PLACEHOLDER_SCALE = 2.4;
@@ -89,6 +89,7 @@ export const createTemplateOgImage = async (
         inset={[8, -12, -20, 0]}
         palette={palette}
         template={template}
+        visibleHeight={(sceneHeight * (1 - SCENE_FADE)) / scale}
         width={sceneWidth / scale}
       />,
       scale,

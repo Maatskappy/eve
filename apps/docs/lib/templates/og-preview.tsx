@@ -289,7 +289,21 @@ interface SceneProps {
   width: number;
   /** Window inset from the scene edges, in scene pixels: top, right, bottom, left. */
   inset?: [number, number, number, number];
+  /**
+   * Height of the part of the scene that is not faded out. The Voice
+   * template's call controls pin to it, as they pin to the card's bottom edge.
+   */
+  visibleHeight: number;
 }
+
+/**
+ * Messages through the agent's first reply. The OG image shows one exchange,
+ * so a long preview doesn't leave half a message in the fade.
+ */
+const firstExchange = (messages: TemplatePreviewMessage[]) => {
+  const reply = messages.findIndex((message) => message.from === "agent" && !message.event);
+  return reply === -1 ? messages : messages.slice(0, reply + 1);
+};
 
 /**
  * The gallery card header's foreground at card scale (`width` × `height` CSS
@@ -302,9 +316,13 @@ export const HeaderScene = ({
   inset = [20, -12, -20, 24],
   palette,
   template,
+  visibleHeight,
   width,
 }: SceneProps) => {
-  const preview = template.preview;
+  const preview = template.preview && {
+    ...template.preview,
+    messages: firstExchange(template.preview.messages),
+  };
   return (
     <div style={{ display: "flex", height, position: "relative", width }}>
       {preview ? (
@@ -312,6 +330,7 @@ export const HeaderScene = ({
           agent={preview.agent ?? template.title}
           assets={assets}
           context={preview.context}
+          footerBottom={height - inset[2] - visibleHeight}
           inset={inset}
           messages={preview.messages}
           palette={palette}
@@ -362,12 +381,14 @@ const Conversation = ({
   context,
   inset,
   messages,
+  footerBottom,
   palette,
   preview,
 }: {
   agent: string;
   assets: OgPreviewAssets;
   context?: string;
+  footerBottom: number;
   inset: [number, number, number, number];
   messages: TemplatePreviewMessage[];
   palette: Palette;
@@ -403,6 +424,7 @@ const Conversation = ({
   return (
     <WebWindow
       address={context}
+      footerBottom={footerBottom}
       inset={inset}
       messages={messages}
       palette={palette}
@@ -413,12 +435,15 @@ const Conversation = ({
 
 const WebWindow = ({
   address,
+  footerBottom,
   inset,
   messages,
   palette,
   voice,
 }: {
   address?: string;
+  /** Distance from the window's bottom edge to the Voice call controls. */
+  footerBottom: number;
   inset: [number, number, number, number];
   messages: TemplatePreviewMessage[];
   palette: Palette;
@@ -494,7 +519,7 @@ const WebWindow = ({
         style={{
           alignItems: "center",
           backgroundImage: `linear-gradient(to top, ${palette.bg100} 60%, ${palette.bg100}00)`,
-          bottom: Math.max(0, -inset[2]),
+          bottom: footerBottom,
           display: "flex",
           gap: 6,
           justifyContent: "center",

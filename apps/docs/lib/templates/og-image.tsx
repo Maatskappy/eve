@@ -4,6 +4,7 @@ import { ImageResponse } from "next/og";
 import type { ReactNode } from "react";
 import type { TemplateManifestEntry } from "./manifest";
 import { dotMatrixSrc, HeaderScene, loadOgPreviewAssets, ogPalette, scaleTree } from "./og-preview";
+import { APP_WINDOW_RAISE, WINDOW_INSET } from "./preview-kit";
 
 const WIDTH = 1200;
 const HEIGHT = 628;
@@ -85,8 +86,8 @@ export const createTemplateOgImage = async (
       <HeaderScene
         assets={assets}
         height={sceneHeight / scale}
-        // Slack and GitHub windows sit 8px higher than the others, as on the card, which puts them at the top edge.
-        inset={[8, -12, -20, 0]}
+        // Flush left, and low enough that Slack and GitHub, which sit higher, start at the top edge.
+        inset={{ ...WINDOW_INSET, left: 0, top: APP_WINDOW_RAISE }}
         palette={palette}
         template={template}
         visibleHeight={(sceneHeight * (1 - SCENE_FADE)) / scale}

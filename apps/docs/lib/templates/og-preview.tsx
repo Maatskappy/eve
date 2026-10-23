@@ -26,11 +26,33 @@ import type {
   TemplatePreviewMessage,
   TemplatePreviewThread,
 } from "./manifest";
+import {
+  APP_WINDOW_RAISE,
+  clamp01,
+  DOT_MATRIX,
+  dotMatrixVariant,
+  dotOpacity,
+  GITHUB_COLORS,
+  GITHUB_ZOOM,
+  githubAvatarUrl,
+  IMESSAGE_COLORS,
+  isNumericCell,
+  MAX_PLACEHOLDER_ICONS,
+  OCTICONS,
+  PHONE_FRAME,
+  parseDiffCode,
+  parseMessageText,
+  pickPreviewUser,
+  SLACK_CHART,
+  SLACK_COLORS,
+  SLACK_TIMESTAMP,
+  SLACK_ZOOM,
+  smoothstep,
+  type TextSegment,
+  WINDOW_INSET,
+} from "./preview-kit";
 
-/**
- * Dark-mode Geist tokens resolved to sRGB, plus the Slack, iMessage, and
- * GitHub (Primer) dark palettes the card's previews copy.
- */
+/** Dark-mode Geist tokens resolved to sRGB, plus the app palettes the card uses. */
 export const ogPalette = {
   bg100: "#000000",
   bg200: "#0a0a0a",
@@ -41,75 +63,13 @@ export const ogPalette = {
   border: "rgba(255,255,255,0.14)",
   dot: "#ededed",
   red: "#e5484d",
-  slackBg: "#1a1d21",
-  slackFg: "#d1d2d3",
-  slackStrong: "#f8f8f8",
-  slackBorder: "#35373b",
-  slackMuted: "#ababad",
-  slackLink: "#1d9bd1",
-  slackCodeFg: "#e8912d",
-  slackCodeBg: "rgba(232,232,232,0.04)",
-  slackCodeBorder: "rgba(232,232,232,0.13)",
-  slackMentionBg: "rgba(29,155,209,0.18)",
-  slackTint: "rgba(232,232,232,0.04)",
-  slackBadgeBg: "rgba(232,232,232,0.13)",
-  slackBadgeFg: "#ababad",
-  slackGreen: "#2bac76",
-  slackButton: "#148567",
-  slackUnfurl: "#545454",
-  imReceived: "#262628",
   glass: "rgba(255,255,255,0.12)",
-  ghBg: "#0d1117",
-  ghFg: "#f0f6fc",
-  ghMuted: "#9198a1",
-  ghBorder: "#3d444d",
-  ghMutedBg: "#151b23",
-  ghLink: "#4493f8",
-  ghOpen: "#238636",
-  ghDraft: "#656c76",
-  ghTimeline: "rgba(61,68,77,0.7)",
-  ghBadgeBg: "#212830",
-  ghCodeBg: "rgba(101,108,118,0.2)",
-  ghAvatarRing: "rgba(255,255,255,0.15)",
-  ghLabelFg: "#c5def5",
-  ghLabelBg: "rgba(197,222,245,0.18)",
-  ghLabelBorder: "rgba(197,222,245,0.3)",
-  ghAddNumberBg: "rgba(63,185,80,0.3)",
-  ghAddLineBg: "rgba(46,160,67,0.15)",
-  ghKeyword: "#ff7b72",
-  ghNumber: "#79c0ff",
+  slack: SLACK_COLORS.dark,
+  github: GITHUB_COLORS.dark,
+  imessage: IMESSAGE_COLORS.dark,
 };
 
 type Palette = typeof ogPalette;
-
-const hashString = (seed: string) => {
-  let hash = 0;
-  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash;
-};
-
-// Same noise as scripts/generate-dot-matrix.mjs, so the OG dots match the card's.
-const noiseHash = (x: number, y: number, seed: number) => {
-  let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ seed;
-  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
-  h ^= h >>> 13;
-  h = Math.imul(h, 0xc2b2ae35);
-  h ^= h >>> 16;
-  return (h >>> 0) / 4294967296;
-};
-const smooth = (t: number) => t * t * (3 - 2 * t);
-const noise = (x: number, y: number, seed: number) => {
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const tx = smooth(x - x0);
-  const ty = smooth(y - y0);
-  const a = noiseHash(x0, y0, seed);
-  const b = noiseHash(x0 + 1, y0, seed);
-  const c = noiseHash(x0, y0 + 1, seed);
-  const d = noiseHash(x0 + 1, y0 + 1, seed);
-  return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
-};
-const clamp = (n: number) => Math.min(1, Math.max(0, n));
 
 /**
  * The card's dot matrix as an SVG data URI. `fade` is the height over which
@@ -117,8 +77,8 @@ const clamp = (n: number) => Math.min(1, Math.max(0, n));
  */
 export const dotMatrixSrc = ({
   color,
-  fade = 176,
-  gap = 8,
+  fade = DOT_MATRIX.height,
+  gap = DOT_MATRIX.gap,
   height,
   seed,
   strength = 1,
@@ -135,14 +95,15 @@ export const dotMatrixSrc = ({
   strength?: number;
   width: number;
 }) => {
-  const noiseSeed = (hashString(seed) % 4) * 7919 + 1;
+  const variant = dotMatrixVariant(seed);
   const dots: string[] = [];
   for (let y = gap / 2; y < height; y += gap) {
     for (let x = gap / 2; x < width; x += gap) {
-      const n = noise(x / ((56 * gap) / 8), y / ((40 * gap) / 8), noiseSeed);
-      const falloff = Number.isFinite(fade) ? clamp(1.1 - y / (fade * 0.8)) : 1;
-      const leftFalloff = fadeLeft ? smooth(clamp(x / fadeLeft)) : 1;
-      const opacity = (0.12 + 0.88 * n ** 2) * falloff * leftFalloff * strength;
+      const leftFalloff = fadeLeft ? smoothstep(clamp01(x / fadeLeft)) : 1;
+      const opacity =
+        dotOpacity({ fadeHeight: fade, scale: gap / DOT_MATRIX.gap, variant, x, y }) *
+        leftFalloff *
+        strength;
       if (opacity < 0.02) continue;
       dots.push(
         `<circle cx="${x}" cy="${y}" r="${gap / 8}" fill-opacity="${+opacity.toFixed(2)}"/>`,
@@ -160,19 +121,6 @@ export interface OgPreviewAssets {
   userName: string;
   userLogin: string;
 }
-
-// Matches PREVIEW_USERS in template-preview.tsx, so the OG image shows the same person.
-const PREVIEW_USERS = [
-  { name: "barba", login: "AndrewBarba", githubId: 1316152 },
-  { name: "Casey Gowrie", login: "ctgowrie", githubId: 6045519 },
-  { name: "pankow", login: "benpankow", githubId: 10215173 },
-  { name: "owen", login: "OwenKephart", githubId: 22457492 },
-  { name: "prha", login: "prha", githubId: 1040172 },
-  { name: "chad", login: "chadhietala", githubId: 183799 },
-  { name: "rui", login: "ruiconti", githubId: 1834568 },
-  { name: "colton", login: "cmpadden", githubId: 5807118 },
-  { name: "shar", login: "darafsheh", githubId: 2982650 },
-];
 
 const toDataUri = (data: Buffer, type: string) => `data:${type};base64,${data.toString("base64")}`;
 
@@ -197,11 +145,11 @@ export const loadOgPreviewAssets = async (
   template: TemplateManifestEntry,
 ): Promise<OgPreviewAssets> => {
   const agent = template.preview?.agent ?? template.title;
-  const user = PREVIEW_USERS[hashString(agent) % PREVIEW_USERS.length]!;
+  const user = pickPreviewUser(agent);
   const [agentIcon, userAvatar] = await Promise.all([
     template.preview?.icon ? loadPublicImage(template.preview.icon) : undefined,
     template.preview?.surface === "slack" || template.preview?.surface === "github"
-      ? loadRemoteImage(`https://avatars.githubusercontent.com/u/${user.githubId}?s=72&v=4`)
+      ? loadRemoteImage(githubAvatarUrl(user))
       : undefined,
   ]);
   return { agentIcon, userAvatar, userLogin: user.login, userName: user.name };
@@ -210,6 +158,20 @@ export const loadOgPreviewAssets = async (
 const EveLogo = ({ color, height }: { color: string; height: number }) => (
   <div style={{ color, display: "flex" }}>{resolveLogo(<LogoEveSvg height={height} />)}</div>
 );
+
+/**
+ * Sizes a logo to fit a `size` square at its own aspect ratio. next/og
+ * stretches an SVG to its width and height, ignoring `preserveAspectRatio`.
+ */
+const fitLogo = (node: ReactNode, size: number): ReactNode => {
+  if (!isValidElement<{ viewBox?: string }>(node)) return node;
+  const [, , width = 1, height = 1] = (node.props.viewBox ?? "").split(/[\s,]+/).map(Number);
+  const aspect = width / height || 1;
+  return cloneElement(node as ReactElement<{ height?: number; width?: number }>, {
+    height: aspect >= 1 ? size / aspect : size,
+    width: aspect >= 1 ? size : size * aspect,
+  });
+};
 
 const IntegrationIcon = ({
   color,
@@ -232,9 +194,7 @@ const IntegrationIcon = ({
     );
   }
   const Icon = (grayscale ? grayscaleIntegrationIcons : integrationIcons)[integration];
-  return (
-    <div style={{ color, display: "flex" }}>{resolveLogo(<Icon height={size} width={size} />)}</div>
-  );
+  return <div style={{ color, display: "flex" }}>{fitLogo(resolveLogo(<Icon />), size)}</div>;
 };
 
 /** Lucide icons the web surface uses, as plain SVG. */
@@ -293,8 +253,8 @@ interface SceneProps {
   palette: Palette;
   template: TemplateManifestEntry;
   width: number;
-  /** Window inset from the scene edges, in scene pixels: top, right, bottom, left. */
-  inset?: [number, number, number, number];
+  /** Window inset from the scene edges, in scene pixels. Defaults to the card's. */
+  inset?: Inset;
   /**
    * Height of the part of the scene that is not faded out. The Voice
    * template's call controls pin to it, as they pin to the card's bottom edge.
@@ -310,7 +270,7 @@ interface SceneProps {
 export const HeaderScene = ({
   assets,
   height,
-  inset = [20, -12, -20, 24],
+  inset = WINDOW_INSET,
   palette,
   template,
   visibleHeight,
@@ -324,7 +284,7 @@ export const HeaderScene = ({
           agent={preview.agent ?? template.title}
           assets={assets}
           context={preview.context}
-          footerBottom={height - inset[2] - visibleHeight}
+          footerBottom={height - inset.bottom - visibleHeight}
           inset={inset}
           messages={preview.messages}
           palette={palette}
@@ -337,8 +297,12 @@ export const HeaderScene = ({
   );
 };
 
-const insetStyle = ([top, right, bottom, left]: [number, number, number, number]) =>
-  ({ bottom, left, position: "absolute", right, top }) satisfies CSSProperties;
+type Inset = typeof WINDOW_INSET;
+
+const insetStyle = (inset: Inset) => ({ ...inset, position: "absolute" }) satisfies CSSProperties;
+
+/** Slack and GitHub windows start higher, to fit their channel or thread header. */
+const raise = (inset: Inset): Inset => ({ ...inset, top: inset.top - APP_WINDOW_RAISE });
 
 /** A window: hairline border, rounded corners, and clipped content. */
 const Frame = ({
@@ -383,7 +347,7 @@ const Conversation = ({
   assets: OgPreviewAssets;
   context?: string;
   footerBottom: number;
-  inset: [number, number, number, number];
+  inset: Inset;
   messages: TemplatePreviewMessage[];
   palette: Palette;
   preview: TemplatePreview;
@@ -394,7 +358,7 @@ const Conversation = ({
       <GitHub
         agent={agent}
         assets={assets}
-        inset={[inset[0] - 8, inset[1], inset[2], inset[3]]}
+        inset={raise(inset)}
         palette={palette}
         preview={preview}
       />
@@ -409,7 +373,7 @@ const Conversation = ({
         agent={agent}
         assets={assets}
         channel={context}
-        inset={[inset[0] - 8, inset[1], inset[2], inset[3]]}
+        inset={raise(inset)}
         messages={messages}
         palette={palette}
       />
@@ -438,7 +402,7 @@ const WebWindow = ({
   address?: string;
   /** Distance from the window's bottom edge to the Voice call controls. */
   footerBottom: number;
-  inset: [number, number, number, number];
+  inset: Inset;
   messages: TemplatePreviewMessage[];
   palette: Palette;
   voice: boolean;
@@ -587,7 +551,9 @@ const AgentAvatar = ({
     <div
       style={{
         alignItems: "center",
-        backgroundColor: fallbackBackground,
+        ...(fallbackBackground.startsWith("linear-gradient(")
+          ? { backgroundImage: fallbackBackground }
+          : { backgroundColor: fallbackBackground }),
         borderRadius: radius,
         display: "flex",
         flexShrink: 0,
@@ -600,9 +566,6 @@ const AgentAvatar = ({
     </div>
   );
 
-/** Slack's desktop metrics (15/22 type, 36px avatars), scaled by 0.72 like the card. */
-const SLACK_ZOOM = 0.72;
-
 const Slack = ({
   agent,
   assets,
@@ -614,19 +577,19 @@ const Slack = ({
   agent: string;
   assets: OgPreviewAssets;
   channel?: string;
-  inset: [number, number, number, number];
+  inset: Inset;
   messages: TemplatePreviewMessage[];
   palette: Palette;
 }) => (
   <Frame
-    inner={{ backgroundColor: palette.slackBg }}
+    inner={{ backgroundColor: palette.slack.bg }}
     outer={insetStyle(inset)}
     palette={palette}
     radius={8}
   >
     <div
       style={{
-        color: palette.slackFg,
+        color: palette.slack.fg,
         display: "flex",
         flexDirection: "column",
         fontFamily: "Lato",
@@ -642,8 +605,8 @@ const Slack = ({
       <div
         style={{
           alignItems: "center",
-          borderBottom: `1px solid ${palette.slackBorder}`,
-          color: palette.slackStrong,
+          borderBottom: `1px solid ${palette.slack.border}`,
+          color: palette.slack.strong,
           display: "flex",
           fontSize: 18,
           fontWeight: 900,
@@ -699,7 +662,7 @@ const Slack = ({
               ) : (
                 <div
                   style={{
-                    backgroundColor: palette.slackBadgeBg,
+                    backgroundColor: palette.slack.hairline,
                     borderRadius: 8,
                     flexShrink: 0,
                     height: 36,
@@ -709,15 +672,15 @@ const Slack = ({
               )}
               <div style={{ display: "flex", flex: 1, flexDirection: "column", minWidth: 0 }}>
                 <div style={{ alignItems: "center", display: "flex", gap: 4 }}>
-                  <div style={{ color: palette.slackStrong, fontWeight: 900 }}>
+                  <div style={{ color: palette.slack.strong, fontWeight: 900 }}>
                     {isAgent ? agent : assets.userName}
                   </div>
                   {isAgent ? (
                     <div
                       style={{
-                        backgroundColor: palette.slackBadgeBg,
+                        backgroundColor: palette.slack.hairline,
                         borderRadius: 2,
-                        color: palette.slackBadgeFg,
+                        color: palette.slack.badgeFg,
                         fontSize: 10,
                         fontWeight: 700,
                         lineHeight: "14px",
@@ -728,8 +691,8 @@ const Slack = ({
                       APP
                     </div>
                   ) : null}
-                  <div style={{ color: palette.slackMuted, fontSize: 12, marginLeft: 4 }}>
-                    10:42 AM
+                  <div style={{ color: palette.slack.muted, fontSize: 12, marginLeft: 4 }}>
+                    {SLACK_TIMESTAMP}
                   </div>
                 </div>
                 <SlackText palette={palette} text={message.text} />
@@ -745,8 +708,6 @@ const Slack = ({
   </Frame>
 );
 
-const SLACK_TOKEN = /(`[^`]+`|\[[^\]]+\]\([^)]*\)|@[\w-]+)/;
-
 interface Run {
   gap: boolean;
   style?: CSSProperties;
@@ -755,23 +716,30 @@ interface Run {
 
 /**
  * Message text with inline styles. next/og has no inline formatting context,
- * so text is laid out word by word in a wrapping flex row. `styleToken`
- * returns the style and text for a token matched by `tokens`; words keep the
- * token's style, so a multi-word link still wraps.
+ * so text is laid out word by word in a wrapping flex row. Words keep their
+ * segment's style, so a multi-word link still wraps.
  */
 const RichText = ({
-  styleToken,
-  text,
-  tokens,
+  segments,
+  styleOf,
 }: {
-  styleToken: (token: string) => { style: CSSProperties; text: string; split?: boolean };
-  text: string;
-  tokens: RegExp;
+  segments: TextSegment[];
+  styleOf: (kind: TextSegment["kind"]) => CSSProperties | undefined;
 }) => {
-  if (!tokens.test(text)) return <div style={{ display: "flex" }}>{text}</div>;
+  if (segments.every((segment) => segment.kind === "text")) {
+    return (
+      <div style={{ display: "flex" }}>{segments.map((segment) => segment.text).join("")}</div>
+    );
+  }
   const runs: Run[] = [];
-  const addWords = (value: string, style?: CSSProperties) => {
-    for (const piece of value.split(/(\s+)/)) {
+  for (const segment of segments) {
+    const style = styleOf(segment.kind);
+    // Code and mentions stay whole; text and links wrap between words.
+    if (segment.kind === "code" || segment.kind === "mention") {
+      runs.push({ gap: false, style, text: segment.text });
+      continue;
+    }
+    for (const piece of segment.text.split(/(\s+)/)) {
       if (!piece) continue;
       if (/^\s+$/.test(piece)) {
         const last = runs.at(-1);
@@ -780,15 +748,7 @@ const RichText = ({
         runs.push({ gap: false, style, text: piece });
       }
     }
-  };
-  text.split(tokens).forEach((part, index) => {
-    if (!part) return;
-    // split() puts captured tokens at odd indexes.
-    if (index % 2 === 0) return addWords(part);
-    const token = styleToken(part);
-    if (token.split) addWords(token.text, token.style);
-    else runs.push({ gap: false, style: token.style, text: token.text });
-  });
+  }
   return (
     <div style={{ display: "flex", flexWrap: "wrap" }}>
       {runs.map((run, index) => (
@@ -803,49 +763,37 @@ const RichText = ({
   );
 };
 
-/** `code`, [label](url), and @mentions in Slack's styles. The URL is not rendered. */
+/** Message text with Slack's inline code, link, and user mention styles. */
 const SlackText = ({ palette, text }: { palette: Palette; text: string }) => (
   <RichText
-    styleToken={(token) => {
-      if (token.startsWith("`")) {
+    segments={parseMessageText(text, "slack")}
+    styleOf={(kind) => {
+      if (kind === "code") {
         return {
-          style: {
-            backgroundColor: palette.slackCodeBg,
-            border: `1px solid ${palette.slackCodeBorder}`,
-            borderRadius: 3,
-            color: palette.slackCodeFg,
-            fontFamily: "Geist Mono",
-            fontSize: 12,
-            padding: "0 3px",
-          },
-          text: token.slice(1, -1),
-        };
-      }
-      if (token.startsWith("[")) {
-        return {
-          split: true,
-          style: { color: palette.slackLink },
-          text: token.slice(1, token.indexOf("]")),
-        };
-      }
-      return {
-        style: {
-          backgroundColor: palette.slackMentionBg,
+          backgroundColor: palette.slack.codeBg,
+          border: `1px solid ${palette.slack.hairline}`,
           borderRadius: 3,
-          color: palette.slackLink,
+          color: palette.slack.codeFg,
+          fontFamily: "Geist Mono",
+          fontSize: 12,
+          padding: "0 3px",
+        };
+      }
+      if (kind === "link") return { color: palette.slack.link };
+      if (kind === "mention") {
+        return {
+          backgroundColor: palette.slack.mentionBg,
+          borderRadius: 3,
+          color: palette.slack.link,
           padding: "0 2px",
-        },
-        text: token,
-      };
+        };
+      }
+      return undefined;
     }}
-    text={text}
-    tokens={SLACK_TOKEN}
   />
 );
 
-const NUMERIC = /^[-+$€£]?[\d.,]+[%KMB]?$/;
-const CHART_WIDTH = 320;
-const CHART_HEIGHT = 36;
+const { height: CHART_HEIGHT, width: CHART_WIDTH } = SLACK_CHART;
 
 const SlackAttachment = ({
   attachment,
@@ -855,7 +803,7 @@ const SlackAttachment = ({
   palette: Palette;
 }) => {
   const box: CSSProperties = {
-    border: `1px solid ${palette.slackBorder}`,
+    border: `1px solid ${palette.slack.border}`,
     borderRadius: 8,
     display: "flex",
     flexDirection: "column",
@@ -870,7 +818,7 @@ const SlackAttachment = ({
         <div
           key={key}
           style={{
-            backgroundColor: bold ? palette.slackTint : "transparent",
+            backgroundColor: bold ? palette.slack.tint : "transparent",
             display: "flex",
             fontWeight: bold ? 700 : 400,
           }}
@@ -879,10 +827,10 @@ const SlackAttachment = ({
             <div
               key={`${index}${cell}`}
               style={{
-                border: `1px solid ${palette.slackBorder}`,
+                border: `1px solid ${palette.slack.border}`,
                 display: "flex",
                 flex: 1,
-                justifyContent: !bold && NUMERIC.test(cell) ? "flex-end" : "flex-start",
+                justifyContent: !bold && isNumericCell(cell) ? "flex-end" : "flex-start",
                 marginLeft: -1,
                 marginTop: -1,
                 padding: "0 8px",
@@ -921,7 +869,7 @@ const SlackAttachment = ({
             {[0.25, 0.75].map((ratio) => (
               <line
                 key={ratio}
-                stroke={palette.slackBorder}
+                stroke={palette.slack.border}
                 strokeDasharray="3 3"
                 x1={0}
                 x2={CHART_WIDTH}
@@ -930,18 +878,18 @@ const SlackAttachment = ({
               />
             ))}
             <polygon
-              fill={palette.slackLink}
+              fill={palette.slack.link}
               fillOpacity={0.12}
               points={`0,${CHART_HEIGHT} ${line} ${CHART_WIDTH},${CHART_HEIGHT}`}
             />
             <polyline
               fill="none"
               points={line}
-              stroke={palette.slackLink}
+              stroke={palette.slack.link}
               strokeLinejoin="round"
               strokeWidth={2}
             />
-            <circle cx={lastX} cy={lastY} fill={palette.slackLink} r={3} />
+            <circle cx={lastX} cy={lastY} fill={palette.slack.link} r={3} />
           </svg>
         </div>
       );
@@ -956,11 +904,11 @@ const SlackAttachment = ({
             {attachment.tasks.map((task) => (
               <div key={task.title} style={{ display: "flex", gap: 8 }}>
                 <svg height={16} style={{ marginTop: 3 }} viewBox="0 0 24 24" width={16}>
-                  <circle cx="12" cy="12" fill={palette.slackGreen} r="10" />
+                  <circle cx="12" cy="12" fill={palette.slack.green} r="10" />
                   <path
                     d="m9 12 2 2 4-4"
                     fill="none"
-                    stroke={palette.slackBg}
+                    stroke={palette.slack.bg}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={2.5}
@@ -969,7 +917,7 @@ const SlackAttachment = ({
                 <div style={{ alignItems: "baseline", display: "flex", flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 700 }}>{task.title}</div>
                   {task.output ? (
-                    <div style={{ color: palette.slackMuted, fontSize: 13, marginLeft: 8 }}>
+                    <div style={{ color: palette.slack.muted, fontSize: 13, marginLeft: 8 }}>
                       {task.output}
                     </div>
                   ) : null}
@@ -984,7 +932,7 @@ const SlackAttachment = ({
         <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
           <div
             style={{
-              backgroundColor: palette.slackUnfurl,
+              backgroundColor: palette.slack.unfurl,
               borderRadius: 999,
               flexShrink: 0,
               width: 4,
@@ -994,7 +942,7 @@ const SlackAttachment = ({
             <div
               style={{
                 alignItems: "center",
-                color: palette.slackMuted,
+                color: palette.slack.muted,
                 display: "flex",
                 fontSize: 12,
                 gap: 6,
@@ -1003,7 +951,7 @@ const SlackAttachment = ({
               <IntegrationIcon integration={attachment.site} size={14} />
               {attachment.site}
             </div>
-            <div style={{ color: palette.slackLink, fontWeight: 700 }}>{attachment.title}</div>
+            <div style={{ color: palette.slack.link, fontWeight: 700 }}>{attachment.title}</div>
             {attachment.description ? <div>{attachment.description}</div> : null}
           </div>
         </div>
@@ -1013,7 +961,7 @@ const SlackAttachment = ({
         <div style={{ display: "flex", fontSize: 13, fontWeight: 700, gap: 8, marginTop: 6 }}>
           <div
             style={{
-              backgroundColor: palette.slackButton,
+              backgroundColor: palette.slack.button,
               border: "1px solid transparent",
               borderRadius: 4,
               color: "white",
@@ -1024,7 +972,7 @@ const SlackAttachment = ({
           </div>
           <div
             style={{
-              border: `1px solid ${palette.slackBorder}`,
+              border: `1px solid ${palette.slack.border}`,
               borderRadius: 4,
               padding: "2px 10px",
             }}
@@ -1034,26 +982,6 @@ const SlackAttachment = ({
         </div>
       );
   }
-};
-
-/** Octicons (MIT, github.com/primer/octicons), 16px. */
-const OCTICONS = {
-  issueOpened: [
-    "M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
-    "M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z",
-  ],
-  pullRequest: [
-    "M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z",
-  ],
-  pullRequestDraft: [
-    "M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 14a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM14 7.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Zm0-4.25a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z",
-  ],
-  tag: [
-    "M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.752 1.752 0 0 1 1 7.775Zm1.5 0c0 .066.026.13.073.177l6.25 6.25a.25.25 0 0 0 .354 0l5.025-5.025a.25.25 0 0 0 0-.354l-6.25-6.25a.25.25 0 0 0-.177-.073H2.75a.25.25 0 0 0-.25.25ZM6 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z",
-  ],
-  kebab: [
-    "M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
-  ],
 };
 
 const Octicon = ({
@@ -1074,8 +1002,6 @@ const Octicon = ({
   </svg>
 );
 
-/** github.com's metrics (Mona Sans 14/21, 40px timeline avatars), zoomed down like the card. */
-const GITHUB_ZOOM = 0.7;
 const GH_MONO = "Geist Mono";
 
 /**
@@ -1091,19 +1017,19 @@ const GitHub = ({
 }: {
   agent: string;
   assets: OgPreviewAssets;
-  inset: [number, number, number, number];
+  inset: Inset;
   palette: Palette;
   preview: TemplatePreview;
 }) => (
   <Frame
-    inner={{ backgroundColor: palette.ghBg }}
+    inner={{ backgroundColor: palette.github.bg }}
     outer={insetStyle(inset)}
     palette={palette}
     radius={8}
   >
     <div
       style={{
-        color: palette.ghFg,
+        color: palette.github.fg,
         display: "flex",
         flexDirection: "column",
         fontFamily: "Mona Sans",
@@ -1147,7 +1073,7 @@ const GitHubHeader = ({ palette, thread }: { palette: Palette; thread: TemplateP
     <div
       style={{
         alignItems: "center",
-        borderBottom: `1px solid ${palette.ghBorder}`,
+        borderBottom: `1px solid ${palette.github.border}`,
         display: "flex",
         gap: 8,
         padding: "8px 16px",
@@ -1156,7 +1082,7 @@ const GitHubHeader = ({ palette, thread }: { palette: Palette; thread: TemplateP
       <div
         style={{
           alignItems: "center",
-          backgroundColor: draft ? palette.ghDraft : palette.ghOpen,
+          backgroundColor: draft ? palette.github.draft : palette.github.open,
           borderRadius: 999,
           color: "white",
           display: "flex",
@@ -1173,7 +1099,7 @@ const GitHubHeader = ({ palette, thread }: { palette: Palette; thread: TemplateP
       <div style={{ alignItems: "baseline", display: "flex", gap: 8, minWidth: 0 }}>
         <div style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{thread.title}</div>
         <div
-          style={{ color: palette.ghMuted, display: "flex", flexShrink: 0 }}
+          style={{ color: palette.github.muted, display: "flex", flexShrink: 0 }}
         >{`#${thread.number}`}</div>
       </div>
     </div>
@@ -1193,7 +1119,7 @@ const GitHubAvatar = ({
 }) => {
   // GitHub draws apps with rounded squares and people with circles.
   const radius = isAgent ? 6 : 999;
-  const ring = { boxShadow: `0 0 0 1px ${palette.ghAvatarRing}` };
+  const ring = { boxShadow: `0 0 0 1px ${palette.github.avatarRing}` };
   if (isAgent) {
     return (
       <div style={{ ...ring, borderRadius: radius, display: "flex", flexShrink: 0 }}>
@@ -1220,7 +1146,7 @@ const GitHubAvatar = ({
   ) : (
     <div
       style={{
-        backgroundColor: palette.ghBorder,
+        backgroundColor: palette.github.border,
         borderRadius: radius,
         flexShrink: 0,
         height: size,
@@ -1243,13 +1169,15 @@ const GitHubAuthor = ({
   palette: Palette;
 }) => (
   <div style={{ alignItems: "center", display: "flex", gap: 4 }}>
-    <div style={{ color: palette.ghFg, fontWeight: 600 }}>{isAgent ? agent : assets.userLogin}</div>
+    <div style={{ color: palette.github.fg, fontWeight: 600 }}>
+      {isAgent ? agent : assets.userLogin}
+    </div>
     {isAgent ? (
       <div
         style={{
-          border: `1px solid ${palette.ghBorder}`,
+          border: `1px solid ${palette.github.border}`,
           borderRadius: 999,
-          color: palette.ghMuted,
+          color: palette.github.muted,
           fontSize: 12,
           fontWeight: 500,
           lineHeight: "18px",
@@ -1259,7 +1187,7 @@ const GitHubAuthor = ({
         Bot
       </div>
     ) : null}
-    <div style={{ color: palette.ghMuted, textDecoration: "underline" }}>now</div>
+    <div style={{ color: palette.github.muted, textDecoration: "underline" }}>now</div>
   </div>
 );
 
@@ -1280,7 +1208,7 @@ const GitHubTimeline = ({
     {/* The timeline line sits 16px into the comment column, after the 40px avatar and a 16px gap. */}
     <div
       style={{
-        backgroundColor: palette.ghTimeline,
+        backgroundColor: palette.github.timeline,
         bottom: 0,
         left: 88,
         position: "absolute",
@@ -1297,8 +1225,8 @@ const GitHubTimeline = ({
           <div
             style={{
               alignItems: "center",
-              backgroundColor: palette.ghBadgeBg,
-              border: `2px solid ${palette.ghBg}`,
+              backgroundColor: palette.github.badgeBg,
+              border: `2px solid ${palette.github.bg}`,
               borderRadius: 999,
               display: "flex",
               flexShrink: 0,
@@ -1309,26 +1237,26 @@ const GitHubTimeline = ({
               width: 32,
             }}
           >
-            <Octicon color={palette.ghMuted} paths={OCTICONS.tag} />
+            <Octicon color={palette.github.muted} paths={OCTICONS.tag} />
           </div>
           <div
             style={{
               alignItems: "center",
-              color: palette.ghMuted,
+              color: palette.github.muted,
               display: "flex",
               flexWrap: "wrap",
               gap: 4,
             }}
           >
             <GitHubAvatar assets={assets} isAgent={false} palette={palette} size={20} />
-            <div style={{ color: palette.ghFg, fontWeight: 600 }}>{assets.userLogin}</div>
+            <div style={{ color: palette.github.fg, fontWeight: 600 }}>{assets.userLogin}</div>
             <div>added the</div>
             <div
               style={{
-                backgroundColor: palette.ghLabelBg,
-                border: `1px solid ${palette.ghLabelBorder}`,
+                backgroundColor: palette.github.labelBg,
+                border: `1px solid ${palette.github.labelBorder}`,
                 borderRadius: 999,
-                color: palette.ghLabelFg,
+                color: palette.github.labelFg,
                 fontSize: 12,
                 fontWeight: 500,
                 lineHeight: "18px",
@@ -1355,8 +1283,8 @@ const GitHubTimeline = ({
           </div>
           <div
             style={{
-              backgroundColor: palette.ghBg,
-              border: `1px solid ${palette.ghBorder}`,
+              backgroundColor: palette.github.bg,
+              border: `1px solid ${palette.github.border}`,
               borderRadius: 6,
               display: "flex",
               flexDirection: "column",
@@ -1371,14 +1299,14 @@ const GitHubTimeline = ({
               viewBox="0 0 8 16"
               width={8}
             >
-              <polygon fill={palette.ghBorder} points="0,8 8,0 8,16" />
-              <polygon fill={palette.ghMutedBg} points="1.5,8 8,1.5 8,14.5" />
+              <polygon fill={palette.github.border} points="0,8 8,0 8,16" />
+              <polygon fill={palette.github.mutedBg} points="1.5,8 8,1.5 8,14.5" />
             </svg>
             <div
               style={{
                 alignItems: "center",
-                backgroundColor: palette.ghMutedBg,
-                borderBottom: `1px solid ${palette.ghBorder}`,
+                backgroundColor: palette.github.mutedBg,
+                borderBottom: `1px solid ${palette.github.border}`,
                 borderTopLeftRadius: 6,
                 borderTopRightRadius: 6,
                 display: "flex",
@@ -1392,7 +1320,7 @@ const GitHubTimeline = ({
                 isAgent={message.from === "agent"}
                 palette={palette}
               />
-              <Octicon color={palette.ghMuted} paths={OCTICONS.kebab} />
+              <Octicon color={palette.github.muted} paths={OCTICONS.kebab} />
             </div>
             <div style={{ display: "flex", padding: 16 }}>
               <GitHubText palette={palette} text={message.text} />
@@ -1421,7 +1349,7 @@ const GitHubReview = ({
   <div style={{ display: "flex", padding: "0 16px" }}>
     <div
       style={{
-        border: `1px solid ${palette.ghBorder}`,
+        border: `1px solid ${palette.github.border}`,
         borderBottomLeftRadius: 6,
         borderBottomRightRadius: 6,
         borderTopWidth: 0,
@@ -1432,10 +1360,10 @@ const GitHubReview = ({
       }}
     >
       <div style={{ display: "flex", fontFamily: GH_MONO, fontSize: 12, lineHeight: "20px" }}>
-        <div style={{ backgroundColor: palette.ghAddNumberBg, flexShrink: 0, width: 50 }} />
+        <div style={{ backgroundColor: palette.github.addNumberBg, flexShrink: 0, width: 50 }} />
         <div
           style={{
-            backgroundColor: palette.ghAddNumberBg,
+            backgroundColor: palette.github.addNumberBg,
             display: "flex",
             flexShrink: 0,
             justifyContent: "flex-end",
@@ -1447,7 +1375,7 @@ const GitHubReview = ({
         </div>
         <div
           style={{
-            backgroundColor: palette.ghAddLineBg,
+            backgroundColor: palette.github.addLineBg,
             display: "flex",
             flexGrow: 1,
             gap: 8,
@@ -1463,7 +1391,7 @@ const GitHubReview = ({
         <div
           key={message.text}
           style={{
-            borderTop: `1px solid ${palette.ghBorder}`,
+            borderTop: `1px solid ${palette.github.border}`,
             display: "flex",
             flexDirection: "column",
             padding: "8px 16px",
@@ -1485,7 +1413,7 @@ const GitHubReview = ({
               palette={palette}
             />
             <Octicon
-              color={palette.ghMuted}
+              color={palette.github.muted}
               paths={OCTICONS.kebab}
               style={{ marginLeft: "auto" }}
             />
@@ -1499,62 +1427,50 @@ const GitHubReview = ({
   </div>
 );
 
-const DIFF_TOKEN = /(\b(?:const|let|var|return|await|if|new|function)\b|\b\d+\b)/;
-
 /** GitHub's syntax colors for the few tokens a one-line sample needs. */
 const DiffCode = ({ code, palette }: { code: string; palette: Palette }) => (
   <div style={{ display: "flex" }}>
-    {code.split(DIFF_TOKEN).map((part, index) => (
+    {parseDiffCode(code).map((token, index) => (
       <div
-        key={`${index}${part}`}
+        key={`${index}${token.text}`}
         style={{
-          color: /^\d+$/.test(part)
-            ? palette.ghNumber
-            : index % 2 === 1
-              ? palette.ghKeyword
-              : undefined,
+          color:
+            token.kind === "number"
+              ? palette.github.number
+              : token.kind === "keyword"
+                ? palette.github.keyword
+                : undefined,
           display: "flex",
         }}
       >
-        {part}
+        {token.text}
       </div>
     ))}
   </div>
 );
 
-/** `code`, [label](url), @mentions, and #123 references. */
-const GITHUB_TOKEN = /(`[^`]+`|\[[^\]]+\]\([^)]*\)|@[\w-]+|#\d+)/;
-
 /** Comment text in GitHub's Markdown styles, with link underlines on. */
 const GitHubText = ({ palette, text }: { palette: Palette; text: string }) => (
   <RichText
-    styleToken={(token) => {
-      if (token.startsWith("`")) {
+    segments={parseMessageText(text, "github")}
+    styleOf={(kind) => {
+      if (kind === "code") {
         return {
-          style: {
-            backgroundColor: palette.ghCodeBg,
-            borderRadius: 6,
-            fontFamily: GH_MONO,
-            fontSize: 12,
-            padding: "0 5px",
-          },
-          text: token.slice(1, -1),
+          backgroundColor: palette.github.codeBg,
+          borderRadius: 6,
+          fontFamily: GH_MONO,
+          fontSize: 12,
+          padding: "0 5px",
         };
       }
-      if (token.startsWith("@")) {
-        return {
-          style: { color: palette.ghFg, fontWeight: 600, textDecoration: "underline" },
-          text: token,
-        };
+      if (kind === "mention") {
+        return { color: palette.github.fg, fontWeight: 600, textDecoration: "underline" };
       }
-      return {
-        split: true,
-        style: { color: palette.ghLink, textDecoration: "underline" },
-        text: token.startsWith("[") ? token.slice(1, token.indexOf("]")) : token,
-      };
+      if (kind === "link" || kind === "reference") {
+        return { color: palette.github.link, textDecoration: "underline" };
+      }
+      return undefined;
     }}
-    text={text}
-    tokens={GITHUB_TOKEN}
   />
 );
 
@@ -1572,12 +1488,10 @@ const IMessage = ({
   <Frame
     inner={{ backgroundColor: palette.bg100, color: palette.fg, fontSize: 10.5, lineHeight: 1.3 }}
     outer={{
-      bottom: -40,
+      ...PHONE_FRAME,
       left: "50%",
-      marginLeft: -128,
+      marginLeft: -PHONE_FRAME.width / 2,
       position: "absolute",
-      top: 12,
-      width: 256,
     }}
     palette={palette}
     radius={30}
@@ -1618,7 +1532,7 @@ const IMessage = ({
       </div>
       <AgentAvatar
         assets={assets}
-        fallbackBackground="#959aa5"
+        fallbackBackground={`linear-gradient(${palette.imessage.avatarTop}, ${palette.imessage.avatarBottom})`}
         fallbackColor="white"
         logoHeight={8}
         radius={999}
@@ -1637,7 +1551,7 @@ const IMessage = ({
         }}
       >
         {agent}
-        <div style={{ color: "#8e8e93", fontWeight: 400, marginLeft: 2 }}>›</div>
+        <div style={{ color: palette.imessage.muted, fontWeight: 400, marginLeft: 2 }}>›</div>
       </div>
     </div>
     <div style={{ display: "flex", flexDirection: "column", padding: "8px 14px 0" }}>
@@ -1650,7 +1564,7 @@ const IMessage = ({
             key={message.text}
             style={{
               alignSelf: sent ? "flex-end" : "flex-start",
-              backgroundColor: sent ? "#0a84ff" : palette.imReceived,
+              backgroundColor: sent ? palette.imessage.sent : palette.imessage.received,
               borderRadius: 14,
               borderBottomLeftRadius: tail && !sent ? 4 : 14,
               borderBottomRightRadius: tail && sent ? 4 : 14,
@@ -1706,7 +1620,7 @@ const Placeholder = ({
         <EveLogo color={palette.fg} height={14} />
       </div>
       <div style={{ color: palette.gray700, fontSize: 14 }}>+</div>
-      {integrations.slice(0, 4).map((integration) => (
+      {integrations.slice(0, MAX_PLACEHOLDER_ICONS).map((integration) => (
         <div key={integration} style={{ ...tile, filter: "grayscale(1)" }}>
           <IntegrationIcon color={palette.fg} grayscale integration={integration} size={20} />
         </div>

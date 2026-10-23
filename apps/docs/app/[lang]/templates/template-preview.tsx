@@ -16,6 +16,29 @@ import type {
   TemplatePreviewMessage,
   TemplatePreviewThread,
 } from "@/lib/templates/manifest";
+import {
+  APP_WINDOW_RAISE,
+  dotMatrixVariant,
+  GITHUB_COLORS,
+  GITHUB_ZOOM,
+  githubAvatarUrl,
+  IMESSAGE_COLORS,
+  isNumericCell,
+  MAX_PLACEHOLDER_ICONS,
+  OCTICONS,
+  PHONE_FRAME,
+  PREVIEW_FADE_FROM,
+  type PreviewUser,
+  paletteVars,
+  parseDiffCode,
+  parseMessageText,
+  pickPreviewUser,
+  SLACK_CHART,
+  SLACK_COLORS,
+  SLACK_TIMESTAMP,
+  SLACK_ZOOM,
+  WINDOW_INSET,
+} from "@/lib/templates/preview-kit";
 import { grayscaleIntegrationIcons, integrationIcons } from "./integration-icons";
 
 /** Slack's UI typeface. Loaded only for the Slack preview. */
@@ -48,7 +71,12 @@ export const TemplatePreview = ({ integrations, preview, title }: TemplatePrevie
     {preview ? (
       // Fade the conversation out toward the title so it reads as a hint, not competing text.
       // The dots fade with it, so they never show through the translucent part of the window.
-      <div className="absolute inset-0 [mask-image:linear-gradient(to_bottom,#000_70%,transparent)]">
+      <div
+        className="absolute inset-0"
+        style={{
+          maskImage: `linear-gradient(to bottom, #000 ${PREVIEW_FADE_FROM * 100}%, transparent)`,
+        }}
+      >
         <DotMatrix seed={title} />
         <Conversation agent={preview.agent ?? title} preview={preview} />
       </div>
@@ -61,23 +89,16 @@ export const TemplatePreview = ({ integrations, preview, title }: TemplatePrevie
   </div>
 );
 
-/** Matches SEEDS in scripts/generate-dot-matrix.mjs. */
-const DOT_MATRIX_VARIANTS = 4;
-
 /**
  * Dot-matrix backdrop after the vercel.com/agent OG image. The SVG masks
  * gray-1000, so light and dark mode come from tokens.
  */
-const DotMatrix = ({ seed }: { seed: string }) => {
-  let hash = 0;
-  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return (
-    <div
-      className="absolute inset-0 bg-gray-1000 [mask-position:0_0] [mask-repeat:no-repeat]"
-      style={{ maskImage: `url(/templates/dot-matrix/${hash % DOT_MATRIX_VARIANTS}.svg)` }}
-    />
-  );
-};
+const DotMatrix = ({ seed }: { seed: string }) => (
+  <div
+    className="absolute inset-0 bg-gray-1000 [mask-position:0_0] [mask-repeat:no-repeat]"
+    style={{ maskImage: `url(/templates/dot-matrix/${dotMatrixVariant(seed)}.svg)` }}
+  />
+);
 
 const Conversation = ({ agent, preview }: { agent: string; preview: TemplatePreviewData }) => {
   if (preview.surface === "github") {
@@ -114,7 +135,10 @@ const Window = ({
   footer?: ReactNode;
   header: ReactNode;
 }) => (
-  <div className="absolute top-5 -right-3 -bottom-5 left-6 overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 text-[11.5px] leading-[1.35] text-gray-1000 shadow-sm">
+  <div
+    className="absolute overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-100 text-[11.5px] leading-[1.35] text-gray-1000 shadow-sm"
+    style={WINDOW_INSET}
+  >
     <div className="flex h-7 items-center gap-1.5 border-b border-gray-alpha-400 px-3 text-gray-800">
       {header}
     </div>
@@ -205,39 +229,6 @@ const WebToolCall = ({ name }: { name: string }) => {
   );
 };
 
-interface PreviewUser {
-  name: string;
-  /** GitHub username, shown on the GitHub surface. */
-  login: string;
-  /** GitHub user ID, for a rename-proof avatar URL. */
-  githubId: number;
-}
-
-/** eve contributors who play the person talking to the agent. */
-const PREVIEW_USERS: PreviewUser[] = [
-  { name: "barba", login: "AndrewBarba", githubId: 1316152 },
-  { name: "Casey Gowrie", login: "ctgowrie", githubId: 6045519 },
-  { name: "pankow", login: "benpankow", githubId: 10215173 },
-  { name: "owen", login: "OwenKephart", githubId: 22457492 },
-  { name: "prha", login: "prha", githubId: 1040172 },
-  { name: "chad", login: "chadhietala", githubId: 183799 },
-  { name: "rui", login: "ruiconti", githubId: 1834568 },
-  { name: "colton", login: "cmpadden", githubId: 5807118 },
-  { name: "shar", login: "darafsheh", githubId: 2982650 },
-];
-
-/** Stable per template, so server and client render the same person. */
-const pickPreviewUser = (seed: string): PreviewUser => {
-  let hash = 0;
-  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return PREVIEW_USERS[hash % PREVIEW_USERS.length]!;
-};
-
-const githubAvatar = (user: PreviewUser) =>
-  `https://avatars.githubusercontent.com/u/${user.githubId}?s=72&v=4`;
-
-const SLACK_TIMESTAMP = "10:42 AM";
-
 /** The template's own icon when it has one, otherwise the eve logo on `fallbackClassName`. */
 const AgentIcon = ({
   className,
@@ -259,6 +250,9 @@ const AgentIcon = ({
     </span>
   );
 
+/** Slack and GitHub windows start higher, to fit their channel or thread header. */
+const APP_WINDOW_INSET = { ...WINDOW_INSET, top: WINDOW_INSET.top - APP_WINDOW_RAISE };
+
 /**
  * Laid out at Slack's real desktop metrics (Lato 15/22, 36px avatars, 8px 20px
  * message gutters, 49px channel header) and Slack's own light and dark
@@ -278,11 +272,15 @@ const Slack = ({
   messages: TemplatePreviewMessage[];
   user: PreviewUser;
 }) => (
-  <div className="absolute top-3 -right-3 -bottom-5 left-6 overflow-hidden rounded-lg border border-gray-alpha-400 bg-white shadow-sm dark:bg-[#1a1d21]">
+  <div
+    className={`absolute overflow-hidden rounded-lg border border-gray-alpha-400 bg-(--slack-bg) shadow-sm ${FOLLOW_THEME}`}
+    style={{ ...APP_WINDOW_INSET, ...paletteVars("slack", SLACK_COLORS) }}
+  >
     <div
-      className={`${lato.className} text-[15px] leading-[1.46668] text-[#1d1c1d] antialiased [zoom:0.72] dark:text-[#d1d2d3]`}
+      className={`${lato.className} text-[15px] leading-[1.46668] text-(--slack-fg) antialiased`}
+      style={{ zoom: SLACK_ZOOM }}
     >
-      <div className="flex h-[49px] items-center border-b border-[rgba(29,28,29,0.13)] px-5 font-black text-[18px] leading-none dark:border-[#35373b] dark:text-[#f8f8f8]">
+      <div className="flex h-[49px] items-center border-b border-(--slack-border) px-5 font-black text-(--slack-strong) text-[18px] leading-none">
         <span className="mr-1 font-bold">#</span>
         {channel ?? "general"}
       </div>
@@ -313,23 +311,21 @@ const Slack = ({
                 // oxlint-disable-next-line nextjs/no-img-element -- tiny decorative avatar
                 <img
                   alt=""
-                  className="size-9 shrink-0 rounded-lg bg-[rgba(29,28,29,0.13)] object-cover"
-                  src={githubAvatar(user)}
+                  className="size-9 shrink-0 rounded-lg bg-(--slack-hairline) object-cover"
+                  src={githubAvatarUrl(user)}
                 />
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-1">
-                  <span className="font-black dark:text-[#f8f8f8]">
+                  <span className="font-black text-(--slack-strong)">
                     {isAgent ? agent : user.name}
                   </span>
                   {isAgent ? (
-                    <span className="ml-1 self-center rounded-[2px] bg-[rgba(29,28,29,0.13)] px-[3px] py-px font-bold text-[10px] text-[rgba(29,28,29,0.7)] leading-[14px] dark:bg-[rgba(232,232,232,0.13)] dark:text-[#ababad]">
+                    <span className="ml-1 self-center rounded-[2px] bg-(--slack-hairline) px-[3px] py-px font-bold text-(--slack-badgeFg) text-[10px] leading-[14px]">
                       APP
                     </span>
                   ) : null}
-                  <span className="ml-1 text-[#616061] text-[12px] dark:text-[#ababad]">
-                    {SLACK_TIMESTAMP}
-                  </span>
+                  <span className="ml-1 text-(--slack-muted) text-[12px]">{SLACK_TIMESTAMP}</span>
                 </div>
                 <p className="break-words">
                   <SlackText text={message.text} />
@@ -344,9 +340,15 @@ const Slack = ({
   </div>
 );
 
-const SLACK_BORDER = "border-[rgba(29,28,29,0.13)] dark:border-[#35373b]";
-const SLACK_MUTED = "text-[#616061] dark:text-[#ababad]";
-const SLACK_LINK = "text-[#1264a3] dark:text-[#1d9bd1]";
+/**
+ * Lets `light-dark()` in palette variables follow the site theme rather than
+ * the OS, since the docs theme is a class on <html>.
+ */
+const FOLLOW_THEME = "scheme-light dark:scheme-dark";
+
+const SLACK_BORDER = "border-(--slack-border)";
+const SLACK_MUTED = "text-(--slack-muted)";
+const SLACK_LINK = "text-(--slack-link)";
 
 const SlackAttachment = ({ attachment }: { attachment: TemplatePreviewAttachment }) => {
   switch (attachment.type) {
@@ -369,8 +371,6 @@ const SlackAttachment = ({ attachment }: { attachment: TemplatePreviewAttachment
   }
 };
 
-const NUMERIC = /^[-+$€£]?[\d.,]+[%KMB]?$/;
-
 /** Slack's Markdown table: hairline grid, bold tinted header, numbers right-aligned. */
 const SlackTable = ({ rows }: { rows: string[][] }) => {
   const [header = [], ...body] = rows;
@@ -378,7 +378,7 @@ const SlackTable = ({ rows }: { rows: string[][] }) => {
   return (
     <table className="mt-1 border-collapse tabular-nums">
       <thead>
-        <tr className="bg-[rgba(29,28,29,0.04)] dark:bg-[rgba(232,232,232,0.04)]">
+        <tr className="bg-(--slack-tint)">
           {header.map((label) => (
             <th className={`${cell} text-left font-bold`} key={label}>
               {label}
@@ -391,7 +391,7 @@ const SlackTable = ({ rows }: { rows: string[][] }) => {
           <tr key={row.join()}>
             {row.map((value, index) => (
               <td
-                className={`${cell} ${NUMERIC.test(value) ? "text-right" : ""}`}
+                className={`${cell} ${isNumericCell(value) ? "text-right" : ""}`}
                 key={`${index}${value}`}
               >
                 {value}
@@ -404,8 +404,7 @@ const SlackTable = ({ rows }: { rows: string[][] }) => {
   );
 };
 
-const CHART_WIDTH = 320;
-const CHART_HEIGHT = 36;
+const { height: CHART_HEIGHT, width: CHART_WIDTH } = SLACK_CHART;
 
 /** A native Slack line chart: bordered card, bold title, one series with a soft fill. */
 const SlackChart = ({ title, values }: { title: string; values: number[] }) => {
@@ -428,7 +427,7 @@ const SlackChart = ({ title, values }: { title: string; values: number[] }) => {
       >
         {[0.25, 0.75].map((ratio) => (
           <line
-            className="stroke-[rgba(29,28,29,0.13)] dark:stroke-[#35373b]"
+            className="stroke-(--slack-border)"
             key={ratio}
             strokeDasharray="3 3"
             vectorEffect="non-scaling-stroke"
@@ -471,7 +470,7 @@ const SlackTasks = ({
       {tasks.map((task) => (
         <div className="flex gap-2" key={task.title}>
           <CircleCheckIcon
-            className="mt-[3px] size-4 shrink-0 fill-[#007a5a] text-white dark:fill-[#2bac76] dark:text-[#1a1d21]"
+            className="mt-[3px] size-4 shrink-0 fill-(--slack-green) text-(--slack-bg)"
             strokeWidth={2.5}
           />
           <p className="min-w-0">
@@ -499,7 +498,7 @@ const SlackUnfurl = ({
   const Icon = integrationIcons[site];
   return (
     <div className="mt-2 flex gap-3">
-      <span className="w-1 shrink-0 rounded-full bg-[#dddddd] dark:bg-[#545454]" />
+      <span className="w-1 shrink-0 rounded-full bg-(--slack-unfurl)" />
       <div className="min-w-0">
         <p className={`flex items-center gap-1.5 text-[12px] ${SLACK_MUTED}`}>
           <Icon className="size-3.5" />
@@ -515,80 +514,56 @@ const SlackUnfurl = ({
 /** Approve and Cancel buttons under the message, a simplified take on eve's approval card. */
 const SlackApproval = ({ approve = "Approve" }: { approve?: string }) => (
   <div className="mt-1.5 flex gap-2 font-bold text-[13px]">
-    <span className="rounded-[4px] border border-transparent bg-[#007a5a] px-2.5 py-0.5 text-white dark:bg-[#148567]">
+    <span className="rounded-[4px] border border-transparent bg-(--slack-button) px-2.5 py-0.5 text-white">
       {approve}
     </span>
     <span className={`rounded-[4px] border px-2.5 py-0.5 ${SLACK_BORDER}`}>Cancel</span>
   </div>
 );
 
-/** `code`, [label](url), and @mentions. The URL is not rendered; the card itself is the link. */
-const SLACK_TOKEN = /(`[^`]+`|\[[^\]]+\]\([^)]*\)|@[\w-]+)/;
-
 /** Message text with Slack's inline code, link, and user mention styles. */
 const SlackText = ({ text }: { text: string }) =>
-  text.split(SLACK_TOKEN).map((part, index) => {
-    const key = `${index}${part}`;
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
-      return (
-        <code
-          className="rounded-[3px] border border-[rgba(29,28,29,0.13)] bg-[rgba(29,28,29,0.04)] px-[3px] pt-[2px] pb-px font-[Monaco,Menlo,Consolas,var(--font-mono),monospace] text-[#e01e5a] text-[12px] dark:border-[rgba(232,232,232,0.13)] dark:bg-[rgba(232,232,232,0.04)] dark:text-[#e8912d]"
-          key={key}
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
+  parseMessageText(text, "slack").map((segment, index) => {
+    const key = `${index}${segment.text}`;
+    switch (segment.kind) {
+      case "code":
+        return (
+          <code
+            className="rounded-[3px] border border-(--slack-hairline) bg-(--slack-codeBg) px-[3px] pt-[2px] pb-px font-[Monaco,Menlo,Consolas,var(--font-mono),monospace] text-(--slack-codeFg) text-[12px]"
+            key={key}
+          >
+            {segment.text}
+          </code>
+        );
+      case "link":
+        return (
+          <span className="text-(--slack-link)" key={key}>
+            {segment.text}
+          </span>
+        );
+      case "mention":
+        return (
+          <span
+            className="rounded-[3px] bg-(--slack-mentionBg) px-0.5 text-(--slack-link)"
+            key={key}
+          >
+            {segment.text}
+          </span>
+        );
+      default:
+        return segment.text;
     }
-    if (part.startsWith("[")) {
-      return (
-        <span className="text-[#1264a3] dark:text-[#1d9bd1]" key={key}>
-          {part.slice(1, part.indexOf("]"))}
-        </span>
-      );
-    }
-    if (part.startsWith("@")) {
-      return (
-        <span
-          className="rounded-[3px] bg-[rgba(29,155,209,0.1)] px-0.5 text-[#1264a3] dark:bg-[rgba(29,155,209,0.18)] dark:text-[#1d9bd1]"
-          key={key}
-        >
-          {part}
-        </span>
-      );
-    }
-    return part;
   });
 
-// Primer's light and dark tokens, as github.com computes them.
-const GH_FG = "text-[#1f2328] dark:text-[#f0f6fc]";
-const GH_MUTED = "text-[#59636e] dark:text-[#9198a1]";
-const GH_BORDER = "border-[#d1d9e0] dark:border-[#3d444d]";
-const GH_MUTED_BG = "bg-[#f6f8fa] dark:bg-[#151b23]";
-const GH_LINK = "text-[#0969da] dark:text-[#4493f8]";
-const GH_AVATAR = "shadow-[0_0_0_1px_#1f232826] dark:shadow-[0_0_0_1px_#ffffff26]";
+const GH_FG = "text-(--gh-fg)";
+const GH_MUTED = "text-(--gh-muted)";
+const GH_BORDER = "border-(--gh-border)";
+const GH_MUTED_BG = "bg-(--gh-mutedBg)";
+const GH_LINK = "text-(--gh-link)";
+const GH_AVATAR = "shadow-[0_0_0_1px_var(--gh-avatarRing)]";
 const GH_MONO = {
   fontFamily:
     'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-};
-
-/** Octicons (MIT, github.com/primer/octicons), 16px. */
-const OCTICONS = {
-  issueOpened: [
-    "M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
-    "M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z",
-  ],
-  pullRequest: [
-    "M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z",
-  ],
-  pullRequestDraft: [
-    "M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 14a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM14 7.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Zm0-4.25a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z",
-  ],
-  tag: [
-    "M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.752 1.752 0 0 1 1 7.775Zm1.5 0c0 .066.026.13.073.177l6.25 6.25a.25.25 0 0 0 .354 0l5.025-5.025a.25.25 0 0 0 0-.354l-6.25-6.25a.25.25 0 0 0-.177-.073H2.75a.25.25 0 0 0-.25.25ZM6 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z",
-  ],
-  kebab: [
-    "M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
-  ],
 };
 
 const Octicon = ({ className, paths }: { className: string; paths: string[] }) => (
@@ -618,9 +593,13 @@ const GitHub = ({
   preview: TemplatePreviewData;
   user: PreviewUser;
 }) => (
-  <div className="absolute top-3 -right-3 -bottom-5 left-6 overflow-hidden rounded-lg border border-gray-alpha-400 bg-white shadow-sm dark:bg-[#0d1117]">
+  <div
+    className={`absolute overflow-hidden rounded-lg border border-gray-alpha-400 bg-(--gh-bg) shadow-sm ${FOLLOW_THEME}`}
+    style={{ ...APP_WINDOW_INSET, ...paletteVars("gh", GITHUB_COLORS) }}
+  >
     <div
-      className={`${monaSans.className} text-[14px] leading-[21px] antialiased [zoom:0.7] ${GH_FG}`}
+      className={`${monaSans.className} text-[14px] leading-[21px] antialiased ${GH_FG}`}
+      style={{ zoom: GITHUB_ZOOM }}
     >
       <GitHubHeader thread={preview.thread ?? { kind: "issue", number: 1, title: agent }} />
       {preview.review ? (
@@ -650,7 +629,7 @@ const GitHubHeader = ({ thread }: { thread: TemplatePreviewThread }) => {
   return (
     <div className={`flex items-center gap-2 border-b px-4 py-2 ${GH_BORDER}`}>
       <span
-        className={`flex h-8 shrink-0 items-center rounded-full px-3 font-semibold leading-4 text-white ${draft ? "bg-[#59636e] dark:bg-[#656c76]" : "bg-[#1f883d] dark:bg-[#238636]"}`}
+        className={`flex h-8 shrink-0 items-center rounded-full px-3 font-semibold leading-4 text-white ${draft ? "bg-(--gh-draft)" : "bg-(--gh-open)"}`}
       >
         <Octicon className="mr-1 size-4" paths={stateIcon} />
         {draft ? "Draft" : "Open"}
@@ -668,7 +647,7 @@ const GitHubUserAvatar = ({ className, user }: { className: string; user: Previe
   <img
     alt=""
     className={`${className} shrink-0 rounded-full object-cover ${GH_AVATAR}`}
-    src={githubAvatar(user)}
+    src={githubAvatarUrl(user)}
   />
 );
 
@@ -730,22 +709,20 @@ const GitHubTimeline = ({
   user: PreviewUser;
 }) => (
   <div className="relative px-4">
-    <span
-      className={`absolute inset-y-0 w-0.5 bg-[#d1d9e0b3] dark:bg-[#3d444db3] ${TIMELINE_LINE}`}
-    />
+    <span className={`absolute inset-y-0 w-0.5 bg-(--gh-timeline) ${TIMELINE_LINE}`} />
     {messages.map((message) =>
       message.event === "labeled" ? (
         <div className={`relative flex py-4 ${TIMELINE_COLUMN}`} key={message.text}>
           {/* The badge centers on the line: 16px into the column, pulled back 15px. */}
           <span
-            className={`ml-px mr-2 flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-white bg-[#f6f8fa] dark:border-[#0d1117] dark:bg-[#212830] ${GH_MUTED}`}
+            className={`ml-px mr-2 flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-(--gh-bg) bg-(--gh-badgeBg) ${GH_MUTED}`}
           >
             <Octicon className="size-4" paths={OCTICONS.tag} />
           </span>
           <p className={`mt-[5px] min-w-0 ${GH_MUTED}`}>
             <GitHubUserAvatar className="mr-1 inline-block size-5 align-middle" user={user} />
             <span className={`font-semibold ${GH_FG}`}>{user.login}</span> added the{" "}
-            <span className="inline-block rounded-full border border-transparent bg-[#c5def5] px-[7px] font-medium text-[12px] leading-[18px] text-black dark:border-[#c5def54d] dark:bg-[#c5def52e] dark:text-[#c5def5]">
+            <span className="inline-block rounded-full border border-(--gh-labelBorder) bg-(--gh-labelBg) px-[7px] font-medium text-(--gh-labelFg) text-[12px] leading-[18px]">
               {message.text}
             </span>{" "}
             label now
@@ -760,10 +737,10 @@ const GitHubTimeline = ({
               <GitHubUserAvatar className="size-10" user={user} />
             )}
           </span>
-          <div className={`relative rounded-md border bg-white dark:bg-[#0d1117] ${GH_BORDER}`}>
+          <div className={`relative rounded-md border bg-(--gh-bg) ${GH_BORDER}`}>
             {/* GitHub's caret toward the avatar: a border-colored triangle under a header-colored one. */}
-            <span className="absolute top-[11px] -left-2 h-4 w-2 bg-[#d1d9e0] [clip-path:polygon(0_50%,100%_0,100%_100%)] dark:bg-[#3d444d]" />
-            <span className="absolute top-[11px] -left-[7px] h-4 w-2 bg-[#f6f8fa] [clip-path:polygon(0_50%,100%_0,100%_100%)] dark:bg-[#151b23]" />
+            <span className="absolute top-[11px] -left-2 h-4 w-2 bg-(--gh-border) [clip-path:polygon(0_50%,100%_0,100%_100%)]" />
+            <span className="absolute top-[11px] -left-[7px] h-4 w-2 bg-(--gh-mutedBg) [clip-path:polygon(0_50%,100%_0,100%_100%)]" />
             <div
               className={`flex items-center gap-1 rounded-t-md border-b px-4 py-2 ${GH_MUTED_BG} ${GH_BORDER} ${GH_MUTED}`}
             >
@@ -801,11 +778,11 @@ const GitHubReview = ({
   <div className="px-4">
     <div className={`overflow-hidden rounded-b-md border border-t-0 ${GH_BORDER}`}>
       <div className="flex text-[12px] leading-5" style={GH_MONO}>
-        <span className="w-[50px] shrink-0 bg-[#aceebb] dark:bg-[#3fb9504d]" />
-        <span className="w-[50px] shrink-0 bg-[#aceebb] px-2.5 text-right dark:bg-[#3fb9504d]">
+        <span className="w-[50px] shrink-0 bg-(--gh-addNumberBg)" />
+        <span className="w-[50px] shrink-0 bg-(--gh-addNumberBg) px-2.5 text-right">
           {review.line}
         </span>
-        <span className="relative min-w-0 flex-1 truncate bg-[#dafbe1] pr-2.5 pl-[22px] dark:bg-[#2ea04326]">
+        <span className="relative min-w-0 flex-1 truncate bg-(--gh-addLineBg) pr-2.5 pl-[22px]">
           <span className="absolute left-2">+</span>
           <DiffCode code={review.code} />
         </span>
@@ -830,62 +807,52 @@ const GitHubReview = ({
   </div>
 );
 
-const DIFF_TOKEN = /(\b(?:const|let|var|return|await|if|new|function)\b|\b\d+\b)/;
-
 /** GitHub's syntax colors for the few tokens a one-line sample needs. */
 const DiffCode = ({ code }: { code: string }) =>
-  code.split(DIFF_TOKEN).map((part, index) => {
-    const key = `${index}${part}`;
-    if (/^\d+$/.test(part)) {
-      return (
-        <span className="text-[#0550ae] dark:text-[#79c0ff]" key={key}>
-          {part}
-        </span>
-      );
-    }
-    if (index % 2 === 1) {
-      return (
-        <span className="text-[#cf222e] dark:text-[#ff7b72]" key={key}>
-          {part}
-        </span>
-      );
-    }
-    return part;
-  });
-
-/** `code`, [label](url), @mentions, and #123 references. */
-const GITHUB_TOKEN = /(`[^`]+`|\[[^\]]+\]\([^)]*\)|@[\w-]+|#\d+)/;
+  parseDiffCode(code).map((token, index) =>
+    token.kind === "text" ? (
+      token.text
+    ) : (
+      <span
+        className={token.kind === "number" ? "text-(--gh-number)" : "text-(--gh-keyword)"}
+        key={`${index}${token.text}`}
+      >
+        {token.text}
+      </span>
+    ),
+  );
 
 /** Comment text in GitHub's Markdown styles, with link underlines on. */
 const GitHubText = ({ text }: { text: string }) =>
-  text.split(GITHUB_TOKEN).map((part, index) => {
-    const key = `${index}${part}`;
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
-      return (
-        <code
-          className="rounded-md bg-[#818b981f] px-[0.4em] py-[0.2em] text-[85%] dark:bg-[#656c7633]"
-          key={key}
-          style={GH_MONO}
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
+  parseMessageText(text, "github").map((segment, index) => {
+    const key = `${index}${segment.text}`;
+    switch (segment.kind) {
+      case "code":
+        return (
+          <code
+            className="rounded-md bg-(--gh-codeBg) px-[0.4em] py-[0.2em] text-[85%]"
+            key={key}
+            style={GH_MONO}
+          >
+            {segment.text}
+          </code>
+        );
+      case "mention":
+        return (
+          <span className={`font-semibold underline underline-offset-[3.2px] ${GH_FG}`} key={key}>
+            {segment.text}
+          </span>
+        );
+      case "link":
+      case "reference":
+        return (
+          <span className={`underline underline-offset-[3.2px] ${GH_LINK}`} key={key}>
+            {segment.text}
+          </span>
+        );
+      default:
+        return segment.text;
     }
-    if (part.startsWith("@")) {
-      return (
-        <span className={`font-semibold underline underline-offset-[3.2px] ${GH_FG}`} key={key}>
-          {part}
-        </span>
-      );
-    }
-    if (part.startsWith("[") || part.startsWith("#")) {
-      return (
-        <span className={`underline underline-offset-[3.2px] ${GH_LINK}`} key={key}>
-          {part.startsWith("[") ? part.slice(1, part.indexOf("]")) : part}
-        </span>
-      );
-    }
-    return part;
   });
 
 /** Liquid glass: translucent fill, blurred backdrop, a bright top edge, and a soft drop shadow. */
@@ -907,7 +874,10 @@ const IMessage = ({
   icon?: string;
   messages: TemplatePreviewMessage[];
 }) => (
-  <div className="absolute top-3 -bottom-10 left-1/2 w-64 -translate-x-1/2 overflow-hidden rounded-[30px] border border-gray-alpha-400 bg-background-100 text-[10.5px] leading-[1.3] text-gray-1000 shadow-sm">
+  <div
+    className={`absolute left-1/2 -translate-x-1/2 overflow-hidden rounded-[30px] border border-gray-alpha-400 bg-background-100 text-[10.5px] leading-[1.3] text-gray-1000 shadow-sm ${FOLLOW_THEME}`}
+    style={{ ...PHONE_FRAME, ...paletteVars("im", IMESSAGE_COLORS) }}
+  >
     <div className="flex flex-col items-center pt-2.5">
       <span
         className={`absolute top-3.5 left-3 flex size-6 items-center justify-center rounded-full ${GLASS}`}
@@ -924,13 +894,13 @@ const IMessage = ({
       </span>
       <AgentIcon
         className="relative z-10 size-8 rounded-full shadow-[0_1px_4px_rgba(0,0,0,0.18)] ring-[0.5px] ring-black/5 dark:ring-white/15"
-        fallbackClassName="bg-linear-to-b from-[#a6abb8] to-[#858994] text-white"
+        fallbackClassName="bg-linear-to-b from-(--im-avatarTop) to-(--im-avatarBottom) text-white"
         icon={icon}
         logoHeight={8}
       />
       <span className={`-mt-1 rounded-full px-2 py-0.5 font-semibold text-[9.5px] ${GLASS}`}>
         {agent}
-        <span className="ml-0.5 font-normal text-[#8e8e93]">›</span>
+        <span className="ml-0.5 font-normal text-(--im-muted)">›</span>
       </span>
     </div>
     <div className="flex flex-col px-3.5 pt-2">
@@ -942,9 +912,7 @@ const IMessage = ({
           <p
             className={[
               "relative max-w-[78%] rounded-[14px] px-2.5 py-[5px]",
-              sent
-                ? "self-end bg-[#0a84ff] text-white"
-                : "self-start bg-[#e9e9eb] dark:bg-[#262628]",
+              sent ? "self-end bg-(--im-sent) text-white" : "self-start bg-(--im-received)",
               tail ? (sent ? SENT_TAIL : RECEIVED_TAIL) : "",
               tail && next ? "mb-1.5" : "mb-0.5",
             ].join(" ")}
@@ -957,8 +925,6 @@ const IMessage = ({
     </div>
   </div>
 );
-
-const MAX_PLACEHOLDER_ICONS = 4;
 
 const Placeholder = ({ integrations }: { integrations: TemplateIntegration[] }) => (
   <>

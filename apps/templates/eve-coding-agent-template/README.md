@@ -37,7 +37,7 @@ vercel env pull
 pnpm dev
 ```
 
-`vercel env pull` gives the sandbox and AI Gateway their credentials. The dev UI opens a session with the agent. Without `GITHUB_ORG` the agent has no `git__gh` tool and can't open pull requests. The GitHub channel still answers mentions.
+`vercel env pull` gives the sandbox and AI Gateway their credentials. The dev UI opens a session with the agent. Without `GITHUB_ORGS` the agent has no `git__gh` tool and can't open pull requests. The GitHub channel still answers mentions.
 
 ## Connect Slack and GitHub
 
@@ -57,11 +57,11 @@ These are the commands `eve add channel/github` runs. `create` adds a default we
 
 Then set these in `.env.local` and your Vercel project:
 
-- `GITHUB_ORG`: the organization or user whose repositories the agent may access
+- `GITHUB_ORGS`: comma-separated organizations or users whose repositories the agent may access, such as `acme,acme-labs`
 - `GITHUB_CONNECTOR`: the connector UID, if it is not `github/coding-agent`
 - `GITHUB_BOT_NAME`: your GitHub App's slug, shown on the connector in the Connect dashboard
 
-Deploy with `eve deploy`, then install the GitHub App on your repositories from the Connect dashboard. Mention the app in Slack, or comment `@<bot name> <request>` on an issue or pull request. Delete `agent/channels/github.ts` if you only want Slack; the agent still needs the GitHub connector and `GITHUB_ORG` to open pull requests.
+Deploy with `eve deploy`, then install the GitHub App on your repositories from the Connect dashboard. Mention the app in Slack, or comment `@<bot name> <request>` on an issue or pull request. Delete `agent/channels/github.ts` if you only want Slack; the agent still needs the GitHub connector and `GITHUB_ORGS` to open pull requests.
 
 ## Customize
 

@@ -42,7 +42,7 @@ test("without github config, GitHub goes through the shell's gh and git", async 
 });
 
 test("with github config, GitHub goes through the brokered gh tool and signed commits", async () => {
-  extension({ github: { connector: "github/acme-bot", org: "acme", broker: async () => {} } });
+  extension({ github: { connector: "github/acme-bot", broker: async () => {} } });
   const { content, skill, tool } = await resolve();
   assert.ok(tool && "execute" in tool);
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);

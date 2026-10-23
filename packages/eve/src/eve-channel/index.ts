@@ -1,7 +1,8 @@
 import { InvalidToolStubTargetError } from "#tool-stubs/validate-targets.js";
 import { readStubFailure, readMatchedStubRules } from "#execution/tool-stubs/steps.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import { proxyStreamHeaders } from "#eve-channel/stream-headers.js";
+import { proxyStreamResponse } from "#eve-channel/stream-headers.js";
+import { descendantStreamResponse } from "#eve-channel/descendant-stream.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceSeed } from "#channel/types.js";
@@ -32,6 +33,7 @@ import {
   EVE_SESSION_ROUTE_PATTERN,
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
+  EVE_DESCENDANT_STREAM_ROUTE_PATTERN,
   EVE_SESSION_STUBS_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
@@ -641,6 +643,19 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
         return await createSessionStreamResponse(req, attachSession(sessionId));
       }),
 
+      GET(EVE_DESCENDANT_STREAM_ROUTE_PATTERN, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+        const sessionId = requireSessionId(args.params);
+        if (sessionId instanceof Response) return sessionId;
+        return descendantStreamResponse({
+          request: req,
+          root: args.attachSession(sessionId),
+          attachSession: args.attachSession,
+          resolveHeaders: readRemoteAgentStreamHeadersResolver(args),
+        });
+      }),
+
       GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
@@ -729,12 +744,7 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
           redirect: "manual",
           signal: req.signal,
         });
-        const responseHeaders = proxyStreamHeaders(upstream.headers);
-        return new Response(upstream.body, {
-          headers: responseHeaders,
-          status: upstream.status,
-          statusText: upstream.statusText,
-        });
+        return proxyStreamResponse(upstream);
       }),
     ],
     events: input.events,

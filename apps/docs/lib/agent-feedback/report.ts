@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-/** The collector rejects feedback longer than this. */
-export const MAX_AGENT_FEEDBACK_LENGTH = 10_000;
 const MAX_ENCODED_REPORT_LENGTH = 12_000;
 
 export const triggerReasonSchema = z.enum([
@@ -15,22 +13,34 @@ export const deployTargetSchema = z.enum(["local", "vercel", "self-hosted", "unk
 export const frequencySchema = z.enum(["once", "reproduced"]);
 export const outcomeSchema = z.enum(["blocked", "worked-around", "resolved"]);
 
-const shortName = z.string().trim().min(1).max(64);
+/** Per-field character limits, shared by the schema and the review form's controls. */
+export const reportLimits = {
+  title: 100,
+  step: 240,
+  observed: 160,
+  expected: 200,
+  comparison: 180,
+  feature: 32,
+  shortName: 64,
+} as const;
+
+const text = (max: number) => z.string().trim().min(1).max(max);
+const shortName = text(reportLimits.shortName);
 
 export const agentFeedbackReportSchema = z.object({
   schemaVersion: z.literal(1),
-  title: z.string().trim().min(1).max(100),
+  title: text(reportLimits.title),
   triggerReason: triggerReasonSchema,
   setup: z.object({
     deployTarget: deployTargetSchema,
     channel: shortName.optional(),
     connection: shortName.optional(),
-    relevantFeatures: z.array(z.string().trim().min(1).max(32)).max(3).optional(),
+    relevantFeatures: z.array(text(reportLimits.feature)).max(3).optional(),
   }),
-  steps: z.array(z.string().trim().min(1).max(240)).min(1).max(4),
-  observed: z.array(z.string().trim().min(1).max(160)).min(1).max(3),
-  expected: z.string().trim().min(1).max(200),
-  comparison: z.string().trim().min(1).max(180).optional(),
+  steps: z.array(text(reportLimits.step)).min(1).max(4),
+  observed: z.array(text(reportLimits.observed)).min(1).max(3),
+  expected: text(reportLimits.expected),
+  comparison: text(reportLimits.comparison).optional(),
   frequency: frequencySchema,
   outcome: outcomeSchema,
   eveVersion: shortName,
@@ -81,13 +91,13 @@ export const includeEverything = (report: AgentFeedbackReport): IncludedItems =>
 const nonEmpty = (values: (string | undefined)[] | undefined) =>
   values?.map((value) => value?.trim()).filter((value): value is string => Boolean(value));
 
-/** Applies the reviewer's removals and returns the report that will be sent, if still valid. */
-export const reviewReport = (
-  report: AgentFeedbackReport,
-  included: IncludedItems,
-): AgentFeedbackReport | undefined => {
+/**
+ * Applies the reviewer's removals and validates the report that will be sent. Issue paths
+ * index into the reviewed lists, which skip removed and blank lines.
+ */
+export const reviewReport = (report: AgentFeedbackReport, included: IncludedItems) => {
   const relevantFeatures = nonEmpty(report.setup.relevantFeatures);
-  const result = agentFeedbackReportSchema.safeParse({
+  return agentFeedbackReportSchema.safeParse({
     ...report,
     setup: {
       ...report.setup,
@@ -99,8 +109,6 @@ export const reviewReport = (
     observed: report.observed.filter((item, index) => included.observed[index] && item.trim()),
     comparison: included.comparison && report.comparison?.trim() ? report.comparison : undefined,
   });
-
-  return result.success ? result.data : undefined;
 };
 
 /** Renders a reviewed report as the plain-text `feedback` the collector stores. */

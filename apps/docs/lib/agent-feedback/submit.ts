@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { canSendAgentFeedback, isAgentFeedbackEnabled } from "./availability";
-import { MAX_AGENT_FEEDBACK_LENGTH, agentFeedbackReportSchema, formatReport } from "./report";
+import { agentFeedbackReportSchema, formatReport } from "./report";
 
 // Pending sign-off from the collector owners.
 const COLLECTOR_REPO = "eve-external";
@@ -42,9 +42,6 @@ export const submitAgentFeedbackReport = async (
   const report = parseReport(formData);
   if (!report) return { status: "failed" };
 
-  const feedback = formatReport(report);
-  if (feedback.length > MAX_AGENT_FEEDBACK_LENGTH) return { status: "failed" };
-
   if (!isAgentFeedbackEnabled(env)) return { status: "disabled" };
   if (!canSendAgentFeedback(env)) return { status: "preview" };
 
@@ -73,7 +70,7 @@ export const submitAgentFeedbackReport = async (
       body: JSON.stringify({
         repo: COLLECTOR_REPO,
         type: "other",
-        feedback,
+        feedback: formatReport(report),
         severity: "info",
         agentType: report.agent,
         context: {

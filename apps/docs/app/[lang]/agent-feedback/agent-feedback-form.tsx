@@ -15,13 +15,12 @@ import {
 import {
   type AgentFeedbackReport,
   type IncludedItems,
-  MAX_AGENT_FEEDBACK_LENGTH,
   decodeReportHash,
   deployTargetLabels,
-  formatReport,
   frequencyLabels,
   includeEverything,
   outcomeLabels,
+  reportLimits,
   reviewReport,
   triggerReasonLabels,
 } from "@/lib/agent-feedback/report";
@@ -132,6 +131,11 @@ const EditableReport = ({
       noValidate
       onChange={() => setEdited(true)}
       onSubmit={(event) => {
+        // The button stays focusable while sending, so block repeat submits here.
+        if (pending) {
+          event.preventDefault();
+          return;
+        }
         setAttemptedSubmit(true);
         if (!issue) return;
         event.preventDefault();
@@ -142,7 +146,7 @@ const EditableReport = ({
       <input
         name="structuredReport"
         type="hidden"
-        value={reviewed ? JSON.stringify(reviewed) : ""}
+        value={reviewed.success ? JSON.stringify(reviewed.data) : ""}
       />
 
       <section
@@ -159,7 +163,7 @@ const EditableReport = ({
               className="text-heading-20"
               id={`${id}-title`}
               label="Summary"
-              maxLength={100}
+              maxLength={reportLimits.title}
               onChange={(value) => update("title", value)}
               pending={pending}
               singleLine
@@ -172,11 +176,11 @@ const EditableReport = ({
           <ol className="flex flex-col gap-2">
             {report.steps.map((step, index) => (
               <ReportLine
-                id={`${id}-step-${index}`}
+                id={`${id}-steps-${index}`}
                 key={index}
                 label={`Reproduction step ${index + 1}`}
                 marker={`${index + 1}.`}
-                maxLength={240}
+                maxLength={reportLimits.step}
                 onChange={(value) => updateListItem("steps", index, value)}
                 onToggle={() => toggle("steps", index)}
                 pending={pending}
@@ -195,7 +199,7 @@ const EditableReport = ({
                 key={index}
                 label={`Observed result ${index + 1}`}
                 marker="•"
-                maxLength={160}
+                maxLength={reportLimits.observed}
                 onChange={(value) => updateListItem("observed", index, value)}
                 onToggle={() => toggle("observed", index)}
                 pending={pending}
@@ -211,7 +215,7 @@ const EditableReport = ({
             <ReportLine
               id={`${id}-expected`}
               label="Expected result"
-              maxLength={200}
+              maxLength={reportLimits.expected}
               onChange={(value) => update("expected", value)}
               pending={pending}
               selected
@@ -224,8 +228,9 @@ const EditableReport = ({
           <ReportSection label="Workaround or control">
             <ul>
               <ReportLine
+                id={`${id}-comparison`}
                 label="Workaround or control"
-                maxLength={180}
+                maxLength={reportLimits.comparison}
                 onChange={(value) => update("comparison", value)}
                 onToggle={() => {
                   setEdited(true);
@@ -255,25 +260,23 @@ const EditableReport = ({
             <ReportDetail label="eve version" value={report.eveVersion} />
             <ReportDetailSelect
               label="Trigger"
-              onChange={(value) =>
-                update("triggerReason", value as AgentFeedbackReport["triggerReason"])
-              }
+              onChange={(triggerReason) => update("triggerReason", triggerReason)}
               options={triggerReasonLabels}
               pending={pending}
               value={report.triggerReason}
             />
             <ReportDetailSelect
               label="Deploy target"
-              onChange={(value) =>
-                updateSetup({ deployTarget: value as AgentFeedbackReport["setup"]["deployTarget"] })
-              }
+              onChange={(deployTarget) => updateSetup({ deployTarget })}
               options={deployTargetLabels}
               pending={pending}
               value={report.setup.deployTarget}
             />
             {report.setup.channel !== undefined ? (
               <ReportDetailText
+                id={`${id}-channel`}
                 label="Channel"
+                maxLength={reportLimits.shortName}
                 onChange={(channel) => updateSetup({ channel })}
                 pending={pending}
                 value={report.setup.channel}
@@ -281,7 +284,9 @@ const EditableReport = ({
             ) : null}
             {report.setup.connection !== undefined ? (
               <ReportDetailText
+                id={`${id}-connection`}
                 label="Connection"
+                maxLength={reportLimits.shortName}
                 onChange={(connection) => updateSetup({ connection })}
                 pending={pending}
                 value={report.setup.connection}
@@ -289,22 +294,24 @@ const EditableReport = ({
             ) : null}
             <ReportDetailSelect
               label="Frequency"
-              onChange={(value) => update("frequency", value as AgentFeedbackReport["frequency"])}
+              onChange={(frequency) => update("frequency", frequency)}
               options={frequencyLabels}
               pending={pending}
               value={report.frequency}
             />
             <ReportDetailSelect
               label="Outcome"
-              onChange={(value) => update("outcome", value as AgentFeedbackReport["outcome"])}
+              onChange={(outcome) => update("outcome", outcome)}
               options={outcomeLabels}
               pending={pending}
               value={report.outcome}
             />
             {report.setup.relevantFeatures?.map((feature, index) => (
               <ReportDetailText
+                id={`${id}-relevantFeatures-${index}`}
                 key={index}
                 label={`Feature ${index + 1}`}
+                maxLength={reportLimits.feature}
                 onChange={(value) =>
                   updateSetup({
                     relevantFeatures: report.setup.relevantFeatures?.map((current, i) =>
@@ -356,39 +363,53 @@ const EditableReport = ({
   );
 };
 
+const fieldLabels: Partial<Record<PropertyKey, string>> = {
+  title: "summary",
+  steps: "reproduction step",
+  observed: "actual result",
+  expected: "expected result",
+  comparison: "workaround or control",
+  channel: "channel",
+  connection: "connection",
+  relevantFeatures: "feature",
+};
+
+/** Maps indices in the reviewed lists back to the lines the reviewer sees. */
+const keptIndices = (values: readonly string[], included?: readonly boolean[]) =>
+  values.flatMap((value, index) => ((included?.[index] ?? true) && value.trim() ? [index] : []));
+
 const getSubmitIssue = (
   report: AgentFeedbackReport,
   included: IncludedItems,
-  reviewed: AgentFeedbackReport | undefined,
+  reviewed: ReturnType<typeof reviewReport>,
   id: string,
 ): SubmitIssue | undefined => {
-  if (!report.title.trim())
-    return { message: "Add a summary before sending.", focusId: `${id}-title` };
-  if (!report.steps.some((step, i) => included.steps[i] && step.trim())) {
-    const index = included.steps.indexOf(true);
-    return {
-      message: "Keep at least one reproduction step.",
-      focusId: index >= 0 ? `${id}-step-${index}` : undefined,
-    };
-  }
-  if (!report.observed.some((item, i) => included.observed[i] && item.trim())) {
-    const index = included.observed.indexOf(true);
-    return {
-      message: "Keep at least one actual result.",
-      focusId: index >= 0 ? `${id}-observed-${index}` : undefined,
-    };
-  }
-  if (!report.expected.trim())
-    return { message: "Describe the expected result.", focusId: `${id}-expected` };
-  if (!reviewed) return { message: "Shorten or fill in the highlighted fields before sending." };
+  const issue = reviewed.error?.issues[0];
+  if (!issue) return undefined;
 
-  const excess = formatReport(reviewed).length - MAX_AGENT_FEEDBACK_LENGTH;
-  if (excess > 0) {
-    return {
-      message: `Shorten the report by ${excess.toLocaleString("en-US")} ${excess === 1 ? "character" : "characters"}.`,
-    };
+  const [field, index] = issue.path[0] === "setup" ? issue.path.slice(1) : issue.path;
+  const label = field === undefined ? undefined : fieldLabels[field];
+  if (!label) return { message: "This report can’t be sent as edited." };
+
+  let focusId: string | undefined = `${id}-${String(field)}`;
+  if (field === "steps" || field === "observed") {
+    const shown =
+      typeof index === "number"
+        ? keptIndices(report[field], included[field])[index]
+        : included[field].indexOf(true);
+    focusId = shown !== undefined && shown >= 0 ? `${focusId}-${shown}` : undefined;
+  } else if (field === "relevantFeatures" && typeof index === "number") {
+    const shown = keptIndices(report.setup.relevantFeatures ?? [])[index];
+    focusId = shown === undefined ? undefined : `${focusId}-${shown}`;
   }
-  return undefined;
+
+  const message =
+    issue.code === "too_big"
+      ? `Shorten the ${label} to ${issue.maximum} characters.`
+      : issue.code === "too_small" && issue.origin === "array"
+        ? `Keep at least one ${label}.`
+        : `Fill in the ${label} before sending.`;
+  return { message, focusId };
 };
 
 const SentState = () => {
@@ -570,37 +591,38 @@ const ReportDetail = ({ label, value }: { label: string; value: string }) => (
 );
 
 const ReportDetailText = ({
+  id,
   label,
+  maxLength,
   onChange,
   pending,
   value,
 }: {
+  id: string;
   label: string;
+  maxLength: number;
   onChange: (value: string) => void;
   pending: boolean;
   value: string;
-}) => {
-  const id = useId();
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <dt className="text-gray-900 text-label-13">
-        <label htmlFor={id}>{label}</label>
-      </dt>
-      <dd>
-        <input
-          className={cn(fieldClassName, "h-10 text-copy-14")}
-          id={id}
-          maxLength={64}
-          onChange={(event) => onChange(event.target.value)}
-          readOnly={pending}
-          value={value}
-        />
-      </dd>
-    </div>
-  );
-};
+}) => (
+  <div className="flex min-w-0 flex-col gap-1.5">
+    <dt className="text-gray-900 text-label-13">
+      <label htmlFor={id}>{label}</label>
+    </dt>
+    <dd>
+      <input
+        className={cn(fieldClassName, "h-10 text-copy-14")}
+        id={id}
+        maxLength={maxLength}
+        onChange={(event) => onChange(event.target.value)}
+        readOnly={pending}
+        value={value}
+      />
+    </dd>
+  </div>
+);
 
-const ReportDetailSelect = ({
+const ReportDetailSelect = <T extends string>({
   label,
   onChange,
   options,
@@ -608,10 +630,10 @@ const ReportDetailSelect = ({
   value,
 }: {
   label: string;
-  onChange: (value: string) => void;
-  options: Record<string, string>;
+  onChange: (value: T) => void;
+  options: Record<T, string>;
   pending: boolean;
-  value: string;
+  value: T;
 }) => {
   const id = useId();
   return (
@@ -624,10 +646,11 @@ const ReportDetailSelect = ({
           className={cn(fieldClassName, "h-10 text-copy-14")}
           disabled={pending}
           id={id}
-          onChange={(event) => onChange(event.target.value)}
+          // The options are the only values the select can produce.
+          onChange={(event) => onChange(event.target.value as T)}
           value={value}
         >
-          {Object.entries(options).map(([optionValue, optionLabel]) => (
+          {Object.entries<string>(options).map(([optionValue, optionLabel]) => (
             <option key={optionValue} value={optionValue}>
               {optionLabel}
             </option>

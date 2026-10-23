@@ -52,7 +52,7 @@ describe("reviewReport", () => {
       { steps: [true, false], observed: [false, true], comparison: false },
     );
 
-    expect(reviewed).toMatchObject({
+    expect(reviewed.data).toMatchObject({
       steps: ["Deploy an agent with a Slack channel"],
       observed: ["No error is logged"],
       comparison: undefined,
@@ -60,10 +60,9 @@ describe("reviewReport", () => {
     });
   });
 
-  it("is invalid once every step is removed", () => {
-    expect(
-      reviewReport(report, { ...includeEverything(report), steps: [false, false] }),
-    ).toBeUndefined();
+  it("reports the steps list once every step is removed", () => {
+    const reviewed = reviewReport(report, { ...includeEverything(report), steps: [false, false] });
+    expect(reviewed.error?.issues).toMatchObject([{ path: ["steps"], code: "too_small" }]);
   });
 });
 

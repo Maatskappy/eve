@@ -20,6 +20,11 @@ export const ghToolOutputSchema = z.object({
   truncated: z.boolean(),
 });
 
+/** Denies a malformed `gh` call before it runs; valid calls need no approval. */
+export function ghToolApproval({ toolInput }: { readonly toolInput?: unknown }) {
+  return githubShellApproval(toolInput as GitHubShellInput | undefined);
+}
+
 /** Runs one `gh` tool call with an extension's GitHub config. */
 export function runGhTool(
   input: GitHubShellInput,
@@ -36,9 +41,11 @@ export function runGhTool(
 
 /**
  * The Connect-brokered `gh` tool, bound to one extension's GitHub config, for
- * static use. Its `execute` captures the `github` getter, which a dynamic tool
- * can't persist, so a `defineDynamic` resolver defines the tool inline and
- * reads its extension's config from a module-level import instead.
+ * static use only. Its `execute` captures the `github` getter, which a dynamic
+ * tool can't persist. A `defineDynamic` resolver must define the tool inline
+ * from the same parts (`ghToolApproval`, `githubShellInputSchema`,
+ * `ghToolOutputSchema`, `runGhTool`) and read its extension's config from a
+ * module-level import, as `tools/gh.ts` does.
  */
 export function defineGhTool(
   github: () => GitHubConfig | undefined,
@@ -46,7 +53,7 @@ export function defineGhTool(
 ) {
   return defineTool({
     description,
-    approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
+    approval: ghToolApproval,
     inputSchema: githubShellInputSchema,
     outputSchema: ghToolOutputSchema,
     execute(input, ctx) {

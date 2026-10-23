@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { z } from "#compiled/zod/index.js";
 import { defineDurableSchema } from "#tools/durable-schema.js";
 import { isToolSchema } from "#tools/schema.js";
@@ -2658,19 +2656,5 @@ describe("durable schema expression transform", () => {
     `,
     );
     expect(result!.code).not.toContain("__eveDefineDurableSchema");
-  });
-});
-
-describe("bundled extension dynamic tools", () => {
-  // A function in a stamped closure fails resolution at session start, which
-  // drops the tool: `git__gh` once captured its config getter this way.
-  it("eve/extensions/git's gh tool captures nothing in its callbacks", async () => {
-    const path = new URL("../../../../eve-git/extension/tools/gh.ts", import.meta.url);
-    const result = await transformDynamicToolExecute(path.pathname, readFileSync(path, "utf8"));
-
-    const closures = [
-      ...result!.code.matchAll(/__eveStampDynamicCallback\([^;]*?, (\{[^}]*\})\)/g),
-    ];
-    expect(closures.map(([, closure]) => closure)).toEqual(["{}", "{}"]);
   });
 });

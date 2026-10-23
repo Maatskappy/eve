@@ -1,8 +1,12 @@
 import { defineDynamic, defineTool } from "eve/tools";
 
 import extension from "../extension.ts";
-import { GH_TOOL_DESCRIPTION, ghToolOutputSchema, runGhTool } from "../lib/gh-tool.ts";
-import { githubShellApproval, type GitHubShellInput } from "../lib/github-shell.ts";
+import {
+  GH_TOOL_DESCRIPTION,
+  ghToolApproval,
+  ghToolOutputSchema,
+  runGhTool,
+} from "../lib/gh-tool.ts";
 import { githubShellInputSchema } from "../lib/github-shell-schema.ts";
 
 /**
@@ -18,8 +22,7 @@ export default defineDynamic({
         ? null
         : defineTool({
             description: GH_TOOL_DESCRIPTION,
-            approval: ({ toolInput }) =>
-              githubShellApproval(toolInput as GitHubShellInput | undefined),
+            approval: ghToolApproval,
             inputSchema: githubShellInputSchema,
             outputSchema: ghToolOutputSchema,
             execute(input, ctx) {

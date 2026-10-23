@@ -10,5 +10,12 @@ export {
 } from "./github-shell.ts";
 export { GH_SIGNED_COMMIT_SOURCE, GH_SIGNED_COMMIT_VERSION } from "./signed-commit.ts";
 export { GITHUB_TOOLING_PATHS } from "./tooling.ts";
-export { defineGhTool, GH_TOOL_DESCRIPTION } from "./gh-tool.ts";
+export {
+  defineGhTool,
+  GH_TOOL_DESCRIPTION,
+  ghToolApproval,
+  ghToolOutputSchema,
+  runGhTool,
+} from "./gh-tool.ts";
+export { githubShellInputSchema } from "./github-shell-schema.ts";
 export { githubInstructions, prSkillDescription, prSkillMarkdown } from "./github-guidance.ts";

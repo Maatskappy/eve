@@ -1714,6 +1714,40 @@ describe("createVercelSandbox", () => {
     ]);
   });
 
+  // https://github.com/vercel/eve/issues/5301
+  it.fails("kills a running command when its abortSignal fires", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    // Like the SDK's detached Command, the `runCommand` signal only covers the
+    // start request: `wait` and `logs` honor their own signal, and only
+    // `kill()` ends the process.
+    const exited = Promise.withResolvers<void>();
+    const untilExitOrAbort = (signal: AbortSignal | undefined) =>
+      new Promise<void>((resolve, reject) => {
+        void exited.promise.then(resolve);
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    const command = {
+      kill: vi.fn(async () => exited.resolve()),
+      async *logs(params?: { signal?: AbortSignal }) {
+        await untilExitOrAbort(params?.signal);
+      },
+      wait: vi.fn(async (params?: { signal?: AbortSignal }) => {
+        await untilExitOrAbort(params?.signal);
+        return { exitCode: 143 };
+      }),
+    };
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce(command as never);
+    const controller = new AbortController();
+    const stop = new Error("stop");
+
+    const running = handle.sandbox.run({ abortSignal: controller.signal, command: "sleep 60" });
+    await vi.waitFor(() => expect(command.wait).toHaveBeenCalled());
+    controller.abort(stop);
+
+    await vi.waitFor(() => expect(command.kill).toHaveBeenCalledOnce());
+    await expect(running).rejects.toBe(stop);
+  });
+
   it("converts Vercel Node file streams to the public Web stream contract", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     sessionSandbox.readFile.mockResolvedValueOnce(

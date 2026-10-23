@@ -108,7 +108,23 @@ export class ConversationClient {
   /** Admits and folds a saved root event without notifying subscribers. */
   hydrate(event: SessionStreamEvent): boolean {
     assertCurrentSavedEvent(event);
-    return this.#conversation.observe(event);
+    const covered = this.#conversation.view.position;
+    if (!this.#conversation.observe(event)) return false;
+    const { next, position, endOfLine } = event.meta;
+    if (position.line < covered)
+      throw new TypeError(
+        "Saved events overlap source lines already covered by the conversation. " +
+          "Save the ordered events as eve read them, or read the session again from position 0.",
+      );
+    if (next !== undefined) {
+      if (endOfLine !== true || !Number.isSafeInteger(next) || next < position.line + 1)
+        throw new TypeError(
+          "Saved `meta.next` must cover a complete source line with a safe integer cursor. " +
+            "Save the events as eve read them, or read the session again from position 0.",
+        );
+      this.#conversation.advancePosition(next);
+    }
+    return true;
   }
 
   /** Starts following the agent sessions the root stream has announced so far. */

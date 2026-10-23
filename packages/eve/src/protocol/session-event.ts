@@ -11,6 +11,12 @@ export interface SessionEventMeta {
   readonly at: string;
   /** False while more known records remain in this line; readers stop only after the commit. */
   readonly endOfLine?: boolean;
+  /**
+   * Exclusive source-line coverage when a reader consumed later lines that emitted no events.
+   * Only on a complete line's last event; its original `position` stays unchanged. Preserve
+   * this reader metadata when saving events, rather than deriving coverage from event counts.
+   */
+  readonly next?: number;
 }
 
 /** One event as a reader reads it back. */

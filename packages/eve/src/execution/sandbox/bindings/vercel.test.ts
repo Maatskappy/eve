@@ -1742,11 +1742,16 @@ describe("createVercelSandbox", () => {
     const stop = new Error("stop");
 
     const running = handle.sandbox.run({ abortSignal: controller.signal, command: "sleep 60" });
+    // Settle `run()` now so its rejection is handled while `kill()` is awaited.
+    const settled = running.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
     await vi.waitFor(() => expect(command.wait).toHaveBeenCalled());
     controller.abort(stop);
 
     await vi.waitFor(() => expect(command.kill).toHaveBeenCalledOnce());
-    await expect(running).rejects.toBe(stop);
+    expect(await settled).toBe(stop);
   });
 
   it("converts Vercel Node file streams to the public Web stream contract", async () => {

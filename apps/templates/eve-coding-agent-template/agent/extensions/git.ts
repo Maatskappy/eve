@@ -2,13 +2,11 @@ import git from "eve/extensions/git";
 
 import { brokerGitHubLease, GITHUB_CONNECTOR } from "../lib/github";
 
-const orgs = (process.env.GITHUB_ORGS ?? "")
-  .split(",")
-  .map((org) => org.trim().toLowerCase())
-  .filter(Boolean);
+// Lowercase GitHub organizations or users whose repositories `git__gh` may
+// access, such as ["acme", "acme-labs"]. While empty, the agent still edits and
+// runs code in its sandbox, but there is no `git__gh` tool and no GitHub credentials.
+const orgs: string[] = [];
 
-// Without GITHUB_ORGS the agent still edits and runs code in its sandbox,
-// but there is no `git__gh` tool and no GitHub credentials.
 export default git(
   orgs.length > 0
     ? {

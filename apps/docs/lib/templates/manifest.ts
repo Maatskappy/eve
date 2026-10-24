@@ -675,14 +675,13 @@ export const templateManifest: TemplateManifestEntry[] = [
       icon: "/templates/icons/foreman.png",
       thread: { kind: "issue", number: 471, title: "Checkout returns 500 on empty carts" },
       messages: [
-        { from: "user", event: "labeled", text: "factory" },
         {
           from: "agent",
-          text: "Classified as a bug: `pricing.ts` reads the first item of an empty cart. Analysis is next.",
+          text: "Draft PR #483 is ready. It guards empty carts in `pricing.ts` and adds a regression test.",
         },
         {
           from: "agent",
-          text: "Draft PR #483 is ready. It guards empty carts and adds a regression test.",
+          text: "Review passed: the new test fails on `main` and passes on the branch, and your checks are green. Mark it ready when you are.",
         },
       ],
     },
@@ -809,6 +808,11 @@ export const templateManifest: TemplateManifestEntry[] = [
       messages: [
         { from: "user", text: "@kody is this safe when the cart is empty?" },
         { from: "agent", text: "No, `items[0]` throws on an empty cart. Same crash as #471." },
+        { from: "user", text: "@kody can you track a fix in Linear?" },
+        {
+          from: "agent",
+          text: "Created [ENG-214](https://linear.app) for it and linked it from #471.",
+        },
       ],
     },
   },

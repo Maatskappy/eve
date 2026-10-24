@@ -14,7 +14,7 @@ import {
   toolCallsStreamResult,
 } from "#internal/testing/approval-resume.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
-import { eachEvent } from "#internal/testing/session-machine.js";
+import { eventsOf } from "#harness/publication.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { always, once } from "#tools/approval/policies.js";
 
@@ -56,10 +56,11 @@ function setup(
   const recorder = createProjectionRecorder();
   const config: ToolLoopHarnessConfig = {
     capabilities: { requestInput: true },
-    handleEvent: eachEvent(async (event) => {
-      recorder.record(event);
-      events.push(event);
-    }),
+    // Each publication commits as one line, as the session's sink writes it.
+    handleEvent: async (publication) => {
+      recorder.record(eventsOf(publication));
+      events.push(...eventsOf(publication));
+    },
     resolveModel: async () => model,
     tools: new Map([tool, ...(options.tools ?? [])].map((entry) => [entry.name, entry])),
   };
@@ -127,7 +128,7 @@ describe("approved call recheck (real AI SDK)", () => {
       fixture.events.filter((event) => event.type === "call.started").map((event) => event.data),
     ).toMatchObject([
       { callId: "first", clearedBy: { interactionId: first.data.interactionId } },
-      { callId: "remembered", clearedBy: { grant: { interactionId: first.data.interactionId } } },
+      { callId: "remembered", clearedBy: { policy: "approval" } },
     ]);
     expect(fixture.events.filter((event) => event.type === "interaction.opened")).toHaveLength(2);
     expect(
@@ -187,55 +188,72 @@ describe("approved call recheck (real AI SDK)", () => {
     },
   );
 
-  it("credits a remembered approval only when once() decides the call", async () => {
-    const perTool = once();
-    const execute = vi.fn(() => "deployed");
-    const fixture = setup(
-      {
-        name: "deploy",
-        description: "Deploy Alice's release",
-        inputSchema: jsonSchema({ type: "object" }),
-        execute,
-        approval: async (context) => {
-          const remembered = await perTool({ ...context });
-          return context.callId === "unrelated" ? "not-applicable" : remembered;
-        },
-      },
-      {
-        calls: [
-          [{ input: "{}", toolCallId: "first", toolName: "deploy" }],
-          [
-            { input: "{}", toolCallId: "unrelated", toolName: "deploy" },
-            { input: "{}", toolCallId: "remembered", toolName: "deploy" },
-          ],
-        ],
-      },
-    );
-    const initial = await fixture.step(fixture.session, {
-      message: "Help Alice deploy her release.",
-    });
-    const request = fixture.events.find((event) => event.type === "interaction.opened")!;
-    await fixture.step(initial.session, {
-      answers: [
+  it.each([
+    ["both approve", ["left", "approve"], ["right", "approve"], true],
+    ["the later answer declines", ["left", "approve"], ["right", "deny"], false],
+    [
+      "the later answer, to the earlier prompt, declines",
+      ["right", "approve"],
+      ["left", "deny"],
+      false,
+    ],
+    ["the later answer approves", ["left", "deny"], ["right", "approve"], true],
+  ] as const)(
+    "keeps simultaneous once prompts independent, then remembers the latest decision (%s)",
+    async (_name, firstAnswer, secondAnswer, remembered) => {
+      const execute = vi.fn(() => "deployed");
+      const call = (toolCallId: string) => ({ input: "{}", toolCallId, toolName: "deploy" });
+      const fixture = setup(
         {
-          interactionId: request.data.interactionId,
-          optionId: "approve",
-          deliveryId: "answer-first",
-          responseId: "response-first",
+          name: "deploy",
+          description: "Deploy Alice's release",
+          inputSchema: jsonSchema({ type: "object" }),
+          execute,
+          approval: once(),
         },
-      ],
-    });
-    const started = fixture.events
-      .filter((event) => event.type === "call.started")
-      .map((event) => event.data);
-    expect(started.find((data) => data.callId === "unrelated")?.clearedBy).toBeUndefined();
-    expect(started.find((data) => data.callId === "remembered")?.clearedBy).toEqual({
-      grant: { interactionId: request.data.interactionId },
-    });
-    expect(execute).toHaveBeenCalledTimes(3);
-  });
+        { calls: [[call("left"), call("right")], [call("later")]] },
+      );
+      const initial = await fixture.step(fixture.session, {
+        message: "Help Alice deploy her releases.",
+      });
+      const requests = fixture.events.filter((event) => event.type === "interaction.opened");
+      expect(requests).toHaveLength(2);
+      const answer = ([prompt, optionId]: readonly [string, string]) => ({
+        interactionId: requests[prompt === "left" ? 0 : 1]!.data.interactionId,
+        optionId,
+        deliveryId: `answer-${prompt}`,
+        responseId: `response-${prompt}`,
+      });
+      const partial = await fixture.step(initial.session, { answers: [answer(firstAnswer)] });
+      expect(execute).not.toHaveBeenCalled();
+      expect(fixture.events.filter((event) => event.type === "interaction.settled")).toHaveLength(
+        0,
+      );
+      await fixture.step(JSON.parse(JSON.stringify(partial.session)) as HarnessSession, {
+        answers: [answer(secondAnswer)],
+      });
+      const approvals = [firstAnswer, secondAnswer].filter(
+        ([, optionId]) => optionId === "approve",
+      );
+      expect(execute).toHaveBeenCalledTimes(approvals.length + (remembered ? 1 : 0));
+      const prompts = fixture.events.filter((event) => event.type === "interaction.opened");
+      expect(prompts).toHaveLength(remembered ? 2 : 3);
+      if (!remembered) expect(prompts.at(-1)?.data.subject).toEqual({ callId: "later" });
+    },
+  );
 
-  it("keeps simultaneous once prompts independent before reusing their approval", async () => {
+  it.each([
+    [
+      "approves the later prompt, then denies the earlier one",
+      ["right", "approve"],
+      ["left", "deny"],
+    ],
+    [
+      "denies the earlier prompt, then approves the later one",
+      ["left", "deny"],
+      ["right", "approve"],
+    ],
+  ] as const)("keeps a denial when one delivery %s", async (_name, firstAnswer, secondAnswer) => {
     const execute = vi.fn(() => "deployed");
     const call = (toolCallId: string) => ({ input: "{}", toolCallId, toolName: "deploy" });
     const fixture = setup(
@@ -252,31 +270,17 @@ describe("approved call recheck (real AI SDK)", () => {
       message: "Help Alice deploy her releases.",
     });
     const requests = fixture.events.filter((event) => event.type === "interaction.opened");
-    expect(requests).toHaveLength(2);
-    const partial = await fixture.step(initial.session, {
-      answers: [
-        {
-          interactionId: requests[0]!.data.interactionId,
-          optionId: "approve",
-          deliveryId: "answer-left",
-          responseId: "response-left",
-        },
-      ],
+    const answer = ([prompt, optionId]: readonly [string, string]) => ({
+      interactionId: requests[prompt === "left" ? 0 : 1]!.data.interactionId,
+      optionId,
+      deliveryId: "answers",
+      responseId: `response-${prompt}`,
     });
-    expect(execute).not.toHaveBeenCalled();
-    expect(fixture.events.filter((event) => event.type === "interaction.settled")).toHaveLength(0);
-    await fixture.step(partial.session, {
-      answers: [
-        {
-          interactionId: requests[1]!.data.interactionId,
-          optionId: "approve",
-          deliveryId: "answer-right",
-          responseId: "response-right",
-        },
-      ],
-    });
-    expect(execute).toHaveBeenCalledTimes(3);
-    expect(fixture.events.filter((event) => event.type === "interaction.opened")).toHaveLength(2);
+    await fixture.step(initial.session, { answers: [answer(firstAnswer), answer(secondAnswer)] });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const prompts = fixture.events.filter((event) => event.type === "interaction.opened");
+    expect(prompts).toHaveLength(3);
+    expect(prompts.at(-1)?.data.subject).toEqual({ callId: "later" });
   });
 
   it("keeps a human-approved call's model output unchanged when its recheck returns a reason", async () => {
@@ -317,60 +321,64 @@ describe("approved call recheck (real AI SDK)", () => {
       tasks: [{ callId: "call-0", clearedBy: { policy: "approval" } }],
     });
   });
-  it.each(["workflow", "agent"])("rechecks an approved %s call before dispatch", async (kind) => {
-    let frozen = false;
-    const policy = vi.fn((ctx: ApprovalContext) =>
-      frozen && ctx.session.auth.current?.principalId === "user-1"
-        ? { type: "denied" as const, reason: "A change freeze is in effect." }
-        : ("user-approval" as const),
-    );
-    const fixture = setup(
-      workflow(
+  it.each(["local", "workflow", "agent"])(
+    "rechecks an approved %s call before execution",
+    async (kind) => {
+      let frozen = false;
+      const policy = vi.fn((ctx: ApprovalContext) =>
+        frozen && ctx.session.auth.current?.principalId === "user-1"
+          ? { type: "denied" as const, reason: "A change freeze is in effect." }
+          : ("user-approval" as const),
+      );
+      const tool = workflow(
         "deploy",
         policy,
         kind === "agent" ? "workflow//./agent/subagents/release//run" : undefined,
-      ),
-    );
-    const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
-    const request = fixture.events.find((event) => event.type === "interaction.opened");
-    expect(request?.type === "interaction.opened" && request.data.request.kind).toBe("approval");
+      );
+      const execute = vi.fn(() => "deployed");
+      const fixture = setup(kind === "local" ? { ...tool, workflowId: undefined, execute } : tool);
+      const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
+      const request = fixture.events.find((event) => event.type === "interaction.opened");
+      expect(request?.type === "interaction.opened" && request.data.request.kind).toBe("approval");
 
-    // A freeze begins for the requester after she asked, before anyone approves.
-    frozen = true;
-    const start = fixture.events.length;
-    const approved = await fixture.step(initial.session, {
-      answers: [
+      // A freeze begins for the requester after she asked, before anyone approves.
+      frozen = true;
+      const start = fixture.events.length;
+      const approved = await fixture.step(initial.session, {
+        answers: [
+          {
+            deliveryId: "delivery-approve",
+            optionId: "approve",
+            interactionId: request?.type === "interaction.opened" ? request.data.interactionId : "",
+            responseId: "response-approve",
+          },
+        ],
+      });
+
+      // The recheck runs as the requester, and its denial means execution never starts.
+      expect(execute).not.toHaveBeenCalled();
+      expect(runtimeWait(approved.session.state)).toBeUndefined();
+      expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
+      expect(
+        fixture.events.slice(start).filter((event) => event.type === "call.settled"),
+      ).toMatchObject([
         {
-          deliveryId: "delivery-approve",
-          optionId: "approve",
-          interactionId: request?.type === "interaction.opened" ? request.data.interactionId : "",
-          responseId: "response-approve",
+          data: {
+            callId: "call-0",
+            outcome: "rejected",
+            output: { code: "TOOL_EXECUTION_DENIED", message: "A change freeze is in effect." },
+          },
         },
-      ],
-    });
-
-    // The recheck runs as the requester, and its denial means the run never starts.
-    expect(runtimeWait(approved.session.state)).toBeUndefined();
-    expect(policy.mock.calls.at(-1)?.[0].session.auth.current?.principalId).toBe("user-1");
-    expect(
-      fixture.events.slice(start).filter((event) => event.type === "call.settled"),
-    ).toMatchObject([
-      {
-        data: {
-          callId: "call-0",
-          outcome: "rejected",
-          output: { code: "TOOL_EXECUTION_DENIED", message: "A change freeze is in effect." },
-        },
-      },
-    ]);
-    expect(
-      approved.session.history
-        .flatMap((message) => (message.role === "tool" ? message.content : []))
-        .filter((part) => part.type === "tool-result"),
-    ).toMatchObject([
-      { output: { reason: "A change freeze is in effect.", type: "execution-denied" } },
-    ]);
-  });
+      ]);
+      expect(
+        approved.session.history
+          .flatMap((message) => (message.role === "tool" ? message.content : []))
+          .filter((part) => part.type === "tool-result"),
+      ).toMatchObject([
+        { output: { reason: "A change freeze is in effect.", type: "execution-denied" } },
+      ]);
+    },
+  );
 
   it.each(["workflow", "agent"])(
     "fails an approved %s call whose dynamic entry changed before dispatch",

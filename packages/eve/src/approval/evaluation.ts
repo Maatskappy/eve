@@ -1,67 +1,101 @@
-import type { ApprovalContext } from "#approval/definition.js";
+import type { ApprovalContext, ApprovalPolicy, ApprovalStatus } from "#approval/definition.js";
+import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
+import type { JsonValue } from "#shared/json.js";
 
-export interface ApprovalGrant {
-  readonly toolName: string;
+/** A person's decision on a request that asked to be remembered, kept under the request's key. */
+export interface RememberedApproval {
+  readonly outcome: "accepted" | "declined";
+  /** The interaction whose settlement recorded the decision. */
   readonly interactionId: string;
+  readonly state?: JsonValue;
 }
 
-export interface OnceApproval {
-  readonly grantable: boolean;
+/** Where a request's settlement is remembered, with the state the policy attached. */
+export interface RememberRequest {
+  readonly key: string;
+  readonly state?: JsonValue;
 }
 
-// Bundles may load the once() helper and the harness from separate copies of this module.
-// The global key lets a copy find the evaluation; `once` returns the creating copy's markers.
-interface Evaluation {
-  readonly once: () => OnceStatus;
-  readonly recheck?: boolean;
+/** What policies can read: remembered decisions, and the keys open requests will record under. */
+export interface ApprovalMemory {
+  readonly remembered: Readonly<Record<string, RememberedApproval>>;
+  readonly pending: readonly string[];
 }
 
-// Enumerable symbols survive policy context spreads without entering JSON or the public type.
+const NO_MEMORY: ApprovalMemory = { pending: [], remembered: {} };
+
+/**
+ * The harness's evaluation of one call's approval policy, private to eve's own policies. Keys are
+ * scoped to the tool the harness resolved: a policy can't read or record another tool's decisions,
+ * whatever key it names or however it renames its context.
+ */
+export interface ApprovalEvaluation {
+  readonly recheck: boolean;
+  readonly read: (key: string) => {
+    readonly entry?: RememberedApproval;
+    readonly pending: boolean;
+  };
+  /** Asks a person; their decision is remembered under `remember.key` when it settles. */
+  readonly ask: (remember: RememberRequest) => ApprovalStatus;
+}
+
+// Bundles may load eve's policies and the harness from separate copies of this module. The global
+// key lets any copy find the evaluation; an enumerable symbol survives context spreads without
+// entering JSON or the public type.
 const evaluationKey = Symbol.for("eve.approval-evaluation");
-type EvaluatedContext = ApprovalContext & { readonly [evaluationKey]?: Evaluation };
+type EvaluatedContext = ApprovalContext & { readonly [evaluationKey]?: ApprovalEvaluation };
 
-// Credit goes to once() only when a policy returns these exact objects, not an equal status.
-const onceGranted = Object.freeze({ type: "not-applicable" as const });
-const onceRequired = Object.freeze({ type: "user-approval" as const });
-type OnceStatus = typeof onceGranted | typeof onceRequired;
-
-function withEvaluation<T extends ApprovalContext>(context: T, evaluation: Evaluation): T {
-  return { ...context, [evaluationKey]: Object.freeze(evaluation) };
-}
-
-export function withApprovalGrants<T extends ApprovalContext>(
-  context: T,
-  grants: readonly ApprovalGrant[],
-): T {
-  const status = grants.some((grant) => grant.toolName === context.toolName)
-    ? onceGranted
-    : onceRequired;
-  return withEvaluation(context, {
-    once: () => status,
-    recheck: approvalEvaluation(context)?.recheck,
-  });
-}
-
-export function evaluateOnce(context: ApprovalContext): OnceStatus {
-  return approvalEvaluation(context)?.once() ?? onceRequired;
-}
-
-/** Which once() decision a policy returned, if its result is one. */
-export function onceOutcome(status: unknown): "granted" | "required" | undefined {
-  if (status === onceGranted) return "granted";
-  if (status === onceRequired) return "required";
-  return undefined;
-}
-
-function approvalEvaluation(context: ApprovalContext): Evaluation | undefined {
+export function approvalEvaluation(context: ApprovalContext): ApprovalEvaluation | undefined {
   return (context as EvaluatedContext)[evaluationKey];
 }
 
-export function markApprovalRecheck<T extends ApprovalContext>(context: T): T {
-  return withEvaluation(context, {
-    once: approvalEvaluation(context)?.once ?? (() => onceRequired),
-    recheck: true,
+/** Runs `policy` for one call. A person who already approved the call isn't asked again. */
+export async function evaluateApproval(
+  policy: ApprovalPolicy,
+  context: ApprovalContext,
+  input: { readonly memory?: ApprovalMemory; readonly recheck?: boolean } = {},
+): Promise<ApprovalDecision> {
+  const { memory = NO_MEMORY, recheck = false } = input;
+  // Only the exact result `ask` issued remembers its settlement, not a discarded or copied one.
+  const asked = new WeakMap<object, RememberRequest>();
+  const scoped = (key: string) => JSON.stringify([context.toolName, key]);
+  const evaluation: ApprovalEvaluation = Object.freeze({
+    ask: (remember: RememberRequest) => {
+      const status = Object.freeze({ type: "user-approval" as const });
+      asked.set(status, { ...remember, key: scoped(remember.key) });
+      return status;
+    },
+    read: (key: string) => ({
+      entry: memory.remembered[scoped(key)],
+      pending: memory.pending.includes(scoped(key)),
+    }),
+    recheck,
   });
+  const evaluated: EvaluatedContext = { ...context, [evaluationKey]: evaluation };
+  const status = await policy(evaluated);
+  const decision = approvalDecision(status);
+  if (decision.awaitsPerson !== true) return decision;
+  if (recheck) return { denied: false };
+  const remember = typeof status === "object" && status !== null ? asked.get(status) : undefined;
+  return remember === undefined ? decision : { ...decision, remember };
+}
+
+/** Remembers a person's decision under the key its request named, replacing an earlier one. */
+export function rememberDecision(
+  remembered: Readonly<Record<string, RememberedApproval>>,
+  request: { readonly interactionId: string; readonly remember?: RememberRequest },
+  outcome: RememberedApproval["outcome"],
+): Readonly<Record<string, RememberedApproval>> {
+  const { remember } = request;
+  if (remember === undefined) return remembered;
+  return {
+    ...remembered,
+    [remember.key]: {
+      interactionId: request.interactionId,
+      outcome,
+      ...(remember.state !== undefined && { state: remember.state }),
+    },
+  };
 }
 
 export function inheritApprovalContext<T extends ApprovalContext>(

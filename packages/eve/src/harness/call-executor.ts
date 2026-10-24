@@ -1,4 +1,4 @@
-import type { ApprovalGrant, OnceApproval } from "#approval/evaluation.js";
+import type { ApprovalMemory, RememberRequest } from "#approval/evaluation.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
@@ -21,17 +21,10 @@ import {
 } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { failedCall, TOOL_EXECUTION_DENIED_MESSAGE } from "#harness/approval-outcome.js";
-import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 import { toolCallModelOutput } from "#harness/tool-call-io.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
-import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
-import {
-  decideApproval,
-  invokeTool,
-  isRunnableTool,
-  recheckApprovedCall,
-  type RunnableTool,
-} from "#harness/tools.js";
+import { decideApproval, invokeTool, isRunnableTool, type RunnableTool } from "#harness/tools.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -39,9 +32,8 @@ import { callProgress, callSettledFrom, callStarted } from "#harness/call-facts.
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toError } from "#shared/errors.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
-import { parseJsonObject } from "#shared/json.js";
 import { toModelSchema } from "#tools/schema.js";
-import { projectToolStartLabel } from "#harness/action-presentation.js";
+import { projectToolLabel } from "#harness/action-presentation.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 // eve runs every local call itself: the AI SDK only calls the model. The calls a model response
@@ -77,27 +69,13 @@ export interface ToolSignIn {
 
 /** How one call came out: its result for the model, or what it waits on instead. */
 export interface CallOutcome {
-  readonly once?: OnceApproval;
+  readonly remember?: RememberRequest;
   readonly clearedBy?: ClearedBy;
   readonly settled: readonly CallResult[];
   /** What `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly awaitsApproval?: true;
   readonly signIn?: ToolSignIn;
-}
-
-/** Where a call's facts belong: its turn, and the run that made it when it's open. */
-export interface CallPosition {
-  readonly turnId: string;
-  readonly runId?: string;
-  readonly sequence?: number;
-  readonly stepIndex?: number;
-}
-
-export function scopeOf(position: CallPosition): { turnId: string; runId?: string } {
-  return position.runId === undefined
-    ? { turnId: position.turnId }
-    : { runId: position.runId, turnId: position.turnId };
 }
 
 /**
@@ -108,10 +86,9 @@ export async function executeToolCall(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
     readonly abortSignal: AbortSignal | undefined;
-    readonly approvalGrants?: readonly ApprovalGrant[];
+    readonly approvalMemory?: ApprovalMemory;
     readonly definition: RunnableTool;
     readonly messages: readonly ModelMessage[];
-    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly telemetry?: TelemetryOptions;
     /** The AI SDK's ID for the model call that made a fresh call. */
@@ -132,7 +109,6 @@ export async function executeToolCall(
 ): Promise<CallOutcome> {
   const { callId, toolName, input: args } = call;
   const { definition } = input;
-  const at = scopeOf(input.position);
   const settled: CallResult[] = [];
   const toolResults: TypedToolResult<ToolSet>[] = [];
   // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
@@ -170,27 +146,20 @@ export async function executeToolCall(
         toolResults,
       };
     }
-    const decision =
-      approval === "recheck"
-        ? await recheckApprovedCall(definition, {
-            abortSignal: input.abortSignal,
-            callId,
-            input: args,
-            approvalGrants: input.approvalGrants,
-          })
-        : await decideApproval(definition, {
-            abortSignal: input.abortSignal,
-            callId,
-            input: args,
-            approvalGrants: input.approvalGrants,
-          });
+    const decision = await decideApproval(definition, {
+      abortSignal: input.abortSignal,
+      callId,
+      input: args,
+      approvalMemory: input.approvalMemory,
+      recheck: approval === "recheck",
+    });
     if (decision.awaitsPerson === true)
-      return { awaitsApproval: true, once: decision.once, settled, toolResults };
+      return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
         { callId, input: args, toolName },
-        { approval, position: at, publish: input.publish, reason: decision.reason },
+        { publish: input.publish, reason: decision.reason },
       );
       return { settled: [...settled, ...denial.settled], toolResults };
     }
@@ -230,13 +199,7 @@ export async function executeToolCall(
               output = partial;
               const visible = withoutSignInSecrets(partial);
               await input.publish(
-                callProgress(
-                  callId,
-                  visible,
-                  projectDeltaPresentation(definition, callId, parseJsonObject(args), visible)?.[
-                    callId
-                  ]?.label,
-                ),
+                callProgress(callId, visible, projectToolLabel(definition, "delta", args, visible)),
               );
             }
           } else {
@@ -307,10 +270,7 @@ export async function executeToolCall(
           toolName,
         }),
         {
-          label: failed
-            ? undefined
-            : projectResultPresentation(definition, callId, parseJsonObject(args), output)?.[callId]
-                ?.label,
+          label: failed ? undefined : projectToolLabel(definition, "complete", args, output),
         },
       ),
     );
@@ -491,10 +451,9 @@ export async function executeInlineCalls(input: {
   readonly excludedCallIds: ReadonlySet<string>;
   /** The step's entries: each call already names the entry it runs. */
   readonly tools: HarnessToolLookup;
-  readonly approvalGrants: readonly ApprovalGrant[];
+  readonly approvalMemory: ApprovalMemory;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
-  readonly position: CallPosition;
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   readonly telemetry?: TelemetryOptions;
@@ -527,7 +486,7 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? { ...approvalRequest(call, definition), once: executed.once }
+              ? { ...approvalRequest(call, definition), remember: executed.remember }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -563,20 +522,19 @@ async function decideDeferredCall(
   definition: HarnessToolDefinition,
   input: {
     readonly abortSignal: AbortSignal | undefined;
-    readonly approvalGrants: readonly ApprovalGrant[];
-    readonly position: CallPosition;
+    readonly approvalMemory: ApprovalMemory;
     readonly publish: HandleEventFn;
   },
 ): Promise<CallOutcome> {
   if (definition.approval === undefined) return { settled: [], toolResults: [] };
   const decision = await decideApproval(definition, {
     abortSignal: input.abortSignal,
-    approvalGrants: input.approvalGrants,
+    approvalMemory: input.approvalMemory,
     callId: call.callId,
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return { awaitsApproval: true, once: decision.once, settled: [], toolResults: [] };
+    return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
   if (!decision.denied)
     return {
       settled: [],
@@ -584,22 +542,15 @@ async function decideDeferredCall(
       clearedBy: decision.clearedBy,
     };
   return await publishDenial(call, {
-    approval: "evaluate",
-    position: input.position,
     publish: input.publish,
     reason: decision.reason,
   });
 }
 
-/**
- * Reports a call its approval policy refused, so it doesn't run. A refusal as the response ends
- * fails the call, as the AI SDK reported it; a refusal of a call a person approved rejects it.
- */
-async function publishDenial(
+/** Reports a call its approval policy refused: it settles rejected, without running. */
+export async function publishDenial(
   call: { readonly callId: string; readonly input: unknown; readonly toolName: string },
   input: {
-    readonly approval: "evaluate" | "recheck";
-    readonly position: CallPosition;
     readonly publish: HandleEventFn;
     readonly reason: string | undefined;
   },
@@ -611,30 +562,20 @@ async function publishDenial(
     type: "tool-result",
   } satisfies ToolResultPart;
   await input.publish(
-    input.approval === "evaluate"
-      ? callSettledFrom(
-          createRuntimeToolResultFromValue({
-            callId: call.callId,
-            isError: true,
-            output: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-            toolName: call.toolName,
-          }),
-          {},
-        )
-      : callSettledFrom(
-          {
-            callId: call.callId,
-            isError: true,
-            kind: "tool-result",
-            output: {
-              code: "TOOL_EXECUTION_DENIED",
-              message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-              tool: { result: "not_run" },
-            },
-            toolName: call.toolName,
-          },
-          { rejected: true },
-        ),
+    callSettledFrom(
+      {
+        callId: call.callId,
+        isError: true,
+        kind: "tool-result",
+        output: {
+          code: "TOOL_EXECUTION_DENIED",
+          message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+          tool: { result: "not_run" },
+        },
+        toolName: call.toolName,
+      },
+      { rejected: true },
+    ),
   );
   return { settled: [{ part }], toolResults: [] };
 }
@@ -647,8 +588,9 @@ function approvalRequest(
   call: TypedToolCall<ToolSet>,
   definition: HarnessToolDefinition | undefined,
 ): ApprovalAsk {
-  const { callId, input, toolName } = createRuntimeToolCallActionFromToolCall({ toolCall: call });
-  const label = projectToolStartLabel(definition, input) ?? displayTitle(toolName);
+  const { toolCallId: callId, toolName } = call;
+  const input = resolveToolCallInputObject(call.input, { callId, toolName });
+  const label = projectToolLabel(definition, "start", input) ?? displayTitle(toolName);
   const prompt = authoredApprovalPrompt(call, definition);
   return {
     call: {

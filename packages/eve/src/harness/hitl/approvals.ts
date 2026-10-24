@@ -1,6 +1,10 @@
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import {
+  type ApprovalMemory,
+  type RememberedApproval,
+  rememberDecision,
+} from "#approval/evaluation.js";
 
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -191,16 +195,26 @@ export function admitAnswers(
   }
   for (const responseId of check.admit) responses.admit(responseId);
   const refusal = check.refused.map(({ reason }) => reason).join("\n");
-  const refused: SessionEvent[] =
-    check.refused.length === 0
-      ? []
-      : (delivery?.deliveries ?? []).map(({ deliveryId }) => ({
-          data: { deliveryId, outcome: "refused", reason: refusal },
-          type: "delivery.settled",
-        }));
+  // The step's input can join an earlier delivery whose answer waits for the rest of its batch:
+  // only the deliveries that carried a refused answer, and haven't settled, are refused.
+  const refusedIds = new Set(check.refused.map(({ responseId }) => responseId));
+  const carriers = (delivery?.answers ?? [])
+    .filter(({ responseId }) => refusedIds.has(responseId))
+    .map(({ deliveryId }) => deliveryId);
+  const traced =
+    carriers.length === check.refused.length && carriers.every((id) => id !== undefined);
+  const refusedDeliveries = new Set(
+    traced ? carriers : (delivery?.deliveries ?? []).map(({ deliveryId }) => deliveryId),
+  );
+  const refused: SessionEvent[] = [...refusedDeliveries]
+    .filter((deliveryId) => tables.deliveries[deliveryId]?.status !== "settled")
+    .map((deliveryId) => ({
+      data: { deliveryId, outcome: "refused", reason: refusal },
+      type: "delivery.settled",
+    }));
   return {
     events: [...responses.facts(), ...refused],
-    responders: { upsert: check.weigh },
+    responders: check.weigh,
     turn: view.turn,
   };
 }
@@ -236,8 +250,9 @@ export interface RunnableCall {
 /**
  * A step's approvals settle together, once each has a standing answer. A message steers past
  * them instead: the answers given stand, and the approvals nobody answered are withdrawn.
- * Approved calls are returned to run; denied ones get their denial as a result, and `once()`
- * approvals remember their tool. `answered` says a step settled on its answers rather than a message.
+ * Approved calls are returned to run; denied ones get their denial as a result.
+ * A request that asked to be remembered records the decision. `answered` says a step settled on
+ * its answers rather than a message.
  */
 export function settleApprovals(
   view: SessionView,
@@ -250,13 +265,19 @@ export function settleApprovals(
   const answerOf = (request: ApprovalAsk) =>
     responseOf(request.interactionId, standing.get(request.interactionId));
   const responses = responseLedger(tables);
-  let grants = [...view.turn.grants];
   const approved: RunnableCall[] = [];
   let answered = false;
   const events: SessionEvent[] = [];
+  const decisions: {
+    readonly at: number;
+    readonly request: ApprovalAsk;
+    readonly outcome: RememberedApproval["outcome"];
+  }[] = [];
   const decide = (request: ApprovalAsk, outcome: InteractionOutcome, reason?: string) => {
     const answer = outcome === "withdrawn" ? undefined : standing.get(request.interactionId);
     if (answer !== undefined) responses.settle(answer.responseId, "applied");
+    if (answer !== undefined && (outcome === "accepted" || outcome === "declined"))
+      decisions.push({ at: answer.introducedAt, outcome, request });
     responses.closeOthers(request.interactionId, answer?.responseId);
     events.push(
       interactionSettled(request.interactionId, outcome, {
@@ -279,10 +300,6 @@ export function settleApprovals(
       const { callId, toolName } = request.call;
       const { approved: approves, reason, status } = resolveApprovalOutcome(answerOf(request));
       if (approves) {
-        if (request.once?.grantable === true) {
-          grants = grants.filter((grant) => grant.toolName !== toolName);
-          grants.push({ toolName, interactionId: request.interactionId });
-        }
         const responder = view.responders[standing.get(request.interactionId)?.responseId ?? ""];
         approved.push({
           approval: {
@@ -325,11 +342,21 @@ export function settleApprovals(
     }
     return { ...step, messages };
   });
+  // Decisions settled together apply in the order people gave them, and the latest one stands.
+  // Answers in one delivery share a position and can't be ordered, so a denial among them stands.
+  const declinedLast = (decision: (typeof decisions)[number]) =>
+    decision.outcome === "declined" ? 1 : 0;
+  const remembered = decisions
+    .sort((a, b) => a.at - b.at || declinedLast(a) - declinedLast(b))
+    .reduce(
+      (memory, decision) => rememberDecision(memory, decision.request, decision.outcome),
+      view.turn.remembered,
+    );
   return {
     answered,
     approved,
     events: [...responses.facts(), ...events],
-    turn: { ...view.turn, grants, suspended },
+    turn: { ...view.turn, remembered, suspended },
   };
 }
 
@@ -367,24 +394,15 @@ export function withdrawUnavailable(
   return { events: [...responses.facts(), ...events], turn: { ...view.turn, suspended } };
 }
 
-/** Remembered approvals, excluding tools still awaiting an independent once() decision. */
-export function grantedApprovals(view: SessionView): readonly ApprovalGrant[] {
-  const pending = view.turn.suspended.flatMap((step) =>
-    pendingApprovals(view, step).filter((request) => request.once !== undefined),
-  );
-  return view.turn.grants.filter(
-    (grant) => !pending.some((request) => request.call.toolName === grant.toolName),
-  );
-}
-
-/** The suspended step that holds `interactionId`. */
-export function stepForRequest(
-  view: SessionView,
-  interactionId: string,
-): SuspendedStep | undefined {
-  return view.turn.suspended.find((step) =>
-    step.requests.some((request) => request.interactionId === interactionId),
-  );
+export function approvalMemory(view: SessionView): ApprovalMemory {
+  return {
+    pending: view.turn.suspended.flatMap((step) =>
+      pendingApprovals(view, step).flatMap((request) =>
+        request.remember === undefined ? [] : [request.remember.key],
+      ),
+    ),
+    remembered: view.turn.remembered,
+  };
 }
 
 // ---------------------------------------------------------------------------

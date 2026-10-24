@@ -58,6 +58,7 @@ export function storedProjection(state: SessionStateMap | undefined): SessionPro
   const projection: SessionProjection = {
     counters: stored.counters ?? initial.counters,
     view: stored.view ?? initial.view,
+    usageWindow: stored.usageWindow,
   };
   return stored.outputStarted === undefined
     ? projection
@@ -100,12 +101,6 @@ export function activeTurnId(position: Pick<TurnPosition, "sequence" | "turnId">
 
 export function isBetweenTurns(projection: SessionProjection): boolean {
   return activeTurnIdOf(projection) === undefined;
-}
-
-/** The index the open turn's next `step.started` takes. */
-export function nextStepIndex(projection: SessionProjection): number {
-  const turnId = activeTurnIdOf(projection);
-  return turnId === undefined ? 0 : (projection.view.turns[turnId]?.runs ?? 0);
 }
 
 /** Input the session holds until it can run. */
@@ -161,6 +156,16 @@ export function runtimeWait(state: SessionStateMap | undefined): RuntimeWait | u
     taskToolCalls,
     tasks,
   };
+}
+
+/** The suspended step whose approval `interactionId` names. */
+export function stepForRequest(
+  view: SessionView,
+  interactionId: string,
+): SuspendedStep | undefined {
+  return view.turn.suspended.find((step) =>
+    step.requests.some((request) => request.interactionId === interactionId),
+  );
 }
 
 /** Requests this session asked itself and still awaits; relayed requests answer elsewhere. */

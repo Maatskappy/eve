@@ -1,4 +1,5 @@
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
   isStepCount,
   type LanguageModel,
@@ -54,7 +55,11 @@ import { createLogger, logError } from "#internal/logging.js";
 import { maybeCompact } from "#harness/compaction/step.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
-import { isEmptyModelResponse, rethrowNoOutputAsEmptyResponse } from "./recovery.js";
+import {
+  isEmptyModelResponse,
+  recoverModelCall,
+  rethrowNoOutputAsEmptyResponse,
+} from "./recovery.js";
 import {
   modelInstructions,
   requestMessages,
@@ -62,7 +67,7 @@ import {
   withTrailingUserNote,
 } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
-import { runModelCallWithRetries } from "./retry.js";
+import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 import { withUniqueCallIds } from "./unique-call-ids.js";
 import { modelCallErrorInfo } from "./failure.js";
 import { prepareModelTools } from "./tools.js";
@@ -99,7 +104,7 @@ interface ModelCallerInput {
   readonly model: LanguageModel;
   readonly generation: GenerationSteering;
   readonly turnMessages: readonly HarnessModelMessage[];
-  readonly approvalGrants: readonly ApprovalGrant[];
+  readonly approvalMemory: ApprovalMemory;
   readonly pendingApprovalsNote: string | undefined;
   /** The prompt as the step started it, projected for the model. */
   readonly projectedMessages: HarnessModelMessage[];
@@ -156,17 +161,32 @@ export class ModelCaller {
   }
 
   /** Calls the model, retrying transient failures. */
-  async call(options: ModelCallOptions): Promise<HarnessStepResult> {
-    return await runModelCallWithRetries(
-      async () => await this.attempt(options),
-      {
-        canRetry: () => this.compactionFailure === undefined,
-        onRetry: async (error) => await this.prepareRetry(error),
-        sessionId: this.step.session.sessionId,
-        turnId: this.step.position().turnId,
-      },
-      this.input.generation.signal,
-    );
+  async call(): Promise<HarnessStepResult> {
+    let options: ModelCallOptions = {};
+    const diagnostics = {
+      // A summary that failed already settled the compaction; another attempt can't redo it.
+      policies: [() => (this.compactionFailure === undefined ? ALLOW_RETRY : STOP_RETRY)],
+      onRetry: (error: unknown) => this.prepareRetry(error),
+      sessionId: this.step.session.sessionId,
+      turnId: this.step.position().turnId,
+    };
+    for (;;) {
+      try {
+        return await runModelCallWithRetries(
+          () => this.attempt(options),
+          diagnostics,
+          this.input.generation.signal,
+        );
+      } catch (error) {
+        if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
+        throwIfTurnAborted(this.step.config.abortSignal);
+        this.input.generation.check();
+        const recovery = recoverModelCall(error, options, diagnostics);
+        if (recovery === undefined) throw error;
+        await this.prepareRetry(error);
+        options = recovery;
+      }
+    }
   }
 
   /**
@@ -174,7 +194,7 @@ export class ModelCaller {
    * new one: the calls it announced settle `abandoned`, since eve can't tell whether they ran. One
    * that published nothing retries in the same run, and the stream hears why.
    */
-  async prepareRetry(error: unknown): Promise<void> {
+  private async prepareRetry(error: unknown): Promise<void> {
     const { step } = this;
     const runId = step.position().runId;
     const attempt = this.started;
@@ -190,7 +210,7 @@ export class ModelCaller {
     await step.apply([fact("model.retried", { attempt, error: modelCallErrorInfo(error), runId })]);
   }
 
-  /** A failed compaction fails the step, whatever recovery the call attempted. */
+  /** Summary failures belong to the history transition, not model-call recovery. */
   throwIfCompactionFailed(): void {
     if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
   }
@@ -303,14 +323,9 @@ export class ModelCaller {
     }
     if (!compaction.compacted) return tools;
     compactPrompt(step, prompt, compaction.messages);
-    const { compaction: settings } = step.session;
     step.session = {
       ...step.session,
-      compaction: {
-        recentWindowSize: settings.recentWindowSize,
-        threshold: settings.threshold,
-        thresholdPercent: settings.thresholdPercent,
-      },
+      compaction: withoutPromptMeasurement(step.session.compaction),
     };
     this.projectedMessages = projectPrompt(prompt);
     return await this.prepare(options);
@@ -494,12 +509,11 @@ export class ModelCaller {
     const { step } = this;
     const results = await executeInlineCalls({
       abortSignal: this.input.generation.signal,
-      approvalGrants: this.input.approvalGrants,
+      approvalMemory: this.input.approvalMemory,
       beforeExecute: () => this.input.generation.protectToolExecution(),
       excludedCallIds: options.excludedCallIds ?? new Set(),
       messages,
       modelCallId: stepResult.callId,
-      position: { ...step.position(), turnId: activeTurnId(step.position()) },
       publish: step.publish,
       telemetry: options.telemetry,
       toolCalls: (stepResult.toolCalls ?? []) as TypedToolCall<ToolSet>[],

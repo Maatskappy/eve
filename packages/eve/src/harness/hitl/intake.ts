@@ -4,31 +4,35 @@ import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
-import type { ApprovedCall, SessionView, SuspendedStep } from "#harness/session-machine/view.js";
+import {
+  stepForRequest,
+  type ApprovedCall,
+  type SessionView,
+  type SuspendedStep,
+} from "#harness/session-machine/view.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import { signInInteractionId } from "#harness/interaction-facts.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { resetSessionUsageWindow } from "#harness/session-usage.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
   admitAnswers,
   dispatch,
-  grantedApprovals,
+  approvalMemory,
   openLimit,
   queueInput,
   requireSignIn,
   type RunnableCall,
   settleApprovals,
   settleLimit,
-  stepForRequest,
   withdrawSignIns,
   withdrawUnavailable,
 } from "./approvals.js";
-import { rejectApprovedCall, runApprovedCalls, type ApprovedCallResult } from "./approved-calls.js";
+import { runApprovedCalls } from "./approved-calls.js";
+import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
   compactInput,
@@ -38,7 +42,7 @@ import {
   type ResolvedStepInput,
   withoutResponses,
 } from "./delivery.js";
-import { recheckApprovedCall } from "#harness/tools.js";
+import { decideApproval } from "#harness/tools.js";
 import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
 import { callSettledFrom } from "#harness/call-facts.js";
 
@@ -184,10 +188,8 @@ export async function applyHumanDecisions(
   step: Step,
   decided: HumanDecisions,
 ): Promise<StepResult | undefined> {
-  if (decided.limit !== undefined) {
-    if (!decided.limit.granted) throw new SessionLimitDeclinedError();
-    step.session = resetSessionUsageWindow(step.session, step.view().projection.view.usage.total);
-  }
+  // A grant needs no write: its accepted budget prompt started the new window.
+  if (decided.limit?.granted === false) throw new SessionLimitDeclinedError();
   await step.apply(settle(step.view(), { results: [] }));
   return runApproved(step, decided.approved);
 }
@@ -208,7 +210,7 @@ async function runApproved(
     byStep.set(parked, [...(byStep.get(parked) ?? []), approval]);
   }
   const tasks: RuntimeWorkflowTaskRequest[] = [];
-  const denied: ApprovedCallResult[] = [];
+  const denied: CallResult[] = [];
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
@@ -224,20 +226,21 @@ async function runApproved(
         denied.push({ part: failed.part });
         continue;
       }
-      const recheck = await recheckApprovedCall(tool, {
+      const recheck = await decideApproval(tool, {
+        recheck: true,
         abortSignal: step.config.abortSignal,
-        approvalGrants: grantedApprovals(step.view()),
+        approvalMemory: approvalMemory(step.view()),
         callId: approval.call.callId,
         input: approval.call.input,
       });
       if (recheck.denied) {
         denied.push(
-          await rejectApprovedCall({
-            position: step.position(),
-            publish: step.publish,
-            approval,
-            reason: recheck.reason,
-          }),
+          ...(
+            await publishDenial(approval.call, {
+              publish: step.publish,
+              reason: recheck.reason,
+            })
+          ).settled,
         );
       } else {
         workflows.set(approval.call.callId, {
@@ -305,10 +308,9 @@ async function runApproved(
             });
       return await runApprovedCalls({
         abortSignal: step.config.abortSignal,
-        approvalGrants: grantedApprovals(step.view()),
+        approvalMemory: approvalMemory(step.view()),
         approvals,
         messages: step.session.history,
-        position: step.position(),
         publish: step.publish,
         responderOf: (approval) => approval.responder,
         telemetry: attempt?.telemetry,

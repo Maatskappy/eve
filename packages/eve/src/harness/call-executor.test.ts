@@ -32,11 +32,10 @@ it.each([
   const results = await contextStorage.run(ctx, () =>
     executeInlineCalls({
       abortSignal: undefined,
-      approvalGrants: [],
+      approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
-      position: { turnId: "turn_0" },
       publish: async (publication) => {
         events.push(...eventsOf(publication));
       },
@@ -66,6 +65,13 @@ it.each([
     expect(results.parts[0]?.output).toEqual({ type: "text", value: "saved" });
   } else if (outcome === "deny") {
     expect(results.parts[0]?.output).toMatchObject({ type: "execution-denied", reason });
+    // A refusal is told apart from a body that ran and failed: it rejects, and never starts.
+    expect(events.map((event) => event.type)).not.toContain("call.started");
+    expect(events.find((event) => event.type === "call.settled")?.data).toMatchObject({
+      cause: { policy: "approval" },
+      outcome: "rejected",
+      output: { code: "TOOL_EXECUTION_DENIED", tool: { result: "not_run" } },
+    });
   }
 });
 
@@ -82,11 +88,10 @@ it.each([null, "allow", { type: "approved", reason: 123 }])(
     const result = await contextStorage.run(ctx, () =>
       executeInlineCalls({
         abortSignal: undefined,
-        approvalGrants: [],
+        approvalMemory: { pending: [], remembered: {} },
         beforeExecute: () => {},
         excludedCallIds: new Set(),
         messages: [],
-        position: { turnId: "turn_0" },
         publish: async () => {},
         toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "save", type: "tool-call" }],
         tools: new Map([
@@ -129,11 +134,10 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   const results = await contextStorage.run(ctx, () =>
     executeInlineCalls({
       abortSignal: undefined,
-      approvalGrants: [],
+      approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
-      position: { turnId: "turn_0" },
       publish: async () => {},
       toolCalls: [
         {
@@ -154,11 +158,10 @@ it("keeps a thrown tool error's name in the durable call ending", async () => {
   const events: import("#protocol/session-event.js").SessionEvent[] = [];
   await executeInlineCalls({
     abortSignal: undefined,
-    approvalGrants: [],
+    approvalMemory: { pending: [], remembered: {} },
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],
-    position: { turnId: "turn_0" },
     publish: async (publication) => {
       events.push(...eventsOf(publication));
     },
@@ -206,11 +209,10 @@ it.each(["policy", "prompt"] as const)(
     };
     const result = await executeInlineCalls({
       abortSignal: undefined,
-      approvalGrants: [],
+      approvalMemory: { pending: [], remembered: {} },
       beforeExecute: () => {},
       excludedCallIds: new Set(),
       messages: [],
-      position: { turnId: "turn_0" },
       publish: async (publication) => {
         events.push(...eventsOf(publication));
       },
@@ -255,11 +257,10 @@ it("closes a streaming tool when progress publication fails", async () => {
   let closed = false;
   const result = await executeInlineCalls({
     abortSignal: undefined,
-    approvalGrants: [],
+    approvalMemory: { pending: [], remembered: {} },
     beforeExecute: () => {},
     excludedCallIds: new Set(),
     messages: [],
-    position: { turnId: "turn_0" },
     publish: async (publication) => {
       if (eventsOf(publication).some((event) => event.type === "call.progress"))
         throw new Error("Progress unavailable");

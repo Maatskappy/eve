@@ -1,4 +1,4 @@
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage, TelemetryOptions } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -13,7 +13,6 @@ import {
   changedSinceOffered,
   changedToolMessage,
   failedCall,
-  TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
 } from "#harness/approval-outcome.js";
 import { isRunnableTool } from "#harness/tools.js";
@@ -37,14 +36,9 @@ export async function runApprovedCalls(input: {
   readonly approvals: readonly ApprovedCall[];
   /** The entries of the step that asked, which the approved calls run. */
   readonly tools: HarnessToolLookup;
-  readonly approvalGrants?: readonly ApprovalGrant[];
+  readonly approvalMemory?: ApprovalMemory;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
-  readonly position: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
@@ -122,46 +116,5 @@ export async function runApprovedCalls(input: {
   return {
     settled: completed.flatMap((call) => call.settled),
     signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
-  };
-}
-
-/** A local call's result, as an approved call settles. */
-export type ApprovedCallResult = CallResult;
-
-/** Records an approved call refused by its final request-policy check. */
-export async function rejectApprovedCall(input: {
-  readonly approval: ApprovedCall;
-  readonly reason?: string;
-  readonly position: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
-  readonly publish: HandleEventFn;
-}): Promise<ApprovedCallResult> {
-  const { callId, toolName } = input.approval.call;
-  await input.publish(
-    callSettledFrom(
-      {
-        callId,
-        isError: true,
-        kind: "tool-result",
-        output: {
-          code: "TOOL_EXECUTION_DENIED",
-          message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-          tool: { result: "not_run" },
-        },
-        toolName,
-      },
-      { rejected: true },
-    ),
-  );
-  return {
-    part: {
-      output: { reason: input.reason, type: "execution-denied" },
-      toolCallId: callId,
-      toolName,
-      type: "tool-result",
-    },
   };
 }

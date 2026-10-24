@@ -1,4 +1,4 @@
-import type { ApprovalGrant } from "#approval/evaluation.js";
+import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -20,7 +20,7 @@ import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
 import {
   askApprovals,
-  grantedApprovals,
+  approvalMemory,
   pendingApprovals,
   openLimit,
   requestLimit,
@@ -46,7 +46,6 @@ export {
 export { openDeferredApprovals, queueInput } from "./approvals.js";
 export { compactInput, turnInputOnly, withoutTurnInput } from "./delivery.js";
 export type { PendingResponder } from "./responders.js";
-export { discardClearedHitlState as discardClearedHumanInput } from "./requests.js";
 
 /**
  * A model step made calls that need a person's approval: the step's response waits on them
@@ -107,6 +106,7 @@ export async function enforceBudget(
     session: step.session,
     turnSequence: step.position().sequence,
     usage: step.view().projection.view.usage.total,
+    window: step.view().projection.usageWindow,
   });
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {
@@ -122,23 +122,23 @@ export async function enforceBudget(
       code: limit.code,
       details: limit.details,
       message: limit.message,
-      terminal: { sessionId: step.session.sessionId },
+      terminal: true,
     }),
   );
   return { next: { done: true, output: "" }, session: step.session };
 }
 
 /**
- * What a model call needs from the approvals: the remembered `once()` approvals of `tools`, and
+ * What a model call needs from the approvals: what their policies remember, and
  * a note on the calls still awaiting approval, which a message may revise.
  */
 export function humanInputContext(step: Step): {
-  readonly approvalGrants: readonly ApprovalGrant[];
+  readonly approvalMemory: ApprovalMemory;
   readonly pendingApprovalsNote?: string;
 } {
   const view = step.view();
   return {
-    approvalGrants: grantedApprovals(view),
+    approvalMemory: approvalMemory(view),
     pendingApprovalsNote: renderPendingApprovalsInstruction(
       view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
     ),

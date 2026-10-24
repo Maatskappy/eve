@@ -8,13 +8,8 @@ import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
-import {
-  type ApprovalGrant,
-  markApprovalRecheck,
-  onceOutcome,
-  withApprovalGrants,
-} from "#approval/evaluation.js";
-import { approvalDecision, type ApprovalDecision } from "#approval/status.js";
+import { type ApprovalMemory, evaluateApproval } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
 import { createLogger } from "#internal/logging.js";
@@ -175,17 +170,8 @@ interface ApprovalCall {
   readonly callId: string;
   readonly input: unknown;
   readonly abortSignal?: AbortSignal;
-  readonly approvalGrants?: readonly ApprovalGrant[];
+  readonly approvalMemory?: ApprovalMemory;
   readonly recheck?: boolean;
-}
-
-/** Rechecks a person's approved call, allowing a policy to deny it before execution. */
-export async function recheckApprovedCall(
-  definition: HarnessToolDefinition,
-  call: ApprovalCall,
-): Promise<ApprovalDecision> {
-  const decision = await decideApproval(definition, { ...call, recheck: true });
-  return decision.awaitsPerson === true ? { denied: false } : decision;
 }
 
 /** Decides whether a call runs, needs a person's approval, or is denied. */
@@ -194,7 +180,8 @@ export async function decideApproval(
   call: ApprovalCall,
 ): Promise<ApprovalDecision> {
   if (definition.approval === undefined) return { denied: false };
-  const context = withApprovalGrants(
+  return await evaluateApproval(
+    resolveApprovalPolicy(definition.approval),
     {
       ...buildCallbackContext(),
       abortSignal: call.abortSignal ?? new AbortController().signal,
@@ -202,17 +189,6 @@ export async function decideApproval(
       toolInput: isObject(call.input) ? call.input : undefined,
       toolName: definition.name,
     },
-    call.approvalGrants ?? [],
+    { memory: call.approvalMemory, recheck: call.recheck },
   );
-  const status = await resolveApprovalPolicy(definition.approval)(
-    call.recheck === true ? markApprovalRecheck(context) : context,
-  );
-  const decision = approvalDecision(status);
-  const once = onceOutcome(status);
-  if (once === "required") return { ...decision, once: { grantable: true } };
-  const grant = call.approvalGrants?.find((entry) => entry.toolName === definition.name);
-  if (once === "granted" && grant !== undefined) {
-    return { ...decision, clearedBy: { grant: { interactionId: grant.interactionId } } };
-  }
-  return decision;
 }

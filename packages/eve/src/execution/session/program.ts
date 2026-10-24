@@ -88,7 +88,6 @@ type SessionActionResult =
 interface SessionProgress {
   /** Delegated caller whose awaited reply is still unsettled. */
   caller: TurnCaller | undefined;
-  terminalEmitted: boolean;
   /** Last dispatched turn; a crash between turns is attributed to it. */
   turnId?: string;
 }
@@ -109,7 +108,7 @@ export async function runPreparedSession(
     serializedContext: boot.serializedContext,
     sessionState: boot.sessionState,
   });
-  const progress: SessionProgress = { caller: boot.caller, terminalEmitted: false };
+  const progress: SessionProgress = { caller: boot.caller };
   const handoff = new SessionHandoff({
     checkpoint: {
       capabilities: boot.capabilities,
@@ -123,6 +122,7 @@ export async function runPreparedSession(
   });
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
+  let finalizing = false;
   try {
     result = await withStubPlayback(scope, boot.sessionId, async () => {
       try {
@@ -135,17 +135,19 @@ export async function runPreparedSession(
         result = await handoff.awaitAnchoredResult();
         return result;
       }
+      finalizing = true;
       result = await finalizeSession(loop.outcome, {
         caller: progress.caller,
         cursor,
         sessionWritable: boot.sessionWritable,
       });
-      progress.terminalEmitted = true;
       return result;
     });
     return result;
   } catch (error) {
-    if (!progress.terminalEmitted) {
+    // Once finalization of the decided outcome starts, failing it must not report a different
+    // outcome. The channel may already have handled the decided terminal event.
+    if (!finalizing) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
         { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },

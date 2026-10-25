@@ -250,6 +250,44 @@ describe("parent development Workflow World", () => {
     }
   });
 
+  it("names the generations of pending and running runs, not finished ones", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-active-generations-");
+    await seedGeneration(appRoot, "generation-a");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    await world.start();
+    try {
+      const created = async (deploymentId: string) =>
+        readCreatedRunId(
+          await callWorld(world, "events.create", [
+            null,
+            {
+              eventData: {
+                deploymentId,
+                executionContext: {},
+                input: new Uint8Array(),
+                workflowName: workflowEntryReference.workflowId,
+              },
+              eventType: "run_created",
+              specVersion: 6,
+            },
+          ]),
+        );
+      await created("generation-a");
+      await created("parked");
+      const finished = await created("finished");
+      await callWorld(world, "events.create", [
+        finished,
+        { eventData: { cancelReason: "test" }, eventType: "run_cancelled", specVersion: 6 },
+      ]);
+
+      await expect(world.activeRunGenerationIds()).resolves.toEqual(
+        new Set(["generation-a", "parked"]),
+      );
+    } finally {
+      await world.close();
+    }
+  });
+
   it("recovers retained runs across restarts without recovering cancelled orphans", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
     await seedGeneration(appRoot, "retained");

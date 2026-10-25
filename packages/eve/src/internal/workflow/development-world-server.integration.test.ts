@@ -602,6 +602,100 @@ describe("parent development Workflow World", () => {
     }
   });
 
+  it("keeps a run parked on an old generation answerable through activations past the grace and keep-5 limits", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-parked-run-");
+    const snapshots = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    await seedGeneration(appRoot, "parked");
+    await seedGeneration(appRoot, "finished");
+    await seedGeneration(appRoot, "current");
+    const world = createWorld({ activeGenerationId: () => "current", appRoot });
+    await world.start();
+    const createRun = async (deploymentId: string) =>
+      readCreatedRunId(
+        await callWorld(world, "events.create", [
+          null,
+          {
+            eventData: {
+              deploymentId,
+              executionContext: {},
+              input: new Uint8Array(),
+              workflowName: workflowEntryReference.workflowId,
+            },
+            eventType: "run_created",
+            specVersion: 6,
+          },
+        ]),
+      );
+    try {
+      const parked = await createRun("parked");
+      await callWorld(world, "events.create", [
+        parked,
+        { eventType: "run_started", specVersion: 6 },
+      ]);
+      const finished = await createRun("finished");
+      await callWorld(world, "events.create", [
+        finished,
+        { eventType: "run_completed", specVersion: 6, eventData: { output: new Uint8Array() } },
+      ]);
+      for (const generationId of ["parked", "finished"]) {
+        await writeFile(join(snapshots, generationId, "activated"), "");
+        await writeFile(
+          join(snapshots, generationId, "retired.json"),
+          JSON.stringify({ retiredAt: 0 }),
+        );
+      }
+      for (let index = 0; index < 6; index++) {
+        const generationId = `recent-${index}`;
+        await seedGeneration(appRoot, generationId);
+        await writeFile(join(snapshots, generationId, "activated"), "");
+        await writeFile(
+          join(snapshots, generationId, "retired.json"),
+          JSON.stringify({ retiredAt: Date.now() }),
+        );
+      }
+      const snapshotRoot = join(snapshots, "current");
+      const runtimeAppRoot = join(snapshotRoot, "source", "app");
+      const compileRoot = join(runtimeAppRoot, ".eve", "compile");
+      await mkdir(compileRoot, { recursive: true });
+      await writeFile(
+        join(compileRoot, "module-map.mjs"),
+        "export const moduleMap = { nodes: {} };\n",
+      );
+      await writeFile(
+        join(compileRoot, "authored-modules.json"),
+        JSON.stringify({ fingerprint: "test", moduleMap: "module-map.mjs", version: 3 }),
+      );
+      const reconciled = Promise.withResolvers<void>();
+      await activateDevelopmentGeneration({
+        appRoot,
+        generation: {
+          fingerprint: "test",
+          runtimeAppRoot,
+          snapshotRoot,
+          snapshotSourceRoot: join(snapshotRoot, "source"),
+          sourceRoot: appRoot,
+        },
+        activeRunGenerationIds: () => world.activeRunGenerationIds(),
+        onRuntimePruned: async () => {
+          try {
+            await world.reconcileExpiredRuns();
+            reconciled.resolve();
+          } catch (error) {
+            reconciled.reject(error);
+          }
+        },
+      });
+      await reconciled.promise;
+      await expect(access(join(snapshots, "parked"))).resolves.toBeUndefined();
+      await expect(access(join(snapshots, "finished"))).rejects.toThrow();
+      await expect(callWorld(world, "runs.get", [parked])).resolves.toMatchObject({
+        status: "running",
+      });
+    } finally {
+      await world.close();
+    }
+  });
+
   it("routes a pre-start health check to the active generation before its run exists", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-health-check-");
     await seedGeneration(appRoot, "generation-b");

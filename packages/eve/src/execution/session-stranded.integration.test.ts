@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { MockLanguageModelV4 } from "ai/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import { createSession } from "#channel/session.js";
@@ -6,6 +7,7 @@ import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
 import type { Runtime } from "#channel/types.js";
 import {
+  EVE_DEPLOYMENT_URL_ATTRIBUTE,
   EVE_SESSION_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
@@ -32,7 +34,12 @@ import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
 import { type SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { transcriptOf, type TranscriptData } from "#client/transcript.js";
 import { sessions } from "#public/server/index.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { defineDynamic, defineInstructions } from "#public/definitions/instructions.js";
+import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
+import { markMockModel } from "#internal/mock-model-identity.js";
+import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
+import { defineTool } from "#tools/definition.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 /** eve version recorded by the owner an earlier build left parked on the local World. */
@@ -51,6 +58,35 @@ async function parkStrandedOwner(
   const run = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
     allowReservedAttributes: true,
     attributes: { ...attributes, [EVE_VERSION_ATTRIBUTE]: PREVIOUS_EVE_VERSION },
+  });
+  await waitForHook(run, { token: sessionInboxHookToken(continuationToken) });
+  return run;
+}
+
+/** The unique URL of a Vercel deployment that has since been deleted. */
+const DELETED_DEPLOYMENT_URL = "agent-deleted.vercel.app";
+
+/**
+ * Parks a session owner this eve version started on a Vercel deployment that
+ * was deleted afterwards: Vercel answers its URL with `DEPLOYMENT_NOT_FOUND`.
+ */
+async function parkOwnerOnDeletedDeployment(continuationToken: string): Promise<ParkedRun> {
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input) !== `https://${DELETED_DEPLOYMENT_URL}` || init?.method !== "HEAD") {
+      return await realFetch(input, init);
+    }
+    return new Response(null, {
+      headers: { "x-vercel-error": "DEPLOYMENT_NOT_FOUND" },
+      status: 404,
+    });
+  });
+  const run = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
+    allowReservedAttributes: true,
+    attributes: {
+      [EVE_DEPLOYMENT_URL_ATTRIBUTE]: DELETED_DEPLOYMENT_URL,
+      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+    },
   });
   await waitForHook(run, { token: sessionInboxHookToken(continuationToken) });
   return run;
@@ -198,7 +234,81 @@ async function resetSession(runtime: Runtime, sessionId: string | undefined): Pr
   });
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("stranded sessions", () => {
+  it("refuses a session whose owner is pinned to a deleted deployment", async () => {
+    const test = await createTestRuntime({ agent: { name: "stranded-deployment-by-id" } });
+    await test.run(async () => {
+      const stranded = await parkOwnerOnDeletedDeployment("http:stranded-deployment-by-id");
+      const runtime = channelRuntime();
+      try {
+        const eventsBefore = await listEventIds(stranded.runId);
+
+        const refusal = await createSession(stranded.runId, runtime)
+          .send("Alice follows up after the redeploy.", { auth: null })
+          .catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(SessionStrandedError);
+        expect(refusal).toMatchObject({
+          owner: { eveVersion: resolveInstalledPackageInfo().version },
+        });
+        const response = await createSessionStreamResponse(
+          new Request(`https://eve.test/eve/v1/session/${stranded.runId}/stream`),
+          createSession(stranded.runId, runtime),
+        );
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({ code: "session_stranded" });
+        await expect(listEventIds(stranded.runId)).resolves.toEqual(eventsBefore);
+        await expect(stranded.status).resolves.toBe("running");
+      } finally {
+        await cancelIfActive(stranded);
+      }
+    });
+  });
+
+  it("runs the replacement as the message's author and queues another author behind it", async () => {
+    const { runtime: test, seen } = await callerRecordingRuntime("stranded-deployment-callers");
+    await test.run(async () => {
+      const continuationToken = "http:stranded-deployment-callers";
+      const stranded = await parkOwnerOnDeletedDeployment(continuationToken);
+      const runtime = channelRuntime();
+      const address = httpAddress(runtime, "stranded-deployment-callers");
+      let freshSessionId: string | undefined;
+      try {
+        const fresh = await address.send("Alice asks whoami after the redeploy.", {
+          auth: ALICE,
+        });
+        freshSessionId = fresh.sessionId;
+        // Bob arrives while Alice's turn is still inside the slow tool.
+        await waitForHook(
+          { runId: fresh.sessionId },
+          { token: sessionInboxHookToken(continuationToken) },
+        );
+        const bobs = await address.send("Bob asks whoami right behind her.", { auth: BOB });
+
+        expect(fresh.sessionId).not.toBe(stranded.runId);
+        expect(bobs.sessionId).toBe(fresh.sessionId);
+        await expect(stranded.status).resolves.toBe("cancelled");
+        const turns = await readTurns(fresh.sessionId, 2);
+        // Each turn carries exactly its author's message and runs as that author.
+        expect(turns).toEqual([
+          { messages: ["Alice asks whoami after the redeploy."], turnId: "turn_0" },
+          { messages: ["Bob asks whoami right behind her."], turnId: "turn_1" },
+        ]);
+        expect(seen).toEqual([
+          { caller: "alice", turnId: "turn_0" },
+          { caller: "bob", turnId: "turn_1" },
+        ]);
+      } finally {
+        await cancelIfActive(stranded);
+        await resetSession(runtime, freshSessionId);
+      }
+    });
+  });
+
   it("ends a stranded session on a channel delivery and starts a fresh one", async () => {
     const test = await createTestRuntime({ agent: { name: "stranded-session-alias" } });
     await test.run(async () => {
@@ -675,6 +785,92 @@ describe("stranded sessions", () => {
     });
   });
 });
+
+function testUser(principalId: string) {
+  return {
+    attributes: {},
+    authenticator: "test",
+    issuer: "test",
+    principalId,
+    principalType: "user" as const,
+  };
+}
+const ALICE = testUser("alice");
+const BOB = testUser("bob");
+
+/** Calls `whoami` once per turn, then replies. */
+const whoamiModel = markMockModel(
+  new MockLanguageModelV4({
+    doStream: async ({ prompt }) =>
+      prompt.at(-1)?.role === "tool"
+        ? textStreamResult("Done.")
+        : toolCallStreamResult({ input: "{}", toolCallId: "call-whoami", toolName: "whoami" }),
+    modelId: "whoami-model",
+    provider: "eve-test",
+  }),
+);
+
+/**
+ * An app whose only tool records the turn's caller. The tool is slow enough
+ * for a second message to arrive while the first turn runs.
+ */
+async function callerRecordingRuntime(name: string) {
+  const seen: Array<{ readonly caller: string | null; readonly turnId: string }> = [];
+  const runtime = await createTestRuntime({
+    agent: {
+      definition: defineAgent({
+        model: defineDynamicModel(() => ({
+          model: whoamiModel,
+          modelContextWindowTokens: 200_000,
+        })),
+      }),
+      name,
+    },
+    modules: [
+      {
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Report who is asking.",
+            execute: async (_input, ctx) => {
+              await new Promise((resolve) => setTimeout(resolve, 1_000));
+              seen.push({
+                caller: ctx.session.auth.current?.principalId ?? null,
+                turnId: ctx.session.turn.id,
+              });
+              return { ok: true };
+            },
+            inputSchema: {},
+          }),
+        }),
+        logicalPath: "tools/whoami.ts",
+      },
+    ],
+  });
+  return { runtime, seen };
+}
+
+/** The first `count` settled turns of a session: each turn's id and the user messages it consumed. */
+async function readTurns(sessionId: string, count: number) {
+  const reader = readSessionEventStream(sessionId).getReader();
+  const turns: Array<{ messages: string[]; turnId: string }> = [];
+  const messages = new Map<string, string[]>();
+  try {
+    while (turns.length < count) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`Session "${sessionId}" ended after ${turns.length} turns.`);
+      if (value.type === "delivery.consumed") {
+        const text = value.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
+        messages.set(value.data.turnId, [...(messages.get(value.data.turnId) ?? []), ...text]);
+      }
+      if (value.type === "turn.settled") {
+        turns.push({ messages: messages.get(value.data.turnId) ?? [], turnId: value.data.turnId });
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return turns;
+}
 
 type TranscriptRead = TranscriptData & { readonly predecessor: SessionPredecessor };
 

@@ -29,8 +29,8 @@ import {
 } from "#execution/session/entry-input.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
+  buildOwnerIdentityAttributes,
   EVE_SESSION_ATTRIBUTE,
-  EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
@@ -258,7 +258,7 @@ async function recordSessionOwner(sessionId: string): Promise<void> {
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
       [EVE_PREWARM_ATTRIBUTE]: "1",
-      [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
+      ...buildOwnerIdentityAttributes(resolveInstalledPackageInfo().version),
     },
     { allowReservedAttributes: true },
   );

@@ -45,13 +45,13 @@ Both kinds of handoff need a Workflow world that can move a session's addresses 
 
 ### Stranded sessions
 
-A session is stranded when another eve version built the workflow run that owns it. A run can only be replayed by the eve version that started it, so the conversation is still stored, but nothing on the current deployment can process a new message. On worlds without per-deployment routing, eve checks the owner before delivering channel messages and input responses, rather than committing them to a session that cannot answer.
+A session is stranded when nothing can replay the workflow run that owns it: another eve version built it, or the Vercel deployment it is pinned to was deleted. A run can only be replayed by the eve version that started it, on the deployment that started it, so the conversation is still stored, but nothing can process a new message. eve checks the owner before delivering channel messages and input responses, rather than committing them to a session that cannot answer.
 
 eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session can never run again:
 
 | World                        | When a session is stranded                                                                                                                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                                                                 |
+| Vercel Workflow              | When the deployment that started the run was deleted. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments, so a version change alone strands nothing.                    |
 | Local world with `eve start` | After any upgrade that changes the eve version. Sessions created before eve recorded its version on the run are treated the same way.                                                                                                 |
 | Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time: a deployment running another version cannot replay these sessions, and eve does not route runs between deployments.                                          |
 | `eve dev`                    | After an eve version change. A session from a previous dev server invocation built by the same eve version is not stranded: it stays dormant until you restart `eve dev` with [`--resume`](../reference/cli#local-workflow-recovery). |

@@ -230,7 +230,7 @@ export async function admitApprovedWork(step: Step, work: ApprovedWork): Promise
     // started the next window.
     const current = getSessionUsageWindowIndex(step.session);
     if ((work.limit.windowIndex ?? current) === current) {
-      step.session = resetSessionUsageWindow(step.session, mintSessionUsageGrant(step.session, []));
+      step.session = resetSessionUsageWindow(step.session, mintSessionUsageGrant(step.session));
     }
   }
   await step.apply(settle(step.view(), { results: [] }));

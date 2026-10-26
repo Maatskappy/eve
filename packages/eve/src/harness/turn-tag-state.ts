@@ -20,7 +20,9 @@
  * zero. {@link toUsage} drops that internal marker when a total crosses into
  * the shared {@link TokenUsage} contract.
  */
+import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import { openInputs } from "#protocol/session-projection.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
@@ -107,7 +109,7 @@ export function getSessionUsageWindow(session: Pick<HarnessSession, "state">): T
  */
 export interface SessionUsageGrant {
   readonly seq: number;
-  /** The relayed prompts it approved, with the total each one showed. */
+  /** The prompts it approved, with the total each one showed. */
   readonly askers: readonly { readonly requestId: string; readonly total?: TokenUsageDelta }[];
 }
 
@@ -145,12 +147,26 @@ export function getSessionUsageGrant(
   return session.state?.[SESSION_USAGE_GRANT_KEY] as SessionUsageGrant | undefined;
 }
 
-/** A new grant at the root of a tree: the one place its grants are minted. */
-export function mintSessionUsageGrant(
-  session: Pick<HarnessSession, "state">,
-  askers: SessionUsageGrant["askers"],
-): SessionUsageGrant {
-  return { askers, seq: (getSessionUsageGrant(session)?.seq ?? 0) + 1 };
+/**
+ * A new grant at the root of a tree: the one place its grants are minted. It
+ * approves every session-limit prompt open in the session, not only the ones
+ * answered, because applying it below closes every parked asker's prompt, and
+ * all of their spend has to count in the window it starts.
+ */
+export function mintSessionUsageGrant(session: Pick<HarnessSession, "state">): SessionUsageGrant {
+  return {
+    askers: openInputs(storedProjection(session.state)).flatMap(({ request }) =>
+      request.kind === "session-limit"
+        ? [
+            {
+              requestId: request.requestId,
+              total: request.action.input["total"] as TokenUsageDelta | undefined,
+            },
+          ]
+        : [],
+    ),
+    seq: (getSessionUsageGrant(session)?.seq ?? 0) + 1,
+  };
 }
 
 /** How many usage windows the session has started before its current one. */

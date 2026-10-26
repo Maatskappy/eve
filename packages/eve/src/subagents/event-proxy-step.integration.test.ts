@@ -35,9 +35,10 @@ import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   applySessionUsageContinuationStep,
   continueSessionUsage,
-  mintRelayedUsageGrant,
 } from "#execution/session-usage-continuation.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
+import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
 import { createTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
 import { DEFAULT_SESSION_USAGE_LIMIT } from "#harness/hitl/budget.js";
@@ -46,6 +47,7 @@ import {
   getSessionUsageGrant,
   getSessionUsageWindow,
   getSessionUsageWindowIndex,
+  mintSessionUsageGrant,
   type SessionUsageGrant,
 } from "#harness/turn-tag-state.js";
 import { storedProjection } from "#harness/session-machine/view.js";
@@ -58,6 +60,11 @@ const sent = vi.hoisted(() => ({
   remote: vi.fn(async (..._args: unknown[]) => {}),
   session: vi.fn(async (..._args: unknown[]) => {}),
   workflowAsk: vi.fn(async (..._args: unknown[]) => {}),
+}));
+// A step that restores its context gets the fixture's bundle back.
+const compiled = vi.hoisted(() => ({ bundle: undefined as unknown }));
+vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
+  getCompiledRuntimeAgentBundle: async () => compiled.bundle,
 }));
 vi.mock("#execution/session-inbox/resume.js", () => ({ resumeSessionInbox: sent.session }));
 vi.mock("#internal/workflow/runtime.js", async (importOriginal: () => Promise<object>) => ({
@@ -116,6 +123,7 @@ function fixture() {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, bundle);
+  compiled.bundle = bundle;
   ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:parent");
   ctx.set(SessionIdKey, "parent-session");
@@ -868,6 +876,24 @@ describe("a Continue on a relayed session-limit prompt", () => {
     ).toBe(M);
   });
 
+  it("credits a parked sibling the answer doesn't name, since the push resumes it too", async () => {
+    // Two workers, each in its own run, parked at 45M; the person answers only the first.
+    const root = await rootWithChildPrompt({
+      root: "a",
+      runPerPrompt: true,
+      totals: [usage(45 * M), usage(45 * M)],
+    });
+
+    const { session } = await answer(root, continueOn(root.request.requestId, alice));
+
+    expect(getSessionUsageGrant(session)?.askers.map((asker) => asker.requestId)).toEqual(
+      root.requests.map((request) => request.requestId),
+    );
+    // Both resume and report 45M: that spend is what the Continue approved.
+    const reported = countRunUsage(countRunUsage(session, usage(45 * M)), usage(45 * M));
+    expect(getSessionUsageWindow(reported).inputTokens).toBe(0);
+  });
+
   it("credits one run's overlapping prompts once, by the largest", async () => {
     // A worker at 45M and its nested worker at 45M, which the worker already counted 30M of.
     const root = await rootWithChildPrompt({ root: "a", totals: [usage(45 * M), usage(45 * M)] });
@@ -875,8 +901,7 @@ describe("a Continue on a relayed session-limit prompt", () => {
     expect(openInputs(storedProjection(parked.state))).toHaveLength(2);
     expect(readHitlState(parked.state).relays.size).toBe(2);
 
-    const ids = root.requests.map((request) => request.requestId);
-    const session = continueSessionUsage(parked, mintRelayedUsageGrant(parked, ids));
+    const session = continueSessionUsage(parked, mintSessionUsageGrant(parked));
 
     const reported = countRunUsage(session, usage(60 * M));
     expect(getSessionUsageWindow(reported).inputTokens).toBe(15 * M);
@@ -935,14 +960,28 @@ describe("a Continue on a relayed session-limit prompt", () => {
           })),
           seq: 7,
         } satisfies SessionUsageGrant);
+      const queue = new SessionInputQueue([]);
       let state: {
         readonly serializedContext: Record<string, unknown>;
         readonly sessionState: DurableSessionState;
       } = root.relayed;
       for (const event of events) {
-        // A forwarded answer applies its grant on admission, before it routes on.
-        const answered = event === "a" ? [a] : event === "b" ? [b] : [];
-        state = await pushTo(state, minted, answered);
+        if (event === "push") {
+          state = await pushTo(state, minted);
+          continue;
+        }
+        // A forwarded answer is admitted, applies its grant, then routes down to its leaf.
+        const delivery = { ...continueOn(event === "a" ? a : b, alice), usageGrant: minted };
+        const admitted = await admitSessionInboxPayload(delivery, { queue });
+        if (admitted.kind !== "usage-continued") throw new Error(`admitted ${admitted.kind}`);
+        state = await pushTo(state, admitted.grant, admitted.answered);
+        const values = { history: [], ...state };
+        const routed = await routeProxiedDeliverStep({
+          ...state,
+          delivery,
+          sessionWritable: root.f.sessionWritable,
+        });
+        state = applySessionStateDelta(values, routed.stateDelta);
       }
       return { minted, session: readDurableSession(state.sessionState) };
     }
@@ -967,7 +1006,10 @@ describe("a Continue on a relayed session-limit prompt", () => {
       expect(sent.hook.mock.calls).toEqual([
         ["m-run-0-hook", { grant: minted, kind: "usage-continued" }],
         ["m-run-1-hook", { grant: minted, kind: "usage-continued" }],
-      ]);
+      ]); // Each answer reached its leaf once per copy, carrying the root's grant.
+      expect(
+        sent.session.mock.calls.map((call) => (call[1] as DeliverHookPayload).usageGrant),
+      ).toEqual(events.filter((event) => event !== "push").map(() => minted));
     });
 
     it("ignores a grant older than the one it applied", async () => {

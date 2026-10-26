@@ -439,7 +439,7 @@ describe("session usage limit", () => {
     expect(resetSessionUsageWindow(later, { askers: [], seq: 1 })).toBe(later);
     expect(getSessionUsageWindowIndex(later)).toBe(1);
     expect(getSessionUsageGrant(later)).toEqual(grant);
-    expect(mintSessionUsageGrant(later, [])).toEqual({ askers: [], seq: 3 });
+    expect(mintSessionUsageGrant(later)).toEqual({ askers: [], seq: 3 });
   });
 
   it("never moves a window's start back when a continuation arrives again", () => {

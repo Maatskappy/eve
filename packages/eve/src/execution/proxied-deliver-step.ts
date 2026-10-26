@@ -13,9 +13,9 @@ import {
 } from "#execution/durable-session-store.js";
 import {
   continueSessionUsage,
-  mintRelayedUsageGrant,
   pushSessionUsageContinuation,
 } from "#execution/session-usage-continuation.js";
+import { mintSessionUsageGrant } from "#harness/turn-tag-state.js";
 import { isSteeringDelivery } from "#execution/session/input-queue.js";
 import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
@@ -207,7 +207,7 @@ async function routeProxiedDeliver(
   // answer brings the root's grant, and every child it reaches gets that one.
   const usageGrant =
     sourceDelivery.usageGrant ??
-    (continued.length === 0 ? undefined : mintRelayedUsageGrant(durableSession, continued));
+    (continued.length === 0 ? undefined : mintSessionUsageGrant(durableSession));
   const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of published.cancelled ? [] : children.values()) {
     if (child.workflowAsk !== undefined) {

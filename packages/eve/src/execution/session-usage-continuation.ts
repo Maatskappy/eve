@@ -16,10 +16,8 @@ import { readHitlState } from "#harness/hitl/index.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import {
   getSessionUsageGrant,
-  mintSessionUsageGrant,
   resetSessionUsageWindow,
   type SessionUsageGrant,
-  type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -87,26 +85,6 @@ export function continueSessionUsage(
   }
   const { costUsd, ...tokens } = unreported;
   return resetSessionUsageWindow(session, grant, costUsd > 0 ? unreported : tokens);
-}
-
-/** Mints the grant for a payload that approves the relayed prompts `requestIds`. */
-export function mintRelayedUsageGrant(
-  session: DurableSession,
-  requestIds: readonly string[],
-): SessionUsageGrant {
-  return mintSessionUsageGrant(
-    session,
-    openInputs(storedProjection(session.state)).flatMap(({ request }) =>
-      request.kind === "session-limit" && requestIds.includes(request.requestId)
-        ? [
-            {
-              requestId: request.requestId,
-              total: request.action.input["total"] as TokenUsageDelta | undefined,
-            },
-          ]
-        : [],
-    ),
-  );
 }
 
 /**

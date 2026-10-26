@@ -1,5 +1,5 @@
 import { defineAuthoringCase, simpleProject } from "../../lib/authoring-case.js";
-import { vercelSetup } from "../../lib/setups/vercel.js";
+import { vercelSetup } from "../vercel-setup.js";
 
 export default defineAuthoringCase({
   startingPoint: simpleProject,

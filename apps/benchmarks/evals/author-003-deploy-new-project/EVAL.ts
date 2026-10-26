@@ -34,11 +34,10 @@ test("deploys the newly linked project to production", () => {
     type: "project.deployed",
     data: { project: "field-notes", url: "https://field-notes.example.test" },
   });
-  // eve owns the remaining deploy flags, such as `--logs`.
   expect(worldEvents).toContainEqual({
     type: "vercel.invoked",
     data: {
-      args: expect.arrayContaining(["deploy", "--prod", "--yes", "--non-interactive"]),
+      args: ["deploy", "--prod", "--yes", "--non-interactive"],
       nonInteractive: true,
     },
   });

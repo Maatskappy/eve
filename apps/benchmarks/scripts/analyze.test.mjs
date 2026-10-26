@@ -136,3 +136,36 @@ test("aggregates docs reads across harnesses and lists unread pages", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("counts docs pages named relative to a cd into the docs", () => {
+  const root = mkdtempSync(join(tmpdir(), "eve-benchmark-analyze-"));
+  const bash = (command) => ({ type: "tool_use", name: "Bash", input: { command } });
+  try {
+    writeRuns(root, {
+      "claude-code": [
+        {
+          type: "assistant",
+          message: {
+            usage: { input_tokens: 10, output_tokens: 3 },
+            content: [
+              bash(`cd ${docs} && cat channels/slack.mdx > /tmp/slack.md; ls memory/`),
+              // The shell keeps its directory between Claude Code calls.
+              bash("cat ./tools/overview.mdx"),
+              bash("cd /vercel/sandbox && cat AGENTS.md"),
+              bash("cd node_modules/eve; cat docs/README.md README.md"),
+            ],
+          },
+        },
+      ],
+    });
+    const [record] = analyze(root);
+    assert.deepEqual(record.docsRead, {
+      "README.md": 1,
+      "channels/slack.mdx": 1,
+      "memory/*": 1,
+      "tools/overview.mdx": 1,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

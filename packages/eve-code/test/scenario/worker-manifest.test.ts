@@ -15,7 +15,7 @@ import {
 
 const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-test("built worker keeps explicit read tools without shell or write capabilities", async () => {
+test("built worker keeps explicit read tools and read-only git without shell or write capabilities", async () => {
   const root = await mkdtemp(join(tmpdir(), "eve-code-worker-manifest-"));
   try {
     const extensionRoot = join(root, "extension-package");
@@ -70,7 +70,7 @@ test("built worker keeps explicit read tools without shell or write capabilities
     assert.ok(!toolNames.includes("write_file"));
     assert.ok(!toolNames.includes("apply_patch"));
     assert.equal(worker.agent.config.defaultTools, false);
-    assert.deepEqual(toolNames, ["glob", "grep", "read_file"]);
+    assert.deepEqual(toolNames, ["git", "glob", "grep", "read_file"]);
     for (const tool of worker.agent.tools) assert.equal(tool.hasExecute, true);
     assert.deepEqual(worker.agent.connections, []);
   } finally {

@@ -1,29 +1,13 @@
 #!/usr/bin/env node
 
-// Reads a benchmark results directory and reports, per case, the signals that
-// matter when tuning the generated AGENTS.md and the shipped docs: outcome,
-// agent cost, which docs pages the agent opened, and which grader assertions
-// failed. Turns and tool calls come from agent-eval's harness-neutral
-// `transcript.json`, and token usage from the raw transcript via the same
-// harness-aware parser as published results, so every metric is read the same
-// way for Claude Code, Codex, and OpenCode.
+// Reports per-case benchmark signals (see run-analysis.mjs), or with --docs,
+// which shipped docs pages agents opened across runs.
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { extractRunUsage } from "./cost.mjs";
-import {
-  docsCounts,
-  docsSequence,
-  docsUsage,
-  readTranscript,
-  shippedDocsPages,
-  transcriptToolCalls,
-} from "./docs-reads.mjs";
-
-// agent-eval names agents `<provider>/<harness>`; cost.mjs keys on display names.
-const harnessNames = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+import { docsUsage, shippedDocsPages } from "./docs-reads.mjs";
+import { analyzeRun, collectRuns, directories } from "./run-analysis.mjs";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -69,124 +53,19 @@ function newestTimestamp(root) {
   return stamps.at(-1).path;
 }
 
-function directories(root) {
-  if (!existsSync(root)) return [];
-  return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(root, entry.name));
-}
-
-// Accepts any depth: run dir, case dir, timestamp dir, or treatment dir.
-function collectRuns(root) {
-  if (existsSync(join(root, "result.json"))) return [root];
-  return directories(root)
-    .flatMap((child) => collectRuns(child))
-    .sort();
-}
-
-function analyzeRun(runPath) {
-  const result = readJson(join(runPath, "result.json"));
-  const rawPath = join(runPath, "transcript-raw.jsonl");
-  const raw = existsSync(rawPath) ? readFileSync(rawPath, "utf8") : "";
-  const timings = readTimings(runPath);
-  const transcript = readTranscript(runPath);
-  const harness =
-    harnessNames[
-      String(transcript?.agent ?? "")
-        .split("/")
-        .at(-1)
-    ];
-  const toolCalls = transcriptToolCalls(transcript);
-  const commands = toolCalls.flatMap((call) => (call.command === undefined ? [] : [call.command]));
-  return {
-    case: basename(resolve(runPath, "..")),
-    run: basename(runPath),
-    path: runPath,
-    status: result.status,
-    durationSeconds: round(result.duration),
-    agentSeconds: round(sumPhases(timings, /^agent\.turn\.\d+$/) / 1000),
-    setupSeconds: round(sumPhases(timings, /^(subject|session)\./) / 1000),
-    // `null` when the transcript is missing or has no usage events, so an
-    // unreadable run never reports as zero turns or zero tokens.
-    turns: transcript?.summary?.totalTurns ?? null,
-    toolCalls: toolCalls.length,
-    commands: commands.length,
-    usage: extractRunUsage(raw, harness),
-    docsRead: docsCounts(docsSequence(toolCalls)),
-    // Which page the agent opened first. `README.md` means the routing index did
-    // its job; anything else means the agent guessed or searched its way in.
-    docsEntry: docsSequence(toolCalls)[0] ?? "(none)",
-    registryCalls: commands.filter((command) => /\beve\s+(registry|add)\b/.test(command)).length,
-    failedCommands: failedCommands(commands),
-    stalls: timings
-      .filter(
-        (entry) => /^agent\.turn\.\d+\.summary$/.test(entry.phase) && entry.outcome !== "success",
-      )
-      .map((entry) => `${entry.phase}: ${entry.details?.stall ?? "did not finish"}`),
-    failures: graderFailures(join(runPath, "outputs/eval.txt")),
-    scriptFailures: scriptFailures(runPath),
-  };
-}
-
-function failedCommands(commands) {
-  // Cheap proxy for wasted effort: repeated identical commands and probes into
-  // paths that the scaffold does not have.
-  const seen = new Map();
-  for (const command of commands) seen.set(command, (seen.get(command) ?? 0) + 1);
-  return [...seen].filter(([, count]) => count > 1).map(([command, count]) => ({ command, count }));
-}
-
-function graderFailures(path) {
-  if (!existsSync(path)) return [];
-  const output = readFileSync(path, "utf8");
-  const failures = [...output.matchAll(/^\s*(?:×|✕|FAIL)\s+(.+)$/gm)].map((match) =>
-    match[1].trim(),
-  );
-  return [...new Set(failures)];
-}
-
-function scriptFailures(runPath) {
-  const scripts = join(runPath, "outputs/scripts");
-  if (!existsSync(scripts)) return [];
-  return readdirSync(scripts)
-    .filter((name) =>
-      /error|not found|exit code [1-9]/i.test(readFileSync(join(scripts, name), "utf8")),
-    )
-    .map((name) => basename(name, ".txt"));
-}
-
-function readTimings(runPath) {
-  const path = join(runPath, "project/benchmark/timings.json");
-  return existsSync(path) ? readJson(path) : [];
-}
-
-function sumPhases(timings, pattern) {
-  return timings
-    .filter((entry) => pattern.test(entry.phase))
-    .reduce((total, entry) => total + entry.durationMs, 0);
-}
-
-function readJson(path) {
-  return JSON.parse(readFileSync(path, "utf8"));
-}
-
-function round(value) {
-  return typeof value === "number" ? Math.round(value * 10) / 10 : 0;
-}
-
 function reportRuns(records, target) {
   console.log(`# ${target}\n`);
   for (const record of records) {
     const mark = record.status === "passed" ? "PASS" : "FAIL";
     console.log(
-      `${mark}  ${record.case} ${record.run}  ${record.durationSeconds}s total / ${record.agentSeconds}s agent / ${record.setupSeconds}s setup`,
+      `${mark}  ${record.case} ${record.run}  ${seconds(record.durationSeconds)} total / ${seconds(record.agentSeconds)} agent / ${seconds(record.setupSeconds)} setup`,
     );
     console.log(
       `      turns=${record.turns ?? "n/a"} tools=${record.toolCalls} ${formatUsage(record.usage)} registry=${record.registryCalls}`,
     );
     const docs = Object.entries(record.docsRead);
     console.log(
-      `      docs: entered at ${record.docsEntry}${docs.length === 0 ? "" : ` — ${docs.map(([page, count]) => (count > 1 ? `${page}×${count}` : page)).join(", ")}`}`,
+      `      docs: entered at ${record.docsEntry ?? "(none)"}${docs.length === 0 ? "" : ` — ${docs.map(([page, count]) => (count > 1 ? `${page}×${count}` : page)).join(", ")}`}`,
     );
     for (const stall of record.stalls) console.log(`      ! ${stall}`);
     for (const failure of record.failures) console.log(`      ! ${failure}`);
@@ -199,6 +78,10 @@ function reportRuns(records, target) {
   }
   const passed = records.filter((record) => record.status === "passed").length;
   console.log(`${passed}/${records.length} passed`);
+}
+
+function seconds(value) {
+  return value === null ? "n/a" : `${value}s`;
 }
 
 function formatUsage(usage) {

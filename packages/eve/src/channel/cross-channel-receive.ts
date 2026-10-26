@@ -68,7 +68,8 @@ export function toCrossChannelTargets(
 }
 
 /**
- * Builds the `ctx.to(channel, target)` closure used by route and schedule handlers.
+ * Builds the `ctx.to(channel, target)` closure used by route and schedule
+ * handlers and tools.
  */
 export function createCrossChannelToFn(
   runtime: Runtime,
@@ -77,21 +78,16 @@ export function createCrossChannelToFn(
   return (channel, target) => {
     const targetChannel = resolveTargetByReference(channel, channels);
     return {
-      async send(message, options) {
+      async send(message, sendOptions) {
         return await invokeChannelReceive({
           runtime,
           target: targetChannel,
           input: {
-            ...toMessageSendOptions(options),
+            ...toMessageSendOptions(sendOptions),
             message,
             target: target as Readonly<Record<string, unknown>>,
           },
-          turnPolicy: options.turnPolicy,
-          describeMissingReceive: () =>
-            `ctx.to(): channel "${targetChannel.name}" does not implement receive(). ` +
-            `Declare a receive hook on the channel to accept cross-channel sessions.`,
-          describeMissingAdapter: () =>
-            `ctx.to(): channel "${targetChannel.name}" has no adapter — cannot build ctx.from().`,
+          turnPolicy: sendOptions.turnPolicy,
         });
       },
     };
@@ -103,23 +99,23 @@ interface InvokeChannelReceiveInput {
   readonly target: Pick<CrossChannelTarget, "name" | "receive" | "adapter" | "turnPolicy">;
   readonly input: GenericReceiveInput;
   readonly turnPolicy?: TurnPolicy;
-  readonly describeMissingReceive: () => string;
-  readonly describeMissingAdapter: () => string;
 }
 
-/**
- * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
- */
+/** Shared authored `receive(input, ctx)` invocation behind every `ctx.to()`. */
 async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Delivery> {
+  const { name } = args.target;
   if (!args.target.receive) {
-    throw new Error(args.describeMissingReceive());
+    throw new Error(
+      `ctx.to(): channel "${name}" does not implement receive(). ` +
+        `Declare a receive hook on the channel to accept cross-channel sessions.`,
+    );
   }
   if (!args.target.adapter) {
-    throw new Error(args.describeMissingAdapter());
+    throw new Error(`ctx.to(): channel "${name}" has no adapter — cannot build ctx.from().`);
   }
   const channelOperations = createChannelOperations({
     adapter: args.target.adapter,
-    channelName: args.target.name,
+    channelName: name,
     runtime: args.runtime,
     turnPolicy: args.turnPolicy ?? args.target.turnPolicy,
   });

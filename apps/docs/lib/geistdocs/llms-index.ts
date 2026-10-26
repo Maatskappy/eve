@@ -97,7 +97,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 - [Changelog](${EVE_ORIGIN}/changelog.md): Read eve release notes, including breaking changes and fixes. Follow the next-page links for older releases.
 - [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and observability integrations.
-- [Templates](${EVE_ORIGIN}/templates): Browse complete example projects and their source.
+- [Templates](https://vercel.com/templates/eve): Browse eve example projects on Vercel.
 - [Official eve Skill](https://github.com/vercel/eve/blob/main/skills/eve/SKILL.md): Install or inspect the coding-agent skill; its guidance defers to version-matched bundled docs.
 - [Source Repository](https://github.com/vercel/eve): Read source, releases, issues, and contribution guidance.
 `;

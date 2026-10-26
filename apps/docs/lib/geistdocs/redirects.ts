@@ -1,3 +1,4 @@
+import { templateGalleryUrl } from "../templates/links";
 import { defaultLanguage } from "./languages";
 
 interface DocsRedirect {
@@ -110,6 +111,23 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
 
 export const compatibilityRedirects: DocsRedirect[] = [
   ...createIntegrationRedirects("chat-sdk-photon", "photon"),
+  ...["", `/${defaultLanguage}`].flatMap((prefix) => [
+    ...extensions.map((extension) => ({
+      source: `${prefix}/templates${extension}`,
+      destination: templateGalleryUrl,
+      permanent: true as const,
+    })),
+    {
+      source: `${prefix}/templates/:path+`,
+      destination: templateGalleryUrl,
+      permanent: true as const,
+    },
+    {
+      source: `${prefix}/resources`,
+      destination: templateGalleryUrl,
+      permanent: true as const,
+    },
+  ]),
   {
     source: "/r/extension/arcana.json",
     destination: "/r/memory/arcana.json",
@@ -150,11 +168,6 @@ export const defaultLanguageRedirects: DocsRedirect[] = [
   {
     source: `/${defaultLanguage}/docs`,
     destination: "/docs/getting-started",
-    permanent: true,
-  },
-  {
-    source: `/${defaultLanguage}/resources`,
-    destination: "/templates",
     permanent: true,
   },
   {

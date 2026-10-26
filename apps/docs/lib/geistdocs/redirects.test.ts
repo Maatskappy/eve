@@ -174,6 +174,25 @@ describe("rootMarkdownRedirects", () => {
 });
 
 describe("compatibilityRedirects", () => {
+  it.each([
+    "/templates",
+    "/templates.md",
+    "/templates.mdx",
+    "/templates/:path+",
+    "/resources",
+    "/en/templates",
+    "/en/templates.md",
+    "/en/templates.mdx",
+    "/en/templates/:path+",
+    "/en/resources",
+  ])("permanently redirects retired template route %s to Vercel", (source) => {
+    expect(compatibilityRedirects).toContainEqual({
+      source,
+      destination: "https://vercel.com/templates/eve",
+      permanent: true,
+    });
+  });
+
   it("redirects the previous benchmark route", () => {
     expect(compatibilityRedirects).toContainEqual({
       source: "/evals",
@@ -213,11 +232,6 @@ describe("defaultLanguageRedirects", () => {
       {
         source: "/en/docs",
         destination: "/docs/getting-started",
-        permanent: true,
-      },
-      {
-        source: "/en/resources",
-        destination: "/templates",
         permanent: true,
       },
       {

@@ -1,49 +1,31 @@
-import { BracesIcon } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import {
-  contentfulLogo,
-  datadogLogo,
-  discordLogo,
   dbtLogo,
   githubLogo,
   linearLogo,
   linkLogo,
-  logos,
   linqLogo,
-  muxLogo,
   motherduckLogo,
   notionLogo,
-  postgresLogo,
   resendLogo,
-  sanityLogo,
-  sentryLogo,
   slackLogo,
   typefullyLogo,
   vercelLogo,
   voiceLogo,
   webLogo,
 } from "@/lib/integrations/logos";
-import type { TemplateIntegration } from "@/lib/templates/data";
+import type { TemplateIntegration } from "@/lib/templates/manifest";
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
 export const integrationIcons: Record<TemplateIntegration, IconComponent> = {
-  Browserbase: logos.browserbase,
-  Contentful: contentfulLogo,
-  Datadog: datadogLogo,
-  Discord: discordLogo,
   dbt: dbtLogo,
   GitHub: githubLogo,
-  "HTTP API": BracesIcon,
   Linear: linearLogo,
   Linq: linqLogo,
-  Mux: muxLogo,
   MotherDuck: motherduckLogo,
   Notion: notionLogo,
-  Postgres: postgresLogo,
   Resend: resendLogo,
-  Sanity: sanityLogo,
-  Sentry: sentryLogo,
   Slack: slackLogo,
   "Stripe Link": linkLogo,
   Typefully: typefullyLogo,

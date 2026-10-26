@@ -188,11 +188,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter @eve-internal/benchmarks...
 
+      # agent-eval exits 1 when any case fails. Like Eval Benchmark, nightly
+      # runs record those failures as data, so a successful nightly run means
+      # main was benchmarked and the next unchanged night can skip.
       - name: Run benchmark
         working-directory: apps/benchmarks
         run: |
-          pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
-            --treatment "$TREATMENT"
+          if ! pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
+            --treatment "$TREATMENT"; then
+            if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then exit 1; fi
+            echo "::warning::Some cases failed; failures are recorded as benchmark data."
+          fi
 
       - name: Summarize results
         if: ${{ !cancelled() }}

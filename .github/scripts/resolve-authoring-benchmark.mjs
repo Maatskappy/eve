@@ -76,20 +76,19 @@ function resolveRuns(value) {
   return String(runs);
 }
 
+/** Maps the triggering event to request options, or null when a PR asks for nothing. */
+export function requestOptions(env) {
+  // The nightly run covers every supported model on the published cases, once.
+  if (env.GITHUB_EVENT_NAME === "schedule") return { models: "all" };
+  if (env.GITHUB_EVENT_NAME === "workflow_dispatch") {
+    return { models: env.INPUT_MODELS, cases: env.INPUT_CASES, runs: env.INPUT_RUNS };
+  }
+  return parseDirective(env.PR_BODY);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const evalsRoot = join(process.cwd(), "apps/benchmarks/evals");
-  const event = process.env.GITHUB_EVENT_NAME;
-  // The nightly run covers every supported model on the published cases, once.
-  const options =
-    event === "schedule"
-      ? { models: "all" }
-      : event === "workflow_dispatch"
-        ? {
-            models: process.env.INPUT_MODELS,
-            cases: process.env.INPUT_CASES,
-            runs: process.env.INPUT_RUNS,
-          }
-        : parseDirective(process.env.PR_BODY);
+  const options = requestOptions(process.env);
   if (options === null) {
     console.log(
       "::notice::No authoring-benchmark line in the PR body; nothing to run. Add one, then re-add the label.",

@@ -20,8 +20,9 @@ dispatched from the Actions tab on a branch with the same options as inputs.
 
 Every night, the workflow runs each supported model once on the published cases against `main`. It
 skips the run when `main` has not moved since the last successful nightly run. Nightly runs and
-dispatches on `main` publish to the private benchmark Blob store, like the nightly Eval Benchmark. Every model runs the same eve package: the workflow pins `main`'s package to one commit
-before any model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
+dispatches on `main` publish to the private benchmark Blob store, like the nightly Eval Benchmark.
+Every model runs the same eve package: the workflow pins `main`'s package to one commit before any
+model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
 `records.jsonl` and `manifest.json` under `authoring/runs/<run-id>/<attempt>/`. A record is one run
 of one case on one model. It holds the outcome, timings, turns, tokens, estimated cost, and which
 docs pages the agent read. A planned run that produced no result is recorded as `missing`. Objects

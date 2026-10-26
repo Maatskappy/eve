@@ -344,8 +344,10 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     ) as SessionCommandResult<TCommand>;
   }
   let hook: SessionInboxOwnerRecord;
+  let inbox: string | undefined;
   try {
     const resumed = await resumeSessionInbox(token, command);
+    inbox = resumed.inbox;
     hook = { runId: resumed.ownerRunId, sessionId: await resumed.sessionId };
   } catch (error) {
     // Each entry point decides what a stranded owner means for its caller.
@@ -379,7 +381,10 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     );
   }
 
-  return activeCommandResult(command, hook.sessionId);
+  const result = activeCommandResult(command, hook.sessionId);
+  return (
+    result.status === "accepted" ? { ...result, inbox } : result
+  ) as SessionCommandResult<TCommand>;
 }
 
 /**
@@ -448,7 +453,7 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
 export async function dispatchWorkflowSessionCommand<TCommand extends SessionCommand>(
   input: DispatchSessionInput<TCommand>,
 ): Promise<SessionCommandResult<TCommand>> {
-  const address = { sessionId: input.sessionId };
+  const address = { sessionId: input.sessionId, inbox: input.inbox };
   try {
     return await dispatchWorkflowCommand(address, input.command);
   } catch (error) {

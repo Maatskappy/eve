@@ -119,6 +119,7 @@ export class EveAgentStore<TData> {
         ? undefined
         : this.#client?.sessions.attach(init.initialSession.sessionId, {
             streamIndex: init.initialSession.streamIndex,
+            inbox: init.initialSession.inbox,
           }));
 
     this.#snapshot = this.#createSnapshot();

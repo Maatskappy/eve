@@ -76,6 +76,7 @@ export interface Session {
 }
 
 interface SessionDeliveryOptions {
+  readonly inbox?: string;
   /** Stable delivery identity, deduplicated within this session's recent-key window. */
   readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
@@ -148,6 +149,7 @@ export function createSession(
       return await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
+        inbox: options.inbox,
       });
     },
     async respond(inputResponses, options) {
@@ -176,6 +178,7 @@ export function createSession(
       return await runtime.dispatchSession({
         command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
         sessionId: id,
+        inbox: options.inbox,
       });
     },
     async cancel(options?: { turnId?: string }) {

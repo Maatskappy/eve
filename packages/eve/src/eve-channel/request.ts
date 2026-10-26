@@ -140,6 +140,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 }
 
 interface ParsedSessionMessageBody {
+  inbox?: string;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -192,6 +193,7 @@ export function parseSessionMessageBody(
   }
 
   return {
+    inbox: typeof payload.inbox === "string" ? payload.inbox : undefined,
     callback,
     message,
     inputResponses,

@@ -468,6 +468,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const options = attachClientContext(
             {
               auth: dispatchAuth,
+              inbox: body.inbox,
               callback: body.callback,
               context,
               history,
@@ -510,6 +511,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             sessionId: result.sessionId,
             status: "accepted",
             deliveryId: result.deliveryId,
+            inbox: result.inbox,
           },
           {
             headers: {

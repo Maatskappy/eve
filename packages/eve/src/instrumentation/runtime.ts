@@ -147,6 +147,10 @@ export interface InstrumentationRuntime {
   readonly prepareTurnTrace?: (
     event: InstrumentationTurnStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
+  readonly readTurnTraceContext?: (
+    sessionId: string,
+    turnId: string,
+  ) => Promise<InstrumentationTraceContext | undefined>;
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;

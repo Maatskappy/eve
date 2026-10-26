@@ -185,7 +185,7 @@ decision state, questions, and answers are not recorded. Set
 `telemetry: { isEnabled: false }` to disable the span for one call.
 
 The operation name follows the [proposed decision-model semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/pull/596).
-A model's explicit refusal does not mark the inference span as failed, though
+A model's explicit refusal does not mark the `decision` span as failed, though
 `decide` still rejects with the AI SDK refusal error.
 
 ## Judge eval results

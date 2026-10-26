@@ -21,10 +21,7 @@ import { readInstrumentationSessionContext } from "#instrumentation/session-cont
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
-import {
-  ContextAgentTraceStateStore,
-  readSessionTraceDecision,
-} from "#tracing/eve/agent-trace-context-store.js";
+import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
 import { gatewayCostAttributes, readGatewayCostData } from "#tracing/eve/gateway.js";
@@ -36,7 +33,8 @@ const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUP
 export async function decideWithTracing<const Questions extends Record<string, DecisionQuestion>>(
   options: Parameters<typeof decideWithAiSdk<Questions>>[0],
 ) {
-  const settings = getInstrumentationRuntime()?.otelSettings;
+  const runtime = getInstrumentationRuntime();
+  const settings = runtime?.otelSettings;
   if (settings === undefined || options.telemetry?.isEnabled === false) {
     return decideWithAiSdk(options);
   }
@@ -44,11 +42,11 @@ export async function decideWithTracing<const Questions extends Record<string, D
   const session = readInstrumentationSessionContext(ctx);
   const sessionId = ctx.get(SessionIdKey);
   const turnId = ctx.get(SessionKey)?.turn.id;
-  const preparedTurn =
+  const turnContext =
     sessionId === undefined || turnId === undefined
       ? undefined
-      : new ContextAgentTraceStateStore().get("turn", JSON.stringify([sessionId, turnId]));
-  const preparedContext = preparedTurn?.context ?? session.traceSeed;
+      : await runtime?.readTurnTraceContext?.(sessionId, turnId);
+  const preparedContext = turnContext ?? session.traceSeed;
   const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
   const decision = resolveInstrumentationTraceDecision(
     settings,

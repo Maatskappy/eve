@@ -31,6 +31,8 @@ import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-st
 import { AgentSpanIdGenerator, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
 import { traceSessionIdFromContext } from "#tracing/eve/conversation-context.js";
+import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
+import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 
 const questions = {
   team: {
@@ -52,7 +54,10 @@ let idGenerator: AgentSpanIdGenerator;
 let runtime: ReturnType<typeof useRuntime>;
 let sampleTrace: boolean;
 
-function useRuntime(tracePolicy?: TraceCapturePolicy) {
+function useRuntime(
+  tracePolicy?: TraceCapturePolicy,
+  stateStore: AgentTraceStateStore = new ContextAgentTraceStateStore(),
+) {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
   const agent = createAgentOtelInstrumentation({
     environment: "production",
@@ -60,7 +65,7 @@ function useRuntime(tracePolicy?: TraceCapturePolicy) {
     idGenerator,
     recordInputs: true,
     recordOutputs: true,
-    stateStore: new ContextAgentTraceStateStore(),
+    stateStore,
     telemetry: otelTelemetry({ provider, idGenerator, samplesTrace: () => sampleTrace }),
     tracePolicy,
   });
@@ -192,9 +197,23 @@ describe("decide tracing", () => {
     expect(JSON.stringify(decision.attributes)).not.toContain(questions.team.instructions);
   });
 
-  it.each([true, false])(
-    "parents routing decisions to each prepared turn (first sampled: %s)",
-    async (firstSampled) => {
+  it.each([
+    { firstSampled: true, asyncStore: false },
+    { firstSampled: false, asyncStore: false },
+    { firstSampled: true, asyncStore: true },
+  ])(
+    "parents routing decisions to each prepared turn (first sampled: $firstSampled, async store: $asyncStore)",
+    async ({ firstSampled, asyncStore }) => {
+      if (asyncStore) {
+        const store = new InMemoryAgentTraceStateStore();
+        runtime = useRuntime(undefined, {
+          get: async (kind, key) => store.get(kind, key),
+          set: store.set.bind(store),
+          delete: store.delete.bind(store),
+          update: store.update.bind(store),
+          entries: store.entries.bind(store),
+        });
+      }
       sampleTrace = firstSampled;
       const model = new Experimental_DecisionMockModelV4({ doDecide: async () => answer });
       const expectedParents: { spanId: string; traceId: string }[] = [];

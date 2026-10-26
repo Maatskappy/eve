@@ -1,24 +1,34 @@
 import {
   experimental_decide as decideWithAiSdk,
+  Experimental_DecisionRefusalError as DecisionRefusalError,
   type Experimental_DecisionQuestion as DecisionQuestion,
 } from "ai";
 
-import { context, createContextKey, trace, SpanKind } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context,
+  createContextKey,
+  trace,
+  SpanKind,
+  SpanStatusCode,
+} from "#compiled/@opentelemetry/api/index.js";
 import { currentCapture, otelTelemetry } from "#compiled/@vercel/agent-runs/index.js";
 import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionIdKey } from "#context/keys.js";
+import { SessionIdKey, SessionKey } from "#context/keys.js";
 import { getRegisteredTelemetryIntegrations } from "#instrumentation/ai-sdk-telemetry.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { resolveInstrumentationTraceDecision } from "#instrumentation/trace-decision.js";
-import { recordErrorOnSpan } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
-import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
+import {
+  ContextAgentTraceStateStore,
+  readSessionTraceDecision,
+} from "#tracing/eve/agent-trace-context-store.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { withOperationTraceContext } from "#tracing/eve/conversation-context.js";
 import { gatewayCostAttributes, readGatewayCostData } from "#tracing/eve/gateway.js";
+import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 
 const SUPPRESS_TRACING_KEY = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRACING");
 
@@ -33,6 +43,12 @@ export async function decideWithTracing<const Questions extends Record<string, D
   const ctx = contextStorage.getStore() ?? new ContextContainer();
   const session = readInstrumentationSessionContext(ctx);
   const sessionId = ctx.get(SessionIdKey);
+  const turnId = ctx.get(SessionKey)?.turn.id;
+  const preparedTurn =
+    sessionId === undefined || turnId === undefined
+      ? undefined
+      : new ContextAgentTraceStateStore().get("turn", JSON.stringify([sessionId, turnId]));
+  const preparedContext = preparedTurn?.context ?? session.traceSeed;
   const agentName = ctx.get(BundleKey)?.resolvedAgent.config?.name ?? "eve";
   const decision = resolveInstrumentationTraceDecision(
     settings,
@@ -76,14 +92,14 @@ export async function decideWithTracing<const Questions extends Record<string, D
     recordOutputs: capture.recordOutputs,
   };
   let parent = context.active();
-  if (trace.getSpan(parent) === undefined && session.traceSeed !== undefined) {
-    parent = trace.setSpan(parent, trace.wrapSpanContext(session.traceSeed));
+  if (trace.getSpan(parent) === undefined && preparedContext !== undefined) {
+    parent = trace.setSpan(parent, trace.wrapSpanContext(preparedContext));
   }
   const reference = trace.getSpan(parent)?.spanContext();
   if (
     !capture.emit ||
     parent.getValue(SUPPRESS_TRACING_KEY) === true ||
-    (session.traceSeed !== undefined && (session.traceSeed.traceFlags & 1) === 0) ||
+    (preparedContext !== undefined && (preparedContext.traceFlags & 1) === 0) ||
     (reference !== undefined && (reference.traceFlags & 1) === 0)
   ) {
     return otelTelemetry().suppressed!(() => decideWithAiSdk({ ...options, telemetry }));
@@ -93,17 +109,18 @@ export async function decideWithTracing<const Questions extends Record<string, D
     parent = withOperationTraceContext(parent, {
       sessionId,
       rootSessionId: session.parent?.rootSessionId,
+      traceSessionId: resolveTraceRootSessionId(ctx, sessionId),
     });
   const modelId = typeof options.model === "string" ? options.model : options.model.modelId;
   const span = trace.getTracer("eve.ai").startSpan(
-    `decide ${modelId}`,
+    `decision ${modelId}`,
     {
       kind: SpanKind.CLIENT,
       attributes: {
-        "gen_ai.operation.name": "decide",
+        "gen_ai.operation.name": "decision",
         "gen_ai.request.model": modelId,
         "gen_ai.agent.name": settings.functionId ?? agentName,
-        "operation.name": "decide",
+        "operation.name": "decision",
       },
     },
     parent,
@@ -114,7 +131,7 @@ export async function decideWithTracing<const Questions extends Record<string, D
         ...options,
         telemetry,
         onStart: async (event) => {
-          span.updateName(`decide ${event.modelId}`);
+          span.updateName(`decision ${event.modelId}`);
           span.setAttributes({
             "gen_ai.provider.name": event.provider,
             "gen_ai.request.model": event.modelId,
@@ -131,7 +148,11 @@ export async function decideWithTracing<const Questions extends Record<string, D
       });
       return result;
     } catch (error) {
-      recordErrorOnSpan(span, error);
+      // SDK errors can retain inputs and outputs on enumerable error properties.
+      if (!DecisionRefusalError.isInstance(error)) {
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        span.setAttribute("error.type", "decision_error");
+      }
       throw error;
     } finally {
       span.end();

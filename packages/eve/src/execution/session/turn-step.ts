@@ -373,6 +373,7 @@ async function runSessionStepBody(
       delivery?.auth === undefined
         ? undefined
         : attributeAnswers({
+            owner: startedBetweenTurns ? undefined : (previousAuth ?? null),
             responder: delivery.auth,
             state: durableSession.state,
             stepInput: resolved,

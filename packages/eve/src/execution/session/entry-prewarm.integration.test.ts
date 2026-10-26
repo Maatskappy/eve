@@ -19,6 +19,9 @@ import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workf
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { defineAgent } from "#public/definitions/agent.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { AI_GATEWAY_MODELS_CATALOG_URL } from "#internal/gateway.js";
 
 async function deadline(runId: string): Promise<Date> {
   const world = await getWorld();
@@ -68,6 +71,69 @@ function sandboxHook() {
 }
 
 describe("session prewarmers", () => {
+  it.each([
+    { name: "reuses prewarmed metadata", failPrewarm: false, changeModel: false, calls: 1 },
+    { name: "retries a failed catalog fetch", failPrewarm: true, changeModel: false, calls: 2 },
+    {
+      name: "resolves the message's changed model",
+      failPrewarm: false,
+      changeModel: true,
+      calls: 2,
+    },
+  ])("$name before the first model call", async ({ failPrewarm, changeModel, calls }) => {
+    const originalFetch = globalThis.fetch;
+    let catalogCalls = 0;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === AI_GATEWAY_MODELS_CATALOG_URL) {
+        catalogCalls++;
+        if (failPrewarm && catalogCalls === 1) return new Response(null, { status: 503 });
+      }
+      return await originalFetch(input, init);
+    });
+    try {
+      const runtime = await createTestRuntime({
+        agent: {
+          name: "model-metadata-prewarm",
+          definition: defineAgent({
+            model: defineDynamic((ctx) =>
+              ctx.memo("selection", () =>
+                changeModel && ctx.turn !== null ? "anthropic/claude-opus-4.7" : "openai/gpt-5.4",
+              ),
+            ),
+          }),
+        },
+      });
+      await runtime.run(async () => {
+        const run = await startSessionOwner(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: {},
+            serializedContext: buildSerializedContext({ channelKind: "http" }),
+            sessionTimeoutMs: false,
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await waitForPrewarmStep(run.runId);
+          expect(catalogCalls).toBe(1);
+          await resumeHook(
+            sessionInboxHookToken(sessionCommandHookToken(run.runId)),
+            handoffFollowUp("dpl_inline", "Alice asks for a short greeting.", "catalog-first"),
+          );
+          await stream.nextTurn();
+          expect(catalogCalls).toBe(calls);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it("starts a prewarmed session's sandbox before its first message, which the turn resumes", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "prewarm-sandbox" },

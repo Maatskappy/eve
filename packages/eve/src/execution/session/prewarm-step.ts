@@ -8,6 +8,8 @@ import {
 } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession, projectToDurableSession } from "#execution/session.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { prewarmModel } from "#reactions/runner.js";
 import type { SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { createLogger } from "#internal/logging.js";
@@ -44,9 +46,11 @@ async function prewarmSession(input: SessionPrewarmInput): Promise<{
       durable: readDurableSession(input.sessionState),
       turnAgent: effectiveAgent.turnAgent,
     });
+    enterSessionProjection(ctx, session.state);
     // The providers' commit waits for the work the prewarmers started.
     const scoped = await withContextScope(ctx, session, async (current) => {
       startSessionPrewarmers(ctx, "session");
+      await prewarmModel(ctx, effectiveAgent.turnAgent.initialMessages ?? []);
       return { result: undefined, session: current };
     });
     // The selector may update `defineState()` handles, which live in the context.

@@ -75,6 +75,8 @@ A memo callback receives `{ idempotencyKey, abortSignal }`. Pass the key to an e
 
 The agent's `model` field accepts a dynamic function. It must return a concrete model ID, a provider instance, or a selection containing `model` and optional model settings. A missing or invalid model fails the turn. `ctx.model` is unavailable here; selection runs first.
 
+For a session created without a message, eve also evaluates the model during prewarming, with `ctx.turn` equal to `null`, to cache its model limits before Send. The first model call evaluates the function again with the actual message and current identity. A different model uses its own metadata, and a failed prewarm is retried by the normal model-call path.
+
 ```ts title="agent/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
 

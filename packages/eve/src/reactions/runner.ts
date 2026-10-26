@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -12,7 +13,7 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { bundleReactions } from "./bundle.js";
 import { sessionFrameOf } from "./frame.js";
 import { reportReactionFailure, takeIntents } from "./intents.js";
-import { effectiveModelId } from "./kinds/model.js";
+import { effectiveModelId, loadModelReaction } from "./kinds/model.js";
 import type {
   BundleReactions,
   CommitReaction,
@@ -108,6 +109,28 @@ export class ReactionFailedError extends Error {
 
 export function isReactionFailedError(error: unknown): error is ReactionFailedError {
   return error instanceof ReactionFailedError;
+}
+
+/** Resolves the anticipated model's metadata while a new session waits for its first message. */
+export async function prewarmModel(
+  ctx: ContextContainer,
+  conversation: readonly ModelMessage[],
+): Promise<void> {
+  const previous = readReactionsState(ctx);
+  try {
+    const reaction = await loadModelReaction(ctx.require(BundleKey));
+    if (reaction !== undefined) {
+      await evaluate(ctx, reaction, { conversation, mode: "evaluate" });
+    }
+  } catch (error) {
+    // Message-dependent selectors can only choose once the first message arrives.
+    log.warn("Model prewarm failed; the next model call resolves it again.", {
+      error: toErrorMessage(error),
+    });
+  } finally {
+    // Only metadata is speculative: the first message must choose with its own memos.
+    writeReactionsState(ctx, previous);
+  }
 }
 
 /**

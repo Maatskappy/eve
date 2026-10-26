@@ -11,11 +11,15 @@ name: Authoring Benchmark
 #   label to run again after a push or a body edit.
 # - Or dispatch this workflow from the Actions tab on any branch with the same
 #   options as inputs.
+# - Nightly, main runs every supported model on the published cases once,
+#   skipped when main has not moved since the last successful nightly run.
 #
-# Dispatches on main also publish their results to the private benchmark Blob
-# store, the same way the nightly Eval Benchmark does. PR runs execute branch
-# code, so their results stay in workflow artifacts only.
+# Nightly runs and dispatches on main also publish their results to the
+# private benchmark Blob store, the same way the nightly Eval Benchmark does.
+# PR runs execute branch code, so their results stay in workflow artifacts only.
 on:
+  schedule:
+    - cron: "41 8 * * *"
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -33,14 +37,17 @@ on:
         default: "1"
 
 # Every label creates a run, so key the group on the label too; otherwise
-# adding an unrelated label would cancel a benchmark in progress.
+# adding an unrelated label would cancel a benchmark in progress. Keying on the
+# event keeps a dispatch on main from cancelling the nightly run.
 concurrency:
-  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || 'dispatch' }}
+  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || github.event_name }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   statuses: read
+  # Lets the nightly run find the last successful nightly run's commit.
+  actions: read
 
 env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -50,7 +57,7 @@ jobs:
   request:
     name: Resolve benchmark request
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
       (github.event.label.name == 'run-authoring-benchmark' &&
       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
@@ -75,8 +82,22 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Skip an unchanged nightly run
+        id: skip
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow authoring-benchmark.yml \
+            --branch main --event schedule --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
+          if [ "$last_sha" = "$HEAD_SHA" ]; then
+            echo "main is still at the last benchmarked commit ${HEAD_SHA}; skipping."
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve models and cases
         id: selection
+        if: steps.skip.outputs.unchanged != 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
           INPUT_MODELS: ${{ inputs.models }}
@@ -225,7 +246,8 @@ jobs:
     needs: [request, benchmark]
     if: >-
       always() && needs.request.result == 'success' && needs.request.outputs.run == 'true' &&
-      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

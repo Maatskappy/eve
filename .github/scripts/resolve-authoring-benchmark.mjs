@@ -78,14 +78,18 @@ function resolveRuns(value) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const evalsRoot = join(process.cwd(), "apps/benchmarks/evals");
+  const event = process.env.GITHUB_EVENT_NAME;
+  // The nightly run covers every supported model on the published cases, once.
   const options =
-    process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
-      ? {
-          models: process.env.INPUT_MODELS,
-          cases: process.env.INPUT_CASES,
-          runs: process.env.INPUT_RUNS,
-        }
-      : parseDirective(process.env.PR_BODY);
+    event === "schedule"
+      ? { models: "all" }
+      : event === "workflow_dispatch"
+        ? {
+            models: process.env.INPUT_MODELS,
+            cases: process.env.INPUT_CASES,
+            runs: process.env.INPUT_RUNS,
+          }
+        : parseDirective(process.env.PR_BODY);
   if (options === null) {
     console.log(
       "::notice::No authoring-benchmark line in the PR body; nothing to run. Add one, then re-add the label.",

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  publishedBenchmark,
-  publishedBenchmarkModels,
-} from "../../apps/benchmarks/lib/benchmark-config.ts";
+import { publishedBenchmark } from "../../apps/benchmarks/lib/benchmark-config.ts";
 import {
   parseDirective,
   requestOptions,
   resolveSelection,
 } from "./resolve-authoring-benchmark.mjs";
 
-const context = { caseExists: (name) => name.startsWith("author-") };
+const context = {
+  caseExists: (name) => name.startsWith("author-"),
+  allCases: () => ["author-000-x", "author-001-y"],
+};
 
 test("does nothing without an authoring-benchmark line", () => {
   assert.equal(parseDirective("Fixes a bug."), null);
@@ -75,7 +75,7 @@ test("rejects unknown models, cases, options, and run counts", () => {
   );
 });
 
-test("runs every supported model on the published cases once at night", () => {
+test("runs Opus 5.5 on every case three times at night", () => {
   // A stray PR body or dispatch input must not narrow the nightly run.
   const options = requestOptions({
     GITHUB_EVENT_NAME: "schedule",
@@ -83,9 +83,9 @@ test("runs every supported model on the published cases once at night", () => {
     PR_BODY: "authoring-benchmark: models=kimi-k3",
   });
   assert.deepEqual(resolveSelection(options, context), {
-    models: publishedBenchmarkModels.map((model) => model.id),
-    cases: publishedBenchmark.caseIds.join(","),
-    runs: "1",
+    models: ["claude-opus-5-5-high"],
+    cases: "author-000-x,author-001-y",
+    runs: "3",
   });
 });
 

@@ -14,20 +14,20 @@ authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-010-ops-agent ru
 ```
 
 `models` is required, and `models=all` selects every supported model. `cases` defaults to the
-published cases and `runs` to 1. Each model runs as its own job with its own summary
-and results artifact. Remove and re-add the label to run again. The workflow can also be
-dispatched from the Actions tab on a branch with the same options as inputs.
+published cases (`cases=all` selects every case) and `runs` to 1. Each model runs as its own job
+with its own summary and results artifact. Remove and re-add the label to run again. The workflow
+can also be dispatched from the Actions tab on a branch with the same options as inputs.
 
-Every night, the workflow runs each supported model once on the published cases against `main`. It
-skips the run when `main` has not moved since the last successful nightly run. Nightly runs and
-dispatches on `main` publish to the private benchmark Blob store, like the nightly Eval Benchmark.
-Every model runs the same eve package: the workflow pins `main`'s package to one commit before any
-model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
-`records.jsonl` and `manifest.json` under `authoring/runs/<run-id>/<attempt>/`. A record is one run
-of one case on one model. It holds the outcome, timings, turns, tokens, estimated cost, and which
-docs pages the agent read. A planned run that produced no result is recorded as `missing`. Objects
-are immutable, and the manifest is written last. PR runs execute branch code, so their results stay
-in workflow artifacts and are not published.
+Every night, the workflow runs Opus 5.5 three times on every case against `main`. It skips the run
+when `main` has not moved since the last successful nightly run. Nightly runs and dispatches on
+`main` publish to the private benchmark Blob store, like the nightly Eval Benchmark. Every model
+runs the same eve package: the workflow pins `main`'s package to one commit before any model starts.
+`scripts/publish-results.mjs` uploads each model's results tree and writes `records.jsonl` and
+`manifest.json` under `authoring/runs/<run-id>/<attempt>/`. A record is one run of one case on one
+model. It holds the outcome, timings, turns, tokens, estimated cost, and which docs pages the agent
+read. A planned run that produced no result is recorded as `missing`. Objects are immutable, and the
+manifest is written last. PR runs execute branch code, so their results stay in workflow artifacts
+and are not published.
 
 Locally, pass several cases as separate or comma-separated arguments:
 `pnpm benchmark author-001-weather-tool,author-005-conditional-approval`.

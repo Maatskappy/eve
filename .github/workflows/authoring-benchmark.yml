@@ -7,12 +7,12 @@ name: Authoring Benchmark
 #   has a line naming what to run. Nothing runs without that line.
 #     authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-008-restock-agent runs=3
 #   `models` is required (`all` selects every supported model); `cases`
-#   defaults to the published cases and `runs` to 1. Remove and re-add the
-#   label to run again after a push or a body edit.
+#   defaults to the published cases (`all` selects every case) and `runs` to
+#   1. Remove and re-add the label to run again after a push or a body edit.
 # - Or dispatch this workflow from the Actions tab on any branch with the same
 #   options as inputs.
-# - Nightly, main runs every supported model on the published cases once,
-#   skipped when main has not moved since the last successful nightly run.
+# - Nightly, main runs Opus 5.5 on every case three times, skipped when main
+#   has not moved since the last successful nightly run.
 #
 # Nightly runs and dispatches on main also publish their results to the
 # private benchmark Blob store, the same way the nightly Eval Benchmark does.
@@ -29,7 +29,7 @@ on:
         type: string
         required: true
       cases:
-        description: Comma-separated case names (default the published cases)
+        description: Comma-separated case names, or "all" (default the published cases)
         type: string
       runs:
         description: Runs per case, 1-5

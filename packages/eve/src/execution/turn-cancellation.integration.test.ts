@@ -20,8 +20,11 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { mockModel } from "#evals/mock-model.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -104,6 +107,10 @@ interface WaitToolFixture {
 async function createWaitToolRuntime(
   agentName: string,
   completion?: Promise<void>,
+  options: {
+    readonly definition?: ReturnType<typeof defineAgent>;
+    readonly modules?: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"];
+  } = {},
 ): Promise<WaitToolFixture> {
   let aborts = 0;
   let starts = 0;
@@ -122,7 +129,8 @@ async function createWaitToolRuntime(
     completion,
   );
   const runtime = await createTestRuntime({
-    agent: { name: agentName },
+    agent: { name: agentName, definition: options.definition },
+    modules: options.modules,
     tools: [waitTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
@@ -481,6 +489,187 @@ describe("turn cancellation integration", () => {
     },
     60_000,
   );
+
+  it("keeps a compaction's summary call when a compaction.completed hook cancels the turn", async () => {
+    const model = mockModel(({ messages }) =>
+      messages.some((message) => message.text.includes("previous checkpoint"))
+        ? {
+            text: "Alice's fern has brown tips and dry soil.",
+            usage: { inputTokens: 2_000, outputTokens: 300 },
+          }
+        : {
+            text: "Water it when the top inch of soil is dry.",
+            usage: { inputTokens: 120_000, outputTokens: 10 },
+          },
+    );
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic({
+            events: {
+              "step.started": () => ({ model, modelContextWindowTokens: 128_000 }),
+            },
+          }),
+        }),
+        name: "compaction-hook-cancel",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "compaction.completed"(_event, ctx) {
+                  ctx.cancel();
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/gate.ts",
+        },
+      ],
+    });
+    const rawToken = "compaction-hook-cancel";
+    const continuationToken = `http:${rawToken}`;
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "http",
+      continuationToken: rawToken,
+      runtime: createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      }),
+    });
+
+    await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Alice's fern has brown tips." },
+          serializedContext: buildSerializedContext({ channelKind: "http", continuationToken }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        // The first reply fills the context window, so the next turn compacts first.
+        const firstTurn = await stream.nextTurn();
+        expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
+
+        await waitForHookByToken(sessionInboxHookToken(continuationToken));
+        await address.send("Should Alice water it more?", { auth: null });
+        const cancelledTurn = await stream.nextTurn();
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "compaction.completed",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expectNoFailureEvents(cancelledTurn);
+        // The provider served the summary call, so the session counts it.
+        expect(
+          filterEventsByType(cancelledTurn, "session.waiting").at(-1)?.data.usage,
+        ).toMatchObject({ inputTokens: 122_000, outputTokens: 310 });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("keeps a compaction's summary call when a batched step's compaction.completed hook cancels it", async () => {
+    // Call 1 of the second turn is a tool call that fills the window; call 2 compacts, then the hook cancels.
+    const model = mockModel(({ messages }) =>
+      messages.some((message) => message.text.includes("previous checkpoint"))
+        ? {
+            text: "Alice's fern has brown tips and dry soil.",
+            usage: { inputTokens: 2_000, outputTokens: 300 },
+          }
+        : messages.some((message) => message.text.includes("Should Alice water it more?"))
+          ? {
+              toolCalls: [{ name: WAIT_TOOL_NAME }],
+              usage: { inputTokens: 120_000, outputTokens: 10 },
+            }
+          : {
+              text: "Brown tips can mean underwatering.",
+              usage: { inputTokens: 1_000, outputTokens: 10 },
+            },
+    );
+    const fixture = await createWaitToolRuntime(
+      "compaction-hook-cancel-batched",
+      Promise.resolve(),
+      {
+        definition: defineAgent({
+          experimental: { workflow: { modelCallsPerStep: 4 } },
+          model: defineDynamic({
+            events: {
+              "step.started": () => ({ model, modelContextWindowTokens: 128_000 }),
+            },
+          }),
+        }),
+        modules: [
+          {
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "compaction.completed"(_event, ctx) {
+                    ctx.cancel();
+                  },
+                },
+              }),
+            }),
+            logicalPath: "hooks/gate.ts",
+          },
+        ],
+      },
+    );
+    const rawToken = "compaction-hook-cancel-batched";
+    const continuationToken = `http:${rawToken}`;
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "http",
+      continuationToken: rawToken,
+      runtime: createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      }),
+    });
+
+    await fixture.runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Alice's fern has brown tips." },
+          serializedContext: buildSerializedContext({ channelKind: "http", continuationToken }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const firstTurn = await stream.nextTurn();
+        expect(filterEventsByType(firstTurn, "turn.completed")).toHaveLength(1);
+
+        await waitForHookByToken(sessionInboxHookToken(continuationToken));
+        await address.send("Should Alice water it more?", { auth: null });
+        const cancelledTurn = await stream.nextTurn();
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "compaction.completed",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expectNoFailureEvents(cancelledTurn);
+        // The first turn, the tool call and the summary call were all served, so the session counts them.
+        expect(
+          filterEventsByType(cancelledTurn, "session.waiting").at(-1)?.data.usage,
+        ).toMatchObject({ inputTokens: 123_000, outputTokens: 320 });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
 
   it("keeps an abort-shaped memory recall error terminal while the turn signal is active", async () => {
     const output = captureConsoleOutput();

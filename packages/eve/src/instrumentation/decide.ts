@@ -1,9 +1,9 @@
 import {
   experimental_decide as decideWithAiSdk,
-  Experimental_DecisionRefusalError as DecisionRefusalError,
   type Experimental_DecisionQuestion as DecisionQuestion,
 } from "ai";
 
+import { Experimental_DecisionRefusalError as DecisionRefusalError } from "#compiled/@ai-sdk/provider/index.js";
 import {
   context,
   createContextKey,

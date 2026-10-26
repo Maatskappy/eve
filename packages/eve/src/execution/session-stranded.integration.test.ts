@@ -18,7 +18,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
-import type { SessionEvent } from "#protocol/session-event.js";
+import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
@@ -63,17 +63,19 @@ async function parkStrandedOwner(
   return run;
 }
 
-/** The unique URL of a Vercel deployment that has since been deleted. */
-const DELETED_DEPLOYMENT_URL = "agent-deleted.vercel.app";
-
 /**
- * Parks a session owner this eve version started on a Vercel deployment that
- * was deleted afterwards: Vercel answers its URL with `DEPLOYMENT_NOT_FOUND`.
+ * Parks a session owner this eve version started on the Vercel deployment at
+ * `deploymentUrl`, deleted afterwards: Vercel answers its URL with
+ * `DEPLOYMENT_NOT_FOUND`. Each test names its own deployment, since ingress
+ * remembers a deleted one for the life of the process.
  */
-async function parkOwnerOnDeletedDeployment(continuationToken: string): Promise<ParkedRun> {
+async function parkOwnerOnDeletedDeployment(
+  continuationToken: string,
+  deploymentUrl: string,
+): Promise<ParkedRun> {
   const realFetch = globalThis.fetch;
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-    if (String(input) !== `https://${DELETED_DEPLOYMENT_URL}` || init?.method !== "HEAD") {
+    if (String(input) !== `https://${deploymentUrl}` || init?.method !== "HEAD") {
       return await realFetch(input, init);
     }
     return new Response(null, {
@@ -84,7 +86,7 @@ async function parkOwnerOnDeletedDeployment(continuationToken: string): Promise<
   const run = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }], {
     allowReservedAttributes: true,
     attributes: {
-      [EVE_DEPLOYMENT_URL_ATTRIBUTE]: DELETED_DEPLOYMENT_URL,
+      [EVE_DEPLOYMENT_URL_ATTRIBUTE]: deploymentUrl,
       [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
     },
   });
@@ -242,7 +244,10 @@ describe("stranded sessions", () => {
   it("refuses a session whose owner is pinned to a deleted deployment", async () => {
     const test = await createTestRuntime({ agent: { name: "stranded-deployment-by-id" } });
     await test.run(async () => {
-      const stranded = await parkOwnerOnDeletedDeployment("http:stranded-deployment-by-id");
+      const stranded = await parkOwnerOnDeletedDeployment(
+        "http:stranded-deployment-by-id",
+        "agent-deleted-by-id.vercel.app",
+      );
       const runtime = channelRuntime();
       try {
         const eventsBefore = await listEventIds(stranded.runId);
@@ -270,10 +275,17 @@ describe("stranded sessions", () => {
   });
 
   it("runs the replacement as the message's author and queues another author behind it", async () => {
-    const { runtime: test, seen } = await callerRecordingRuntime("stranded-deployment-callers");
+    const {
+      runtime: test,
+      seen,
+      whoami,
+    } = await callerRecordingRuntime("stranded-deployment-callers");
     await test.run(async () => {
       const continuationToken = "http:stranded-deployment-callers";
-      const stranded = await parkOwnerOnDeletedDeployment(continuationToken);
+      const stranded = await parkOwnerOnDeletedDeployment(
+        continuationToken,
+        "agent-deleted-callers.vercel.app",
+      );
       const runtime = channelRuntime();
       const address = httpAddress(runtime, "stranded-deployment-callers");
       let freshSessionId: string | undefined;
@@ -282,20 +294,42 @@ describe("stranded sessions", () => {
           auth: ALICE,
         });
         freshSessionId = fresh.sessionId;
-        // Bob arrives while Alice's turn is still inside the slow tool.
-        await waitForHook(
-          { runId: fresh.sessionId },
-          { token: sessionInboxHookToken(continuationToken) },
-        );
-        const bobs = await address.send("Bob asks whoami right behind her.", { auth: BOB });
-
         expect(fresh.sessionId).not.toBe(stranded.runId);
-        expect(bobs.sessionId).toBe(fresh.sessionId);
         await expect(stranded.status).resolves.toBe("cancelled");
-        const turns = await readTurns(fresh.sessionId, 2);
-        // Each turn carries exactly its author's message and runs as that author.
-        expect(turns).toEqual([
-          { messages: ["Alice asks whoami after the redeploy."], turnId: "turn_0" },
+
+        // Alice's turn is inside her tool call, so Bob arrives mid-turn.
+        await whoami.entered;
+        const bobs = await address.send("Bob asks whoami right behind her.", { auth: BOB });
+        expect(bobs.sessionId).toBe(fresh.sessionId);
+
+        // Bob's message was accepted, yet turn_0 is still open inside Alice's call and has
+        // consumed only her message: his waits for the turn to end.
+        const open = await readSessionEvents(
+          fresh.sessionId,
+          (event) => event.type === "call.started",
+        );
+        expect(open.map((event) => event.type)).not.toContain("turn.settled");
+        expect(turnsOf(open)).toEqual([{ messages: [ALICE_ASKS], turnId: "turn_0" }]);
+        expect(seen).toEqual([{ caller: "alice", turnId: "turn_0" }]);
+
+        whoami.release();
+        const settled = await readSessionEvents(fresh.sessionId, settledTurns(2));
+        // Bob's delivery enters the session only after turn_0 settles, as its own turn and author.
+        const order = settled.flatMap((event) =>
+          event.type === "turn.settled"
+            ? [`settled:${event.data.turnId}`]
+            : event.type === "delivery.admitted"
+              ? [`admitted:${event.data.principal?.id}`]
+              : [],
+        );
+        expect(order).toEqual([
+          "admitted:alice",
+          "settled:turn_0",
+          "admitted:bob",
+          "settled:turn_1",
+        ]);
+        expect(turnsOf(settled)).toEqual([
+          { messages: [ALICE_ASKS], turnId: "turn_0" },
           { messages: ["Bob asks whoami right behind her."], turnId: "turn_1" },
         ]);
         expect(seen).toEqual([
@@ -303,6 +337,7 @@ describe("stranded sessions", () => {
           { caller: "bob", turnId: "turn_1" },
         ]);
       } finally {
+        whoami.release();
         await cancelIfActive(stranded);
         await resetSession(runtime, freshSessionId);
       }
@@ -810,12 +845,17 @@ const whoamiModel = markMockModel(
   }),
 );
 
+const ALICE_ASKS = "Alice asks whoami after the redeploy.";
+
 /**
- * An app whose only tool records the turn's caller. The tool is slow enough
- * for a second message to arrive while the first turn runs.
+ * An app whose only tool records the turn's caller. The first call signals
+ * `whoami.entered` and blocks until `whoami.release()`, so a test can act
+ * while that turn is provably still running; later calls pass straight through.
  */
 async function callerRecordingRuntime(name: string) {
   const seen: Array<{ readonly caller: string | null; readonly turnId: string }> = [];
+  const entered = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
@@ -832,11 +872,12 @@ async function callerRecordingRuntime(name: string) {
           default: defineTool({
             description: "Report who is asking.",
             execute: async (_input, ctx) => {
-              await new Promise((resolve) => setTimeout(resolve, 1_000));
               seen.push({
                 caller: ctx.session.auth.current?.principalId ?? null,
                 turnId: ctx.session.turn.id,
               });
+              entered.resolve();
+              await released.promise;
               return { ok: true };
             },
             inputSchema: {},
@@ -846,28 +887,45 @@ async function callerRecordingRuntime(name: string) {
       },
     ],
   });
-  return { runtime, seen };
+  return {
+    runtime,
+    seen,
+    whoami: { entered: entered.promise, release: () => released.resolve() },
+  };
 }
 
-/** The first `count` settled turns of a session: each turn's id and the user messages it consumed. */
-async function readTurns(sessionId: string, count: number) {
+/** The session's events from the start up to and including the first one `stop` accepts. */
+async function readSessionEvents(sessionId: string, stop: (event: SessionStreamEvent) => boolean) {
   const reader = readSessionEventStream(sessionId).getReader();
-  const turns: Array<{ messages: string[]; turnId: string }> = [];
-  const messages = new Map<string, string[]>();
+  const events: SessionStreamEvent[] = [];
   try {
-    while (turns.length < count) {
+    for (;;) {
       const { done, value } = await reader.read();
-      if (done) throw new Error(`Session "${sessionId}" ended after ${turns.length} turns.`);
-      if (value.type === "delivery.consumed") {
-        const text = value.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
-        messages.set(value.data.turnId, [...(messages.get(value.data.turnId) ?? []), ...text]);
-      }
-      if (value.type === "turn.settled") {
-        turns.push({ messages: messages.get(value.data.turnId) ?? [], turnId: value.data.turnId });
-      }
+      if (done) throw new Error(`Session "${sessionId}" ended after ${events.length} events.`);
+      events.push(value);
+      if (stop(value)) return events;
     }
   } finally {
     await reader.cancel().catch(() => {});
+  }
+}
+
+/** Stops once `count` turns have settled. */
+function settledTurns(count: number) {
+  let settled = 0;
+  return (event: SessionStreamEvent) => event.type === "turn.settled" && ++settled === count;
+}
+
+/** The turns the events opened, in order, each with the user messages it consumed. */
+function turnsOf(events: readonly SessionStreamEvent[]) {
+  const turns: Array<{ messages: string[]; turnId: string }> = [];
+  for (const event of events) {
+    if (event.type === "turn.started") turns.push({ messages: [], turnId: event.data.turnId });
+    if (event.type === "delivery.consumed") {
+      const turn = turns.find((candidate) => candidate.turnId === event.data.turnId);
+      const text = event.data.parts.flatMap((part) => (part.kind === "text" ? [part.text] : []));
+      turn?.messages.push(...text);
+    }
   }
   return turns;
 }

@@ -3,12 +3,27 @@
 // Reads a benchmark results directory and reports, per case, the signals that
 // matter when tuning the generated AGENTS.md and the shipped docs: outcome,
 // agent cost, which docs pages the agent opened, and which grader assertions
-// failed. Docs reads are recovered from shell commands because agents read
-// `node_modules/eve/docs` with `cat`/`sed`/`grep` rather than a read tool.
+// failed. Turns and tool calls come from agent-eval's harness-neutral
+// `transcript.json`, and token usage from the raw transcript via the same
+// harness-aware parser as published results, so every metric is read the same
+// way for Claude Code, Codex, and OpenCode.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+
+import { extractRunUsage } from "./cost.mjs";
+import {
+  docsCounts,
+  docsSequence,
+  docsUsage,
+  readTranscript,
+  shippedDocsPages,
+  transcriptToolCalls,
+} from "./docs-reads.mjs";
+
+// agent-eval names agents `<provider>/<harness>`; cost.mjs keys on display names.
+const harnessNames = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -23,20 +38,25 @@ if (values.help) {
 
   results-dir  A run directory, a case directory, a timestamp directory, or a
                treatment directory. Defaults to the newest timestamp directory.
-  --docs       Aggregate docs-page reads across cases instead of per-case detail.
-  --json       Emit the collected records as JSON.`);
+  --docs       Aggregate docs-page reads across runs, including shipped pages
+               that no run opened, instead of per-case detail.
+  --json       Emit the collected records (or, with --docs, the aggregate) as JSON.`);
   process.exit(0);
 }
 
 const resultsRoot = resolve(import.meta.dirname, "../results");
+const docsRoot = resolve(import.meta.dirname, "../../../docs");
 const target =
   positionals[0] === undefined ? newestTimestamp(resultsRoot) : resolve(positionals[0]);
 const runs = collectRuns(target);
 if (runs.length === 0) throw new Error(`No benchmark runs found under ${target}.`);
 
 const records = runs.map((run) => analyzeRun(run));
-if (values.json) console.log(JSON.stringify(records, null, 2));
-else if (values.docs) reportDocs(records);
+if (values.docs) {
+  const usage = docsUsage(records, shippedDocsPages(docsRoot));
+  if (values.json) console.log(JSON.stringify(usage, null, 2));
+  else reportDocs(usage);
+} else if (values.json) console.log(JSON.stringify(records, null, 2));
 else reportRuns(records, target);
 
 function newestTimestamp(root) {
@@ -66,19 +86,18 @@ function collectRuns(root) {
 
 function analyzeRun(runPath) {
   const result = readJson(join(runPath, "result.json"));
-  const raw = readRawTranscript(join(runPath, "transcript-raw.jsonl"));
+  const rawPath = join(runPath, "transcript-raw.jsonl");
+  const raw = existsSync(rawPath) ? readFileSync(rawPath, "utf8") : "";
   const timings = readTimings(runPath);
-  const toolCalls = raw.flatMap((entry) => entry.toolCalls);
+  const transcript = readTranscript(runPath);
+  const harness =
+    harnessNames[
+      String(transcript?.agent ?? "")
+        .split("/")
+        .at(-1)
+    ];
+  const toolCalls = transcriptToolCalls(transcript);
   const commands = toolCalls.flatMap((call) => (call.command === undefined ? [] : [call.command]));
-  const usage = raw.reduce(
-    (total, entry) => ({
-      inputTokens: total.inputTokens + (entry.usage?.inputTokens ?? 0),
-      outputTokens: total.outputTokens + (entry.usage?.outputTokens ?? 0),
-      reasoningTokens: total.reasoningTokens + (entry.usage?.reasoningTokens ?? 0),
-      cachedInputTokens: total.cachedInputTokens + (entry.usage?.cachedInputTokens ?? 0),
-    }),
-    { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedInputTokens: 0 },
-  );
   return {
     case: basename(resolve(runPath, "..")),
     run: basename(runPath),
@@ -87,10 +106,12 @@ function analyzeRun(runPath) {
     durationSeconds: round(result.duration),
     agentSeconds: round(sumPhases(timings, /^agent\.turn\.\d+$/) / 1000),
     setupSeconds: round(sumPhases(timings, /^(subject|session)\./) / 1000),
-    turns: raw.filter((entry) => entry.role === "user").length,
+    // `null` when the transcript is missing or has no usage events, so an
+    // unreadable run never reports as zero turns or zero tokens.
+    turns: transcript?.summary?.totalTurns ?? null,
     toolCalls: toolCalls.length,
     commands: commands.length,
-    usage,
+    usage: extractRunUsage(raw, harness),
     docsRead: docsCounts(docsSequence(toolCalls)),
     // Which page the agent opened first. `README.md` means the routing index did
     // its job; anything else means the agent guessed or searched its way in.
@@ -105,29 +126,6 @@ function analyzeRun(runPath) {
     failures: graderFailures(join(runPath, "outputs/eval.txt")),
     scriptFailures: scriptFailures(runPath),
   };
-}
-
-// Recovers `docs/<page>` paths from any tool input that mentions them, so a
-// `cat`, `sed -n`, `grep -r`, or read-tool path all count as one read each. Call
-// order is preserved: the first page tells you which entry point the agent used.
-function docsSequence(toolCalls) {
-  const pages = [];
-  for (const call of toolCalls) {
-    for (const text of [call.command ?? "", ...call.paths]) {
-      for (const match of text.matchAll(/eve\/docs\/([\w./-]*\.mdx?)/g)) pages.push(match[1]);
-      // A bare directory listing or a glob read counts as a directory probe.
-      for (const match of text.matchAll(/eve\/docs\/([\w/-]+)\/(?:\*|$|\s)/g)) {
-        pages.push(`${match[1]}/*`);
-      }
-    }
-  }
-  return pages;
-}
-
-function docsCounts(pages) {
-  const counts = new Map();
-  for (const page of pages) counts.set(page, (counts.get(page) ?? 0) + 1);
-  return Object.fromEntries([...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
 }
 
 function failedCommands(commands) {
@@ -157,32 +155,6 @@ function scriptFailures(runPath) {
     .map((name) => basename(name, ".txt"));
 }
 
-function readRawTranscript(path) {
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8")
-    .trim()
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const entry = JSON.parse(line);
-      const content = entry.message?.content;
-      const blocks = Array.isArray(content) ? content : [];
-      return {
-        role: entry.type,
-        usage: entry.message?.usage,
-        toolCalls: blocks
-          .filter((block) => block.type === "tool_use")
-          .map((block) => ({
-            name: block.name,
-            command: typeof block.input?.command === "string" ? block.input.command : undefined,
-            paths: [block.input?.filePath, block.input?.path, block.input?.pattern].filter(
-              (value) => typeof value === "string",
-            ),
-          })),
-      };
-    });
-}
-
 function readTimings(runPath) {
   const path = join(runPath, "project/benchmark/timings.json");
   return existsSync(path) ? readJson(path) : [];
@@ -210,7 +182,7 @@ function reportRuns(records, target) {
       `${mark}  ${record.case} ${record.run}  ${record.durationSeconds}s total / ${record.agentSeconds}s agent / ${record.setupSeconds}s setup`,
     );
     console.log(
-      `      turns=${record.turns} tools=${record.toolCalls} in=${record.usage.inputTokens} out=${record.usage.outputTokens} reasoning=${record.usage.reasoningTokens} registry=${record.registryCalls}`,
+      `      turns=${record.turns ?? "n/a"} tools=${record.toolCalls} ${formatUsage(record.usage)} registry=${record.registryCalls}`,
     );
     const docs = Object.entries(record.docsRead);
     console.log(
@@ -229,22 +201,20 @@ function reportRuns(records, target) {
   console.log(`${passed}/${records.length} passed`);
 }
 
-function reportDocs(records) {
-  const totals = new Map();
-  for (const record of records) {
-    for (const [page, count] of Object.entries(record.docsRead)) {
-      const entry = totals.get(page) ?? { reads: 0, cases: new Set() };
-      entry.reads += count;
-      entry.cases.add(record.case);
-      totals.set(page, entry);
-    }
-  }
-  const rows = [...totals].sort((a, b) => b[1].reads - a[1].reads || a[0].localeCompare(b[0]));
-  console.log("reads  cases  page");
-  for (const [page, entry] of rows) {
+function formatUsage(usage) {
+  if (usage === null) return "tokens=n/a";
+  return `in=${usage.input} out=${usage.output} reasoning=${usage.reasoning} cache-read=${usage.cacheRead}`;
+}
+
+function reportDocs(usage) {
+  console.log(`${usage.runsWithDocs}/${usage.runs} runs opened at least one docs page\n`);
+  console.log(" runs  reads  cases  page");
+  for (const entry of usage.pages) {
     console.log(
-      `${String(entry.reads).padStart(5)}  ${String(entry.cases.size).padStart(5)}  ${page}`,
+      `${String(entry.runs).padStart(5)}  ${String(entry.reads).padStart(5)}  ${String(entry.cases.length).padStart(5)}  ${entry.page}`,
     );
-    console.log(`                 ${[...entry.cases].sort().join(", ")}`);
+    console.log(`                      ${entry.cases.join(", ")}`);
   }
+  console.log(`\nNever opened (${usage.unread.length} shipped pages):`);
+  for (const page of usage.unread) console.log(`  ${page}`);
 }

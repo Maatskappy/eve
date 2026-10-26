@@ -49,7 +49,7 @@ are not supported by the native runner.
 The runner uses agent-eval's native Gateway harnesses: OpenCode for other providers, Claude Code
 for Anthropic models, and Codex for OpenAI models. Each attempt starts an isolated Vercel Sandbox,
 then scaffolds the selected immutable canary with `npx` before the coding agent starts.
-The starting workspace includes pinned `just-bash@3.1.0` for the local default sandbox provider.
+The starting workspace includes pinned `just-bash@3.6.0` for the local default sandbox provider and `vitest@5.0.2` for the grader.
 Scaffolded workspaces must pass typecheck and build before any model inference starts.
 
 Local runs use the `guided` treatment by default, which keeps the `AGENTS.md` and aliases generated
@@ -58,6 +58,20 @@ by `eve init`. Pass `--treatment baseline` to remove those files before the codi
 Results are written under `apps/benchmarks/results/`. Each run includes the native transcript,
 grader output, summary, copied project files, and validation output. Vercel Sandbox and AI Gateway
 credentials are required.
+
+## See which docs pages agents read
+
+`scripts/analyze.mjs` reports which pages under `node_modules/eve/docs` the coding agent opened in
+each run, for every harness. Pass `--docs` to aggregate across runs: pages are ranked by how many
+runs opened them, and shipped pages that no run opened are listed last.
+
+```sh
+node scripts/analyze.mjs --docs
+node scripts/analyze.mjs results/<experiment>/<timestamp> --docs --json
+```
+
+These counts cover benchmark tasks only, not real usage. The unread list compares against `docs/` in
+the current checkout, which can differ from the canary the runs used.
 
 ## Publish canonical results
 

@@ -858,6 +858,15 @@ describe("dispatchChannelRequest tracing", () => {
     return exporter.getFinishedSpans();
   }
 
+  // The request span ends with the response body, so read it before inspecting spans.
+  async function dispatchAndConsume(
+    ...args: Parameters<typeof dispatchChannelRequest>
+  ): Promise<Response> {
+    const response = await dispatchChannelRequest(...args);
+    await response.clone().arrayBuffer();
+    return response;
+  }
+
   it("uses the semantic request name", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
@@ -865,7 +874,7 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
+    await dispatchAndConsume(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
 
     const [span] = await finishedSpans();
     expect(span!.name).toBe("agent.channel.request");
@@ -892,7 +901,7 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    const response = await dispatchChannelRequest(
+    const response = await dispatchAndConsume(
       createEvent({ method: "POST", waitUntil: vi.fn() }),
       "POST /slack",
       {} as never,
@@ -941,10 +950,67 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
+    await dispatchAndConsume(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
 
     const [span] = await finishedSpans();
     expect(span!.attributes["eve.channel.kind"]).toBe("channel:support");
+  });
+
+  // https://github.com/vercel/eve/issues/4256
+  it("keeps the request span open until a streamed response body is consumed", async () => {
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        slackChannel(
+          async () =>
+            new Response(
+              new ReadableStream({
+                pull(controller) {
+                  controller.enqueue(new TextEncoder().encode("event"));
+                  controller.close();
+                },
+              }),
+            ),
+        ),
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect((await finishedSpans()).map((span) => span.name)).toEqual([]);
+    expect(await response.text()).toBe("event");
+    expect((await finishedSpans()).map((span) => span.name)).toEqual(["agent.channel.request"]);
+  });
+
+  it("ends the request span when a streamed response body is cancelled", async () => {
+    const sourceCancelled = createDeferred<unknown>();
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        slackChannel(
+          async () =>
+            new Response(
+              new ReadableStream({ cancel: (reason) => sourceCancelled.resolve(reason) }),
+            ),
+        ),
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+    await response.body!.cancel("client gone");
+
+    expect(await sourceCancelled.promise).toBe("client gone");
+    expect((await finishedSpans()).map((span) => span.name)).toEqual(["agent.channel.request"]);
   });
 
   it("makes a span created inside the handler a child of the request span", async () => {
@@ -961,7 +1027,7 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
+    await dispatchAndConsume(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
 
     const spans = await finishedSpans();
     const server = spans.find((span) => span.name === "agent.channel.request");
@@ -975,7 +1041,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("captures the created SERVER span context on channel delivery metadata", async () => {
     const tracedRuntime = mockRouteSendRuntime();
 
-    await dispatchChannelRequest(
+    await dispatchAndConsume(
       createEvent({
         headers: {
           traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
@@ -1013,7 +1079,7 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    await dispatchChannelRequest(
+    await dispatchAndConsume(
       createEvent({
         headers: { traceparent: `00-${traceId}-${parentId}-01` },
         waitUntil: vi.fn(),
@@ -1039,7 +1105,7 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    const response = await dispatchChannelRequest(
+    const response = await dispatchAndConsume(
       createEvent({ waitUntil: vi.fn() }),
       "POST /slack",
       {} as never,
@@ -1083,7 +1149,7 @@ describe("dispatchChannelRequest tracing", () => {
       runtime,
     });
 
-    const response = await dispatchChannelRequest(
+    const response = await dispatchAndConsume(
       createEvent({ waitUntil: vi.fn() }),
       "POST /missing",
       {} as never,
@@ -1128,7 +1194,7 @@ describe("dispatchChannelRequest tracing", () => {
       url: `https://eve.test/eve/v1/session/${sessionId}?token=${hookToken}`,
     });
 
-    await dispatchChannelRequest(event, "POST /eve/v1/session/:sessionId", {} as never);
+    await dispatchAndConsume(event, "POST /eve/v1/session/:sessionId", {} as never);
 
     const [span] = await finishedSpans();
     expect(span!.name).toBe("agent.channel.request");

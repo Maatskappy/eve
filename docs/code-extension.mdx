@@ -72,10 +72,6 @@ export default code({
 });
 ```
 
-### The worker reads, it doesn't write
-
-The `worker` subagent shares the caller's sandbox but has no shell and no write tools. It can `glob`, `grep`, and `read_file`, and its `git` tool runs only read-only subcommands: `diff`, `log`, `show`, `blame`, `status`, `ls-files`, and `rev-parse`. That's enough for a fresh-context reviewer to read the caller's staged change with `git diff --cached` without inheriting the caller's reasoning. The tool refuses `--output`, skips optional index locks, and caps output at 64 KiB. Programs the repository's own git config names, such as an external diff or `textconv` driver, still run, so the worker trusts that config as much as the caller does.
-
 ### Credentials stay outside the sandbox
 
 With firewall delivery, Vercel tokens never enter sandbox processes. Firewall delivery without a top-level `broker` requires a sandbox provider that exposes `setNetworkPolicy()`, and fails otherwise. Set `vercel.delivery: "command"` for providers without a mutable network policy.

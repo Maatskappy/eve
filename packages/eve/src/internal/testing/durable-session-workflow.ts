@@ -37,7 +37,6 @@ function buildSyntheticSession(input: {
     },
     compaction: {
       recentWindowSize: 0,
-      thresholdPercent: 0.9,
       threshold: 0.7,
     },
     continuationToken: `test:${input.sessionId}`,

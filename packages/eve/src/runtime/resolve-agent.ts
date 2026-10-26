@@ -13,6 +13,7 @@ import { resolveHookDefinition } from "#runtime/resolve-hook.js";
 import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
+import { resolveCompactionDefinition } from "#runtime/resolve-compaction.js";
 import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
@@ -101,6 +102,10 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       resolveMemoryDefinition(definition, input.moduleMap, input.nodeId),
     ),
   );
+  const resolvedCompaction =
+    input.manifest.compaction === null
+      ? undefined
+      : await resolveCompactionDefinition(input.manifest.compaction, input.moduleMap, input.nodeId);
   const authoredSandbox = await resolveSandboxDefinition(
     input.manifest.sandbox,
     input.moduleMap,
@@ -125,6 +130,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
     memories: resolvedMemories,
+    compaction: resolvedCompaction,
     sandbox: authoredSandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,
@@ -229,7 +235,6 @@ function createResolvedAgentConfig(
   if (manifest.config.compaction !== undefined) {
     const compaction: {
       model?: NonNullable<NonNullable<ResolvedAgent["config"]>["compaction"]>["model"];
-      thresholdPercent?: number;
     } = {};
 
     if (manifest.config.compaction.model !== undefined) {
@@ -254,10 +259,6 @@ function createResolvedAgentConfig(
               },
               sourceField: manifest.config.compaction.model.sourceField,
             };
-    }
-
-    if (manifest.config.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = manifest.config.compaction.thresholdPercent;
     }
 
     config.compaction = compaction;

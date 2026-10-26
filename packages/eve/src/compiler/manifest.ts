@@ -263,6 +263,8 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly extensionNamespace?: string;
 }
 
+export type CompiledCompactionDefinition = ModuleSourceRef;
+
 export interface CompiledMemoryDefinition extends ModuleSourceRef {
   readonly description?: string;
   readonly slot: string;
@@ -603,7 +605,6 @@ const compiledAgentWorkflowDefinitionSchema = z
 const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> = z
   .object({
     model: compiledRuntimeModelReferenceSchema.optional(),
-    thresholdPercent: z.number().finite().min(0).max(1).optional(),
   })
   .strict();
 
@@ -990,6 +991,7 @@ const compiledAgentResourceFields = {
   extensionMounts: z.array(compiledExtensionMountSchema).default([]),
   hooks: z.array(compiledHookDefinitionSchema),
   memories: z.array(compiledMemoryDefinitionSchema).default([]),
+  compaction: moduleSourceRefSchema.nullable().default(null),
   sandbox: compiledSandboxDefinitionSchema,
   sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
   schedules: z.array(compiledScheduleDefinitionSchema),
@@ -1095,6 +1097,7 @@ export const compiledAgentManifestSchema = z
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
     memories: z.array(compiledMemoryDefinitionSchema).default([]),
+    compaction: moduleSourceRefSchema.nullable().default(null),
     kind: z.literal(COMPILED_AGENT_MANIFEST_KIND),
     remoteAgents: z.array(compiledRemoteAgentNodeSchema),
     sandbox: compiledSandboxDefinitionSchema,
@@ -1125,6 +1128,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly memories?: readonly CompiledMemoryDefinition[];
+  readonly compaction?: CompiledCompactionDefinition | null;
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
   readonly sandbox: CompiledSandboxDefinition;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
@@ -1164,6 +1168,7 @@ export function createCompiledAgentResources(
     extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
     memories: [...(input.memories ?? [])],
+    compaction: input.compaction ?? null,
     instructions: [...(input.instructions ?? [])],
     remoteAgents: [...(input.remoteAgents ?? [])],
     sandbox: input.sandbox,
@@ -1212,7 +1217,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
         config.compaction?.model === undefined
           ? undefined
           : cloneCompiledRuntimeModelReference(config.compaction.model),
-      thresholdPercent: config.compaction?.thresholdPercent,
     },
     defaultTools: config.defaultTools,
     description: config.description,

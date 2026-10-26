@@ -77,14 +77,12 @@ export async function compileAgentConfig(
       : undefined;
   const compaction: {
     model?: CompiledRuntimeModelReference;
-    thresholdPercent?: number;
   } = {};
 
   const compiledConfig: {
     build?: CompiledAgentDefinition["build"];
     compaction: {
       model?: CompiledRuntimeModelReference;
-      thresholdPercent?: number;
     };
     defaultTools?: boolean;
     description?: string;
@@ -158,10 +156,6 @@ export async function compileAgentConfig(
       sourcePath: configModulePath,
       value: definition.compaction.model,
     });
-  }
-
-  if (definition.compaction?.thresholdPercent !== undefined) {
-    compaction.thresholdPercent = definition.compaction.thresholdPercent;
   }
 
   if (dynamicModel !== undefined) {

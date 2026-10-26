@@ -22,7 +22,7 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { defineTool } from "#tools/definition.js";
 import { runApprovedCalls } from "#harness/hitl/approved-calls.js";
-import { takeTurnFailure } from "./intents.js";
+import { takeCompactRequest, takeTurnFailure } from "./intents.js";
 import { takeUserInstructionMessages } from "./kinds/instructions.js";
 import { dynamicTools } from "./kinds/tool.js";
 import { evaluateValues, isReactionFailedError, restoreReactions, runReactions } from "./runner.js";
@@ -563,6 +563,34 @@ describe("runReactions", () => {
     });
     expect(cancels).toEqual([]);
     expect(readReactionsState(ctx).intents ?? []).toEqual([]);
+  });
+
+  it("keeps a compact request made between turns for the next model call, once", async () => {
+    const ctx = session(noTools, [hook("trim", { "*": (_event, ctx) => ctx.compact() })]);
+    await commit(ctx, { written: written(1, "session.started") });
+    await commit(ctx, { written: written(2, "session.started") });
+
+    expect((readReactionsState(ctx).intents ?? []).map(({ type }) => type)).toEqual(["compact"]);
+    expect(takeCompactRequest(ctx)).toBe(true);
+    expect(takeCompactRequest(ctx)).toBe(false);
+  });
+
+  it("keeps a compact request made during a turn, and a cancel does not take it", async () => {
+    const ctx = session(noTools, [
+      hook("trim", {
+        "*": (_event, ctx) => {
+          ctx.compact();
+          ctx.cancel("Stop.");
+        },
+      }),
+    ]);
+    turnRunning(ctx);
+    const cancels: unknown[] = [];
+    await commit(ctx, { written: written(1) });
+    await commit(ctx, { cancelTurn: (cancel) => cancels.push(cancel), written: written(2) });
+
+    expect(cancels).toHaveLength(1);
+    expect(takeCompactRequest(ctx)).toBe(true);
   });
 
   it("throws for a command after the handler settled", async () => {

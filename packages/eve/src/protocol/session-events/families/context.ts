@@ -13,6 +13,8 @@ export interface ContextStartedData {
   readonly turnId?: string;
   /** The control delivery for a manual change. */
   readonly cause?: Cause;
+  /** The named strategy a hook asked for; absent for the agent's default. */
+  readonly strategy?: string;
   /** What started a threshold compaction. */
   readonly trigger?: { readonly inputTokens: number };
 }
@@ -55,6 +57,7 @@ export const contextSchemas = {
         cause: cause.optional(),
         changeId: id,
         kind: z.string(),
+        strategy: z.string().optional(),
         trigger: z.object({ inputTokens: z.number().int().nonnegative() }).optional(),
         turnId: id.optional(),
       }),

@@ -48,20 +48,6 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 180_000,
-      thresholdPercent: 0.9,
-    });
-  });
-
-  it("uses the authored threshold percent when provided", () => {
-    expect(
-      createCompactionConfig({
-        contextWindowTokens: 200_000,
-        thresholdPercent: 0.5,
-      }),
-    ).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
     });
   });
 
@@ -69,7 +55,6 @@ describe("createCompactionConfig", () => {
     expect(createCompactionConfig()).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
-      thresholdPercent: 0.9,
     });
   });
 });
@@ -192,24 +177,6 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
-      thresholdPercent: 0.9,
-    });
-  });
-
-  it("honors compactionOverrides.thresholdPercent", () => {
-    const session = createSession({
-      compactionOverrides: { thresholdPercent: 0.5 },
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        model: { id: "test-model", contextWindowTokens: 200_000 },
-      }),
-    });
-
-    expect(session.compaction).toEqual({
-      recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
     });
   });
 
@@ -374,9 +341,6 @@ describe("refreshSessionFromTurnAgent", () => {
       }),
     });
     const refreshed = refreshSessionFromTurnAgent({
-      compactionOverrides: {
-        thresholdPercent: 0.5,
-      },
       session: {
         ...session,
         compaction: {
@@ -396,8 +360,7 @@ describe("refreshSessionFromTurnAgent", () => {
       lastKnownPromptMessageCount: 7,
       requestEnvelopeTokens: 42,
       recentWindowSize: 10,
-      threshold: 100_000,
-      thresholdPercent: 0.5,
+      threshold: 180_000,
     });
     const restored = hydrateDurableSession({
       durable: structuredClone(projectToDurableSession(refreshed)),

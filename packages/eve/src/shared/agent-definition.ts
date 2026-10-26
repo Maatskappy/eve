@@ -140,18 +140,11 @@ export interface InternalAgentCompactionDefinition {
    * When omitted, eve uses the active turn model for the summary call.
    */
   model?: InternalAgentModelDefinition;
-  /**
-   * Fraction of the primary model context window that triggers compaction.
-   *
-   * eve defaults to `0.9` when this is omitted.
-   */
-  thresholdPercent?: number;
 }
 
 /**
- * Configures conversation compaction: when the model context window fills past
- * `thresholdPercent`, eve summarizes earlier turns to reclaim space. Every
- * field is optional; omit the block to use eve's defaults.
+ * Configures conversation compaction. eve compacts when a request would fill 90% of the
+ * model's context window; a `compaction.ts` strategy decides how. Every field is optional.
  */
 export interface PublicAgentCompactionDefinition {
   /**
@@ -169,12 +162,6 @@ export interface PublicAgentCompactionDefinition {
    * When omitted, eve uses the active turn model for the summary call.
    */
   readonly model?: PublicAgentStaticModelDefinition;
-  /**
-   * Fraction of the primary model context window that triggers compaction.
-   *
-   * eve defaults to `0.9` when this is omitted.
-   */
-  readonly thresholdPercent?: number;
 }
 
 /**

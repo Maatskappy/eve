@@ -14,7 +14,6 @@ import {
 export interface DynamicSubagentAgentConfig {
   readonly compaction?: {
     readonly model?: DynamicSubagentModelReference;
-    readonly thresholdPercent?: number;
   };
   readonly description: string;
   /** Serialized into workflow input, so it can't carry the `sessionUsage` function. */
@@ -82,7 +81,6 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (definition.compaction !== undefined) {
     const compaction: {
       model?: DynamicSubagentModelReference;
-      thresholdPercent?: number;
     } = {};
     if (definition.compaction.model !== undefined) {
       compaction.model = await normalizeDurableModelSelection({
@@ -94,9 +92,6 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
         },
         state: input.state,
       });
-    }
-    if (definition.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = definition.compaction.thresholdPercent;
     }
     config.compaction = compaction;
   }

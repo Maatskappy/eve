@@ -1,4 +1,4 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
+import { withoutPromptMeasurement } from "#harness/compaction/measure.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import {
   isStepCount,
@@ -53,6 +53,8 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import type { ContextContainer } from "#context/container.js";
+import { takeCompactRequest } from "#reactions/intents.js";
 import { compactedTurnInput, maybeCompact } from "#harness/compaction/step.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
 import { reportCompactionFailure } from "./failure.js";
@@ -299,6 +301,7 @@ export class ModelCaller {
     const { step, prompt } = this;
     const { config } = step;
     let compaction: Awaited<ReturnType<typeof maybeCompact>>;
+    const requested = takeCompactRequest(step.ctx as ContextContainer | undefined);
     try {
       const { projection } = step.view();
       compaction = await maybeCompact({
@@ -311,7 +314,7 @@ export class ModelCaller {
         },
         ctx: step.ctx,
         emissionState: step.position(),
-        // A hook's compact intent compacts before this call, once.
+        force: requested,
         messages: [...prompt.messages],
         model: this.input.model,
         promptMessages: withClientContext(prompt),
@@ -327,6 +330,7 @@ export class ModelCaller {
             attempt: 0,
             turnId: activeTurnId(step.position()),
           }).telemetry,
+        strategy: config.compactionStrategy,
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
       step.session = compaction.session;

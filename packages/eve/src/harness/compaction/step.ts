@@ -1,4 +1,10 @@
-import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
+import {
+  exceedsLimit,
+  getInputTokenCount,
+  withoutPromptMeasurement,
+} from "#harness/compaction/measure.js";
+import type { CompactionContext, CompactionStrategy } from "#harness/compaction/strategy.js";
+import { fixedTail } from "#harness/compaction/strategies/fixed-tail/index.js";
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
@@ -6,7 +12,6 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
 import {
-  type CompactionConfig,
   type HarnessSession,
   requireSessionModelReference,
   type StepResult,
@@ -26,12 +31,6 @@ import {
   resolveEffectiveRuntimeModel,
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
-import {
-  compactMessages,
-  type CompactionSummarizer,
-  getInputTokenCount,
-  shouldCompact,
-} from "#harness/compaction/engine.js";
 import { contextStorage } from "#context/container.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -140,6 +139,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       session: step.session,
       prepareTelemetry: (runId) =>
         step.instrumentation?.prepareAttempt({ runId, attempt: 0 }).telemetry,
+      strategy: config.compactionStrategy,
       traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
     });
     step.session = compacted.session;
@@ -266,6 +266,9 @@ async function compactOnce(input: {
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
+  readonly strategy?: CompactionStrategy;
+  /** The strategy's name when a hook asked for a named one. */
+  readonly strategyName?: string;
   readonly telemetry?: TelemetryOptions;
   readonly prepareTelemetry?: (runId: string) => TelemetryOptions | undefined;
   readonly traceContextHeaders?: () => Record<string, string> | undefined;
@@ -277,41 +280,62 @@ async function compactOnce(input: {
   readonly session: HarnessSession;
 }> {
   const { emissionState, publish } = input;
+  const strategy = input.strategy ?? fixedTail();
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
   const projectedPromptMessages = validateHarnessModelMessages(promptMessages);
-  const needsSummary =
-    input.force === true ||
-    shouldCompact(
+  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
+  const ordinary = validateHarnessModelMessages(messages);
+  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
+  const protectedTokens = Math.max(
+    0,
+    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
+  );
+  const measured = {
+    inputTokens: getInputTokenCount(
       projectedPromptMessages,
       session.compaction,
       input.requestEnvelopeTokens,
       session.compaction.requestEnvelopeTokens,
-    );
+    ),
+    recentWindowSize: session.compaction.recentWindowSize,
+    requestEnvelopeTokens: requestEnvelopeTokens + protectedTokens,
+    threshold: session.compaction.threshold,
+  };
+  const needsSummary =
+    input.force === true || (projectedPromptMessages.length > 0 && exceedsLimit(measured));
   if (!needsSummary) {
     return { compacted: false, messages, session };
   }
 
   const modelReference = requireSessionModelReference(session);
   const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
-  const model =
-    compactionModelReference === modelReference
-      ? input.model
-      : await input.resolveModel(compactionModelReference);
-  const profile = resolveModelProfile(model);
-  const providerOptions = resolveCallProviderOptions({
-    auth: input.auth,
-    profile,
-    providerOptions: compactionModelReference.providerOptions,
-    session,
-  }) as Parameters<typeof streamText>[0]["providerOptions"];
-  const call = {
-    abortSignal: input.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
-    providerOptions,
-    telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+  // Resolved on the first summary, so a strategy that never summarizes needs no compaction model.
+  let summaryCall: Promise<SummaryCall & { readonly modelId: string }> | undefined;
+  const resolveSummaryCall = () => {
+    summaryCall ??= (async () => {
+      const model =
+        compactionModelReference === modelReference
+          ? input.model
+          : await input.resolveModel(compactionModelReference);
+      const profile = resolveModelProfile(model);
+      const providerOptions = resolveCallProviderOptions({
+        auth: input.auth,
+        profile,
+        providerOptions: compactionModelReference.providerOptions,
+        session,
+      }) as Parameters<typeof streamText>[0]["providerOptions"];
+      return {
+        abortSignal: input.abortSignal,
+        headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
+        model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
+        modelId: gatewayModelId(model) ?? "unknown",
+        providerOptions,
+        telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+      };
+    })();
+    return summaryCall;
   };
   let summaryTelemetry: TelemetryOptions | undefined;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
@@ -319,15 +343,12 @@ async function compactOnce(input: {
   // The summary run starts with its first call: `compactMessages` can keep the history without one.
   let summaryRunOpen = change.announced === true;
   const summarize = async (prompt: CompactionSummaryPrompt) => {
+    const { modelId, ...call } = await resolveSummaryCall();
     if (!summaryRunOpen) {
       summaryRunOpen = true;
       await publish([
         runRequested({ changeId: change.changeId }, change.summaryRunId),
-        runStarted({
-          attempt: 0,
-          modelId: gatewayModelId(model) ?? "unknown",
-          runId: change.summaryRunId,
-        }),
+        runStarted({ attempt: 0, modelId, runId: change.summaryRunId }),
       ]);
     }
     const summary = await runModelCallWithRetries(
@@ -349,49 +370,23 @@ async function compactOnce(input: {
     return summary.text;
   };
 
-  {
-    if (change.announced !== true) {
-      const inputTokens = getInputTokenCount(
-        projectedPromptMessages,
-        session.compaction,
-        input.requestEnvelopeTokens,
-        session.compaction.requestEnvelopeTokens,
-      );
-      await publish(
-        contextStarted({
-          cause: change.cause,
-          changeId: change.changeId,
-          kind: "compaction",
-          trigger: input.force === true || inputTokens === null ? undefined : { inputTokens },
-          turnId: change.turnId,
-        }),
-        projectedPromptMessages,
-      );
-    }
+  if (change.announced !== true) {
+    await publish(
+      contextStarted({
+        cause: change.cause,
+        changeId: change.changeId,
+        kind: "compaction",
+        ...(input.strategyName !== undefined && { strategy: input.strategyName }),
+        trigger: input.force === true ? undefined : { inputTokens: measured.inputTokens },
+        turnId: change.turnId,
+      }),
+      projectedPromptMessages,
+    );
   }
 
   if (needsSummary) summaryTelemetry = input.prepareTelemetry?.(change.summaryRunId);
 
-  const ordinary = validateHarnessModelMessages(messages);
-  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
-  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
-  const protectedTokens = Math.max(
-    0,
-    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
-  );
-  const historyCompaction: CompactionConfig = {
-    ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens - protectedTokens),
-    lastKnownInputTokens:
-      session.compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            session.compaction.lastKnownInputTokens -
-              Math.min(session.compaction.requestEnvelopeTokens ?? 0, requestEnvelopeTokens),
-          ),
-  };
-  let compactedOrdinary: ModelMessage[] = [...ordinary];
+  let compactedOrdinary: readonly HarnessModelMessage[] = ordinary;
   // A memory capture before compaction ran in the commit that started it. When it failed, the
   // compaction fails before it rewrites the history the capture couldn't keep.
   const captureFailure = takeCompactionCaptureFailure(input.ctx);
@@ -404,25 +399,29 @@ async function compactOnce(input: {
         requestEnvelopeTokens,
         threshold: session.compaction.threshold,
       });
-      compactedOrdinary = await compactMessages(
-        [...ordinary],
-        historyCompaction,
+      const context: CompactionContext = {
+        ...measured,
+        forced: input.force === true,
+        abortSignal: input.abortSignal,
+        estimateTokens,
         summarize,
-        input.force === true,
-        input.requestEnvelopeTokens === undefined
-          ? undefined
-          : Math.max(
-              0,
-              getInputTokenCount(
-                projectedPromptMessages,
-                session.compaction,
-                requestEnvelopeTokens,
-                session.compaction.requestEnvelopeTokens,
-              ) -
-                requestEnvelopeTokens -
-                protectedTokens,
-            ),
-      );
+      };
+      compactedOrdinary = await strategy.compact([...ordinary], context);
+      // The core's guard: a strategy's result that still leaves the request over the limit is
+      // compacted once more by the default, which must fit.
+      if (
+        input.strategy !== undefined &&
+        exceedsLimit({
+          inputTokens: estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens,
+          threshold: context.threshold,
+        })
+      ) {
+        compactedOrdinary = await fixedTail().compact([...compactedOrdinary], {
+          ...context,
+          forced: false,
+          inputTokens: estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens,
+        });
+      }
     }
   } catch (error) {
     failure = { error };
@@ -474,7 +473,11 @@ export function compactedTurnInput<Message extends ModelMessage>(
   return messages.findLast((message) => isUserModelMessage(message) && message.kind === "user");
 }
 
-type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
+type CompactionSummaryPrompt = Parameters<CompactionContext["summarize"]>[0];
+type SummaryCall = Pick<
+  Parameters<typeof streamText>[0],
+  "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+>;
 
 /**
  * Calls the compaction model the way a step calls its model: streamed, with stream errors

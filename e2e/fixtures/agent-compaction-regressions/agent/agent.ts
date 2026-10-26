@@ -225,12 +225,13 @@ export default defineAgent({
   // fixture's scripted mock regardless of the matrix model.
   ...e2eAgentConfig(),
   model: taskModel,
-  modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
+  // eve compacts at 90% of the window, so the window is sized for the limit below.
+  modelContextWindowTokens: Math.ceil(
+    (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / 0.9,
+  ),
   compaction: {
     model: e2eModel(),
     modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-    thresholdPercent:
-      (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / TEST_CONTEXT_WINDOW_TOKENS,
   },
   limits: {
     sessionUsage: ({ window }) => window.inputTokens - window.cacheReadTokens >= 100_000,

@@ -7,6 +7,23 @@ declare const sessionViewBrand: unique symbol;
 /** An immutable observation snapshot. Persist events and cursors, not its backing representation. */
 export interface SessionView {
   readonly [sessionViewBrand]: true;
+  /** What the model last saw. */
+  readonly context: {
+    /** The input tokens of the latest settled model call; absent before the first one. */
+    readonly inputTokens?: number;
+  };
+}
+
+/** Walks runs from the newest, so it costs the calls since the latest settled one. */
+function latestInputTokens(runs: Tables["runs"]): number | undefined {
+  const ids = Object.keys(runs);
+  for (let index = ids.length - 1; index >= 0; index--) {
+    const run = runs[ids[index]!];
+    if (run?.step !== undefined && run.status === "settled" && run.usage !== undefined) {
+      return run.usage.inputTokens;
+    }
+  }
+  return undefined;
 }
 
 interface Snapshot {
@@ -57,7 +74,15 @@ export function snapshotOf(
   previews: SessionPreviews = emptyPreviews(),
   pending: readonly ReceivedEvent[] = [],
 ): SessionView {
-  const snapshot = Object.freeze({}) as SessionView;
+  let inputTokens: { readonly value: number | undefined } | undefined;
+  const snapshot = Object.freeze({
+    context: Object.freeze({
+      get inputTokens() {
+        inputTokens ??= { value: latestInputTokens(snapshotState(snapshot).tables.runs) };
+        return inputTokens.value;
+      },
+    }),
+  }) as SessionView;
   snapshots.set(snapshot, {
     tables: Object.freeze({
       position: view.position,

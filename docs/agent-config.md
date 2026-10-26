@@ -234,13 +234,13 @@ Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
-Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:
+Compaction shortens the history as a request approaches the context window. It's on by default. eve compacts when a request would fill 90% of the model's context window, or when a hook calls `ctx.compact()`. How the history is shortened is a strategy you export from `agent/compaction.ts`; see [Compaction strategies](./concepts/compaction-strategies). `compaction.model` sets the model that writes summaries:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   compaction: {
-    thresholdPercent: 0.75, // default 0.9
+    model: "anthropic/claude-haiku-4.5",
   },
 });
 ```

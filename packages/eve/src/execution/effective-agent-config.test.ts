@@ -10,7 +10,6 @@ describe("resolveEffectiveAgentRuntime", () => {
     ctx.set(DynamicSubagentAgentConfigKey, {
       compaction: {
         model: { id: "anthropic/claude-sonnet-4.5" },
-        thresholdPercent: 0.75,
       },
       description: "Perform deep research.",
       limits: { sessionTimeoutMs: 120_000 },
@@ -23,7 +22,6 @@ describe("resolveEffectiveAgentRuntime", () => {
       {
         resolvedAgent: {
           config: {
-            compaction: { thresholdPercent: 0.9 },
             limits: { sessionTimeoutMs: 60_000 },
           },
         },
@@ -40,7 +38,6 @@ describe("resolveEffectiveAgentRuntime", () => {
 
     expect(effective).toMatchObject({
       limits: { sessionTimeoutMs: 120_000 },
-      thresholdPercent: 0.75,
       turnAgent: {
         compactionModel: { id: "anthropic/claude-sonnet-4.5" },
         model: { id: "anthropic/claude-opus-4.6" },
@@ -56,7 +53,6 @@ describe("resolveEffectiveAgentRuntime", () => {
     ctx.set(DynamicSubagentAgentConfigKey, {
       compaction: {
         model: { id: "anthropic/claude-haiku-4.5" },
-        thresholdPercent: 0.75,
       },
       description: "Perform deep research.",
       limits: { sessionTimeoutMs: 120_000 },
@@ -83,7 +79,6 @@ describe("resolveEffectiveAgentRuntime", () => {
 
     expect(effective).toMatchObject({
       limits: { sessionTimeoutMs: 120_000 },
-      thresholdPercent: 0.75,
       turnAgent: {
         compactionModel: { id: "anthropic/claude-haiku-4.5" },
         instructions: ["Research carefully."],

@@ -14,6 +14,7 @@ import {
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
+import { orderLocalWorkflowStreamWrites } from "#internal/workflow/local-world-stream-order.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -96,10 +97,12 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
     this.#transportSecret = input.transportSecret;
     applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-    this.#world = createWorld({
-      dataDir: resolveLocalWorkflowWorldDataDirectory(input.appRoot),
-      recoverActiveRuns: false,
-    });
+    this.#world = orderLocalWorkflowStreamWrites(
+      createWorld({
+        dataDir: resolveLocalWorkflowWorldDataDirectory(input.appRoot),
+        recoverActiveRuns: false,
+      }),
+    );
   }
 
   async start(): Promise<void> {
@@ -305,12 +308,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         });
       }
       return hook;
-    }
-    if (call.operation === "streams.writeMulti" && this.#world.streams.writeMulti === undefined) {
-      for (const chunk of args[2] as readonly (string | Uint8Array)[]) {
-        await this.#world.streams.write(args[0] as string, args[1] as string, chunk);
-      }
-      return undefined;
     }
     const separator = call.operation.indexOf(".");
     const receiver: unknown = this.#world[call.operation.slice(0, separator) as keyof World];

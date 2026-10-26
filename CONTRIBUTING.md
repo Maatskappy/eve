@@ -30,7 +30,7 @@ commits need both.
 ## Prerequisites
 
 - **Node.js 24+** — see [`.nvmrc`](./.nvmrc) (`nvm use` or `fnm use`)
-- **pnpm** — the version pinned in [`package.json`](./package.json) (`corepack enable` handles this automatically)
+- **pnpm 12.11 or later** as the first `pnpm` on your `PATH` (`which -a pnpm`). It switches to the version pinned in [`package.json`](./package.json) on its own. Older versions stop before they switch, with `Failed to parse pnpm-workspace.yaml` and `expected string scalar`. Upgrade with `brew upgrade pnpm` or `npm install -g pnpm@latest`, or run `corepack enable pnpm` and remove the older `pnpm` from your `PATH`.
 
 ## Getting started
 

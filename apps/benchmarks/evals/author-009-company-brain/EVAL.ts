@@ -224,9 +224,10 @@ test("analyze asks both specialists at the same time and returns both answers", 
           result: async () => {
             sentWhenFirstAnswerRead ??= sent.length;
             return {
-              status: "waiting",
-              message: `${name}-answer`,
+              status: "completed",
+              reply: `${name}-answer`,
               data: { answer: `${name}-answer` },
+              sessionEnded: false,
             };
           },
         };
@@ -313,7 +314,7 @@ test("keeps metric definitions in a skill loaded on demand", async () => {
   const singleFile = sourceFiles("skills", /\.md$/)
     .filter((file) => dirname(file) === `${agentRoot}/skills` && !file.endsWith("/SKILL.md"))
     .map((file) => ({ file, text: readFileSync(file, "utf8") }));
-  // Or a `defineSkill({ markdown, files })` module, possibly re-exported from lib/.
+  // Or a `defineSkill({ content, files })` module, possibly re-exported from lib/.
   const defined = await Promise.all(
     sourceFiles("skills", /\.ts$/)
       .filter((file) => dirname(file) === `${agentRoot}/skills`)
@@ -321,7 +322,7 @@ test("keeps metric definitions in a skill loaded on demand", async () => {
         const definition = await load(file);
         return {
           file,
-          text: [definition?.markdown, ...strings(definition?.files)].join("\n"),
+          text: [definition?.content, ...strings(definition?.files)].join("\n"),
         };
       }),
   );
@@ -518,11 +519,15 @@ function requiresApproval(decision: unknown): boolean {
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function resolveDynamic(definition: any, caller: Caller): Promise<unknown> {
   expect(definition?.kind).toBe("eve:dynamic");
-  const handler = ["session.started", "turn.started", "step.started"]
-    .map((event) => definition.events?.[event])
-    .find((candidate) => typeof candidate === "function");
-  expect(typeof handler).toBe("function");
-  return handler({}, { session: session(caller) });
+  expect(typeof definition.evaluate).toBe("function");
+  return definition.evaluate({
+    session: session(caller),
+    turn: null,
+    now: new Date(),
+    model: { id: "anthropic/claude-sonnet-5" },
+    memo: async (_key: unknown, fn: () => unknown) => fn(),
+    messages: async () => [],
+  });
 }
 
 function session(caller: Caller) {
@@ -548,9 +553,16 @@ function session(caller: Caller) {
  * trusts groups only from SSO callers then sees the name it checks for.
  */
 function ssoAuthenticator(): string {
-  const file = `${agentRoot}/channels/eve.ts`;
-  const named = /\bauthenticator\s*:\s*["']([^"']+)["']/.exec(resolvedSource(file))?.[1];
-  return named ?? "oidc";
+  const source = resolvedSource(`${agentRoot}/channels/eve.ts`);
+  const named = /\bauthenticator\s*:\s*(?:["']([^"']+)["']|([A-Za-z_$][\w$]*))/.exec(source);
+  if (named?.[1] !== undefined) return named[1];
+  // `authenticator: SSO_AUTHENTICATOR`, with the constant declared in an imported module.
+  const constant = named?.[2];
+  const declared =
+    constant === undefined
+      ? undefined
+      : new RegExp(`\\b${constant}\\s*=\\s*["']([^"']+)["']`).exec(source)?.[1];
+  return declared ?? "oidc";
 }
 
 function toolContext(caller: Caller) {

@@ -8,6 +8,8 @@ import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import { createCompactionUserMessage } from "#harness/compaction/message.js";
+import type { CompactionStrategy } from "#harness/compaction/strategy.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
 import { attachClientContext } from "#internal/client-context.js";
@@ -97,9 +99,22 @@ function userTexts(prompt: Prompt): string[] {
 }
 
 /** Manually compacts a short conversation with `model`, as `session.compact()` does. */
-async function compactWith(model: MockLanguageModelV3) {
+async function compactWith(
+  model: MockLanguageModelV3,
+  compactionStrategy?: CompactionStrategy,
+  options: {
+    readonly compactionModelReference?: { readonly id: string };
+    readonly events?: { readonly type: string; readonly data?: unknown }[];
+    readonly resolveModel?: (reference: { readonly id: string }) => Promise<MockLanguageModelV3>;
+  } = {},
+) {
   const session: HarnessSession = {
-    agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
+    agent: {
+      compactionModelReference: options.compactionModelReference,
+      modelReference: { id: "summary-model" },
+      system: "You help Alice.",
+      tools: [],
+    },
     compaction: { recentWindowSize: 1, threshold: 100_000 },
     continuationToken: "http:compaction-session",
     history: [
@@ -111,8 +126,11 @@ async function compactWith(model: MockLanguageModelV3) {
   };
   return createToolLoopHarness({
     compactOnly: true,
-    handleEvent: async () => {},
-    resolveModel: async () => model,
+    compactionStrategy,
+    handleEvent: async (event) => {
+      options.events?.push(event as { type: string; data?: unknown });
+    },
+    resolveModel: options.resolveModel ?? (async () => model),
     tools: new Map(),
   })(session, {});
 }
@@ -189,6 +207,131 @@ describe("compaction summary call", () => {
     expect(result.session.history).toHaveLength(3);
     expect(JSON.stringify(result.session.history)).not.toContain("context.compaction");
     expect(getTurnUsageState(result.session.state)?.session).toMatchObject({ inputTokens: 120 });
+  });
+});
+
+describe("compaction strategy", () => {
+  it("compacts through the agent's strategy, with the core's measurements and summarizer", async () => {
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => summaryStream());
+    const compact = vi.fn<CompactionStrategy["compact"]>(async (history, context) => [
+      createCompactionUserMessage("Checkpoint follows."),
+      {
+        content: await context.summarize({ messages: [...history], system: "Summarize." }),
+        role: "assistant",
+      },
+      ...history.slice(-1),
+    ]);
+
+    const result = await compactWith(new MockLanguageModelV3({ doStream }), {
+      compact,
+      shouldCompact: () => false,
+    });
+
+    expect(doStream).toHaveBeenCalledTimes(1);
+    expect(compact.mock.calls[0]?.[1]).toMatchObject({
+      forced: true,
+      recentWindowSize: 1,
+      threshold: 100_000,
+    });
+    expect(result.session.history).toEqual([
+      { content: "Checkpoint follows.", kind: "context.compaction", role: "user" },
+      { content: "Alice asked for the quarterly report.", role: "assistant" },
+      { content: "Thanks, keep going.", kind: "user", role: "user" },
+    ]);
+  });
+
+  it("never asks shouldCompact for a forced compaction, and hands compact no event", async () => {
+    const shouldCompact = vi.fn<CompactionStrategy["shouldCompact"]>(() => false);
+    const compact = vi.fn<CompactionStrategy["compact"]>(async (history) => history);
+
+    await compactWith(new MockLanguageModelV3({ doStream: async () => summaryStream() }), {
+      compact,
+      shouldCompact,
+    });
+
+    expect(shouldCompact).not.toHaveBeenCalled();
+    expect(compact.mock.calls[0]?.[1]).toMatchObject({ forced: true });
+    expect(compact.mock.calls[0]?.[1]).not.toHaveProperty("event");
+  });
+
+  it("needs no compaction model when the strategy never summarizes", async () => {
+    const turnModel = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const resolveModel = vi.fn(async (reference: { readonly id: string }) => {
+      if (reference.id === "other-model") throw new Error("compaction model unavailable");
+      return turnModel;
+    });
+
+    const result = await compactWith(
+      turnModel,
+      { compact: async (history) => history.slice(-2), shouldCompact: () => false },
+      { compactionModelReference: { id: "other-model" }, resolveModel },
+    );
+
+    expect(resolveModel).not.toHaveBeenCalledWith({ id: "other-model" });
+    expect(result.session.history).toHaveLength(2);
+  });
+
+  it("names the configured compaction model on its events, whether or not the strategy summarizes", async () => {
+    const turnModel = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const strategy: CompactionStrategy = {
+      compact: async (history) => history.slice(-2),
+      shouldCompact: () => false,
+    };
+    const configured: { type: string; data?: unknown }[] = [];
+    const fallback: { type: string; data?: unknown }[] = [];
+
+    await compactWith(turnModel, strategy, {
+      compactionModelReference: { id: "other-model" },
+      events: configured,
+      resolveModel: async () => turnModel,
+    });
+    await compactWith(turnModel, strategy, { events: fallback });
+
+    const modelIds = (events: { type: string; data?: unknown }[]) =>
+      events
+        .filter((event) => event.type.startsWith("compaction."))
+        .map((event) => [event.type, (event.data as { modelId?: string } | undefined)?.modelId]);
+    expect(modelIds(configured)).toEqual([
+      ["compaction.requested", "other-model"],
+      ["compaction.completed", "other-model"],
+    ]);
+    expect(modelIds(fallback)).toEqual([
+      ["compaction.requested", "summary-model"],
+      ["compaction.completed", "summary-model"],
+    ]);
+  });
+
+  it("treats an invalid strategy result as a compaction failure that still counts the summary call", async () => {
+    const strategy: CompactionStrategy = {
+      compact: async (history, context) => {
+        await context.summarize({ messages: [...history], system: "Summarize." });
+        return [{ content: "no kind", role: "user" }] as never;
+      },
+      shouldCompact: () => false,
+    };
+
+    const result = await compactWith(
+      new MockLanguageModelV3({ doStream: async () => summaryStream() }),
+      strategy,
+    );
+
+    expect(result.session.history).toHaveLength(3);
+    expect(getTurnUsageState(result.session.state)?.session).toMatchObject({ inputTokens: 120 });
+  });
+
+  it("makes no model call when the strategy keeps the history without a summary", async () => {
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => summaryStream());
+
+    const result = await compactWith(new MockLanguageModelV3({ doStream }), {
+      compact: async (history) => history.slice(-2),
+      shouldCompact: () => false,
+    });
+
+    expect(doStream).not.toHaveBeenCalled();
+    expect(result.session.history).toEqual([
+      { content: "I started the report.", role: "assistant" },
+      { content: "Thanks, keep going.", kind: "user", role: "user" },
+    ]);
   });
 });
 

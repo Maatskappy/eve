@@ -290,6 +290,7 @@ export class ModelCaller {
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
+        strategy: config.compactionStrategy,
         telemetry: step.instrumentation?.telemetry(),
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });

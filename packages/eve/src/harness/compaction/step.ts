@@ -1,11 +1,9 @@
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
 import {
-  type CompactionConfig,
   type HarnessSession,
   requireSessionModelReference,
   type StepResult,
@@ -28,12 +26,10 @@ import {
   withGatewayTraceContext,
 } from "#harness/model-call/model.js";
 import { canonicalizeMemoryRecords, shouldCanonicalizeMemory } from "#shared/memory-state.js";
-import {
-  compactMessages,
-  type CompactionSummarizer,
-  getInputTokenCount,
-  shouldCompact,
-} from "#harness/compaction/engine.js";
+import { getInputTokenCount } from "#harness/compaction/measure.js";
+import type { CompactionContext, CompactionStrategy } from "#harness/compaction/strategy.js";
+import { estimateTokens } from "#harness/token-estimate.js";
+import { fixedTail } from "#harness/compaction/strategies/fixed-tail/index.js";
 import { contextStorage } from "#context/container.js";
 import {
   createCompactionCompletedEvent,
@@ -42,11 +38,7 @@ import {
 import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
-import {
-  extractGatewayCostUsd,
-  extractTokenUsageDelta,
-  gatewayModelId,
-} from "#harness/model-call/usage.js";
+import { extractGatewayCostUsd, extractTokenUsageDelta } from "#harness/model-call/usage.js";
 import { resolveModelProfile } from "#harness/model-profile.js";
 import {
   addTurnUsage,
@@ -119,6 +111,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
         session: step.session,
+        strategy: config.compactionStrategy,
         telemetry: step.instrumentation?.telemetry(),
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
@@ -176,6 +169,7 @@ export async function maybeCompact(input: {
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
+  readonly strategy?: CompactionStrategy;
   readonly telemetry?: TelemetryOptions;
   readonly traceContextHeaders?: () => Record<string, string> | undefined;
 }): Promise<{
@@ -186,20 +180,39 @@ export async function maybeCompact(input: {
   readonly session: HarnessSession;
 }> {
   const { emissionState, publish } = input;
+  const strategy = input.strategy ?? fixedTail();
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
   const projectedPromptMessages = validateHarnessModelMessages(
     input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages,
   );
-  const needsSummary =
-    input.force === true ||
-    shouldCompact(
+  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
+  const canonical = canonicalizeMemoryRecords(messages);
+  const ordinary = validateHarnessModelMessages(
+    input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
+      canonical.ordinary,
+  );
+  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
+  const protectedTokens = Math.max(
+    0,
+    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
+  );
+  const measured = {
+    inputTokens: getInputTokenCount(
       projectedPromptMessages,
       session.compaction,
       input.requestEnvelopeTokens,
       getRequestEnvelopeTokens(session),
-    );
+    ),
+    recentWindowSize: session.compaction.recentWindowSize,
+    requestEnvelopeTokens: requestEnvelopeTokens + protectedTokens,
+    threshold: session.compaction.threshold,
+  };
+  const needsSummary =
+    input.force === true ||
+    (projectedPromptMessages.length > 0 &&
+      strategy.shouldCompact({ ...measured, event: { type: "step.started" } }));
   const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
 
   if (!needsSummary && !needsMemoryCanonicalization) {
@@ -208,28 +221,35 @@ export async function maybeCompact(input: {
 
   const modelReference = requireSessionModelReference(session);
   const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
-  const model =
-    compactionModelReference === modelReference
-      ? input.model
-      : await input.resolveModel(compactionModelReference);
-  const profile = resolveModelProfile(model);
-  const providerOptions = resolveCallProviderOptions({
-    auth: input.auth,
-    profile,
-    providerOptions: compactionModelReference.providerOptions,
-    session,
-  }) as Parameters<typeof streamText>[0]["providerOptions"];
-  const call = {
-    abortSignal: input.abortSignal,
-    headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-    model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
-    providerOptions,
-    telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+  // Resolved on the first summary, so a strategy that never summarizes needs no compaction model.
+  let summaryCall: Promise<SummaryCall> | undefined;
+  const resolveSummaryCall = () => {
+    summaryCall ??= (async (): Promise<SummaryCall> => {
+      const model =
+        compactionModelReference === modelReference
+          ? input.model
+          : await input.resolveModel(compactionModelReference);
+      const profile = resolveModelProfile(model);
+      const providerOptions = resolveCallProviderOptions({
+        auth: input.auth,
+        profile,
+        providerOptions: compactionModelReference.providerOptions,
+        session,
+      }) as Parameters<typeof streamText>[0]["providerOptions"];
+      return {
+        abortSignal: input.abortSignal,
+        headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
+        model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
+        providerOptions,
+        telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+      };
+    })();
+    return summaryCall;
   };
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const summarize = async (prompt: CompactionSummaryPrompt) => {
     const summary = await runModelCallWithRetries(
-      () => streamCompactionSummary({ ...call, ...prompt }),
+      async () => streamCompactionSummary({ ...(await resolveSummaryCall()), ...prompt }),
       { sessionId: session.sessionId, turnId: emissionState.turnId },
       input.abortSignal,
     );
@@ -249,46 +269,18 @@ export async function maybeCompact(input: {
     }
     await publish(
       createCompactionRequestedEvent({
-        modelId: gatewayModelId(model) ?? "unknown",
+        modelId: compactionModelReference.id,
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
-        usageInputTokens: getInputTokenCount(
-          projectedPromptMessages,
-          session.compaction,
-          input.requestEnvelopeTokens,
-          getRequestEnvelopeTokens(session),
-        ),
+        usageInputTokens: measured.inputTokens,
       }),
       projectedPromptMessages,
     );
   }
 
-  const canonical = canonicalizeMemoryRecords(messages);
-  const ordinary = validateHarnessModelMessages(
-    input.historyProjector?.({ messages: canonical.ordinary, state: session.state }) ??
-      canonical.ordinary,
-  );
-  const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
-  // Whatever the model sees besides the history (memory, client context) is kept whole, so it takes room like the envelope.
-  const protectedTokens = Math.max(
-    0,
-    estimateTokens(projectedPromptMessages) - estimateTokens(ordinary),
-  );
-  const historyCompaction: CompactionConfig = {
-    ...session.compaction,
-    threshold: Math.max(1, session.compaction.threshold - requestEnvelopeTokens - protectedTokens),
-    lastKnownInputTokens:
-      session.compaction.lastKnownInputTokens === undefined
-        ? undefined
-        : Math.max(
-            0,
-            session.compaction.lastKnownInputTokens -
-              Math.min(getRequestEnvelopeTokens(session) ?? 0, requestEnvelopeTokens),
-          ),
-  };
-  let compactedOrdinary: ModelMessage[] = [...ordinary];
+  let compacted: HarnessModelMessage[] | undefined;
   let failure: { readonly error: unknown } | undefined;
   try {
     if (needsSummary) {
@@ -297,25 +289,15 @@ export async function maybeCompact(input: {
         requestEnvelopeTokens,
         threshold: session.compaction.threshold,
       });
-      compactedOrdinary = await compactMessages(
-        [...ordinary],
-        historyCompaction,
+      const context: CompactionContext = {
+        ...measured,
+        forced: input.force === true,
+        abortSignal: input.abortSignal,
+        estimateTokens,
         summarize,
-        input.force === true,
-        input.requestEnvelopeTokens === undefined
-          ? undefined
-          : Math.max(
-              0,
-              getInputTokenCount(
-                projectedPromptMessages,
-                session.compaction,
-                requestEnvelopeTokens,
-                getRequestEnvelopeTokens(session),
-              ) -
-                requestEnvelopeTokens -
-                protectedTokens,
-            ),
-      );
+      };
+      const result = await strategy.compact([...ordinary], context);
+      compacted = validateHarnessModelMessages([...canonical.memory, ...result]);
     }
   } catch (error) {
     failure = { error };
@@ -329,7 +311,7 @@ export async function maybeCompact(input: {
   if (failure !== undefined) {
     return { compacted: false, failure, messages: input.messages, session };
   }
-  messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
+  messages = compacted ?? validateHarnessModelMessages([...canonical.memory, ...ordinary]);
 
   {
     const ctx = contextStorage.getStore();
@@ -338,7 +320,7 @@ export async function maybeCompact(input: {
     }
     await publish(
       createCompactionCompletedEvent({
-        modelId: gatewayModelId(model) ?? "unknown",
+        modelId: compactionModelReference.id,
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
@@ -387,19 +369,17 @@ function placeRecalledMemory(
   return [...messages.slice(0, index), ...recalled, ...messages.slice(index)];
 }
 
-type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
+type CompactionSummaryPrompt = Parameters<CompactionContext["summarize"]>[0];
+type SummaryCall = Pick<
+  Parameters<typeof streamText>[0],
+  "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
+>;
 
 /**
  * Calls the compaction model the way a step calls its model: streamed, with stream errors
  * thrown in the same shape, so the caller's retries classify them alike.
  */
-async function streamCompactionSummary(
-  input: CompactionSummaryPrompt &
-    Pick<
-      Parameters<typeof streamText>[0],
-      "abortSignal" | "headers" | "model" | "providerOptions" | "telemetry"
-    >,
-): Promise<{
+async function streamCompactionSummary(input: CompactionSummaryPrompt & SummaryCall): Promise<{
   readonly finishReason: string;
   readonly text: string;
   readonly usage: TokenUsageDelta | undefined;

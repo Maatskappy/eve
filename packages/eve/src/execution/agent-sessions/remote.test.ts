@@ -287,7 +287,7 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
-  it.each([undefined, 2])(
+  it.each([2])(
     "accepts an earlier protocol's result-only session (%s)",
     async (protocolVersion) => {
       vi.stubGlobal(
@@ -309,7 +309,31 @@ describe("startRemoteAgentSession", () => {
           remote: createRemoteAgent(),
           session: { continuationToken: "eve:parent-token" },
         }),
-      ).resolves.toEqual({ earlierProtocol: protocolVersion ?? 1, sessionId: "legacy-session" });
+      ).resolves.toEqual({ earlierProtocol: protocolVersion, sessionId: "legacy-session" });
+    },
+  );
+
+  it.each([undefined, 1])(
+    "rejects a protocol-1 remote's create response (%s)",
+    async (protocolVersion) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        Response.json({
+          ok: true,
+          sessionId: "legacy-session",
+          status: "accepted",
+          protocolVersion,
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(
+        startRemoteAgentSession({
+          action: createAction(),
+          callbackBaseUrl: "https://caller.example.com",
+          remote: createRemoteAgent(),
+          session: { continuationToken: "eve:parent-token" },
+        }),
+      ).rejects.toThrow(/speaks eve remote agent protocol 1.*Remote session: legacy-session/s);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -387,6 +411,7 @@ describe("startRemoteAgentSession", () => {
     [409, { ok: false, sessionId: "already-named" }],
     [409, { ok: true }],
     [500, { ok: false }],
+    [409, { ok: false, protocolVersion: 1 }],
     [409, { ok: false, protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION + 1 }],
   ])("never negotiates an ambiguous or unsupported rejection (%s, %j)", async (status, fields) => {
     const fetchMock = vi

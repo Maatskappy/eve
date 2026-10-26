@@ -20,7 +20,7 @@ describe("parseCreateBody", () => {
     });
   });
 
-  it.each([1, 2, REMOTE_AGENT_PROTOCOL_VERSION])(
+  it.each([2, REMOTE_AGENT_PROTOCOL_VERSION])(
     "accepts a delegated protocol %s call with a retired activity observer",
     (protocolVersion) => {
       const callback = {
@@ -44,7 +44,6 @@ describe("parseCreateBody", () => {
   );
 
   it.each([
-    ["an eve 0.66–0.68 caller, which sends no version", undefined, 1],
     ["a caller on protocol 2", 2, 2],
     ["a caller on this protocol", REMOTE_AGENT_PROTOCOL_VERSION, REMOTE_AGENT_PROTOCOL_VERSION],
   ])("serves %s", (_name, sent, served) => {
@@ -54,13 +53,22 @@ describe("parseCreateBody", () => {
     expect(body).toEqual(expect.objectContaining({ callback: CALLBACK, protocolVersion: served }));
   });
 
-  it("drops the background task id an eve 0.66–0.68 caller names on its callback", () => {
-    const body = parseCreateBody({
-      callback: { ...CALLBACK, taskId: "caller-task" },
-      message: "research this",
-    });
-    expect(body).toEqual(expect.objectContaining({ callback: CALLBACK, protocolVersion: 1 }));
-  });
+  it.each([undefined, 1])(
+    "rejects a protocol-1 caller before parsing its callback (%s)",
+    async (protocolVersion) => {
+      const body = parseCreateBody({
+        callback: { ...CALLBACK, taskId: "caller-task" },
+        message: "research this",
+        protocolVersion,
+      });
+      if (!(body instanceof Response)) throw new Error("expected a refusal");
+      expect(body.status).toBe(409);
+      await expect(body.json()).resolves.toMatchObject({
+        code: "REMOTE_AGENT_PROTOCOL_MISMATCH",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+      });
+    },
+  );
 
   it.each([{}, { nextProtocolOption: true }])(
     "preserves protocol upgrade guidance with additional fields %j",

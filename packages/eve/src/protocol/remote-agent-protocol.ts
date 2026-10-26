@@ -47,13 +47,13 @@ export function readCallbackProtocol(url: string): number | undefined {
 }
 
 /**
- * Whether a remote agent serves a caller on this protocol version. It serves every version back
- * to the unversioned one, but relays requests and streams only to a caller on its own version.
+ * Whether a remote agent serves a caller on this protocol version. It serves versions 2 and up,
+ * but relays requests and streams only to a caller on its own version.
  */
 export function servesRemoteAgentCaller(version: number): boolean {
   return (
     Number.isSafeInteger(version) &&
-    version >= UNVERSIONED_REMOTE_AGENT_PROTOCOL &&
+    version >= V26_INPUT_REMOTE_AGENT_PROTOCOL &&
     version <= REMOTE_AGENT_PROTOCOL_VERSION
   );
 }

@@ -121,11 +121,11 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     "stubs",
     "forwardedPrincipal",
   ];
-  // Protocol 1–3 callers can still send this retired advisory field when delegating.
+  // Supported callers can still send this retired advisory field when delegating.
   if (input.callback !== undefined) fields.push("activityObserver");
   const rejection = rejectUnknownFields(input, fields);
   if (rejection !== undefined) return rejection;
-  const payload = withoutLegacyTaskId(input);
+  const payload = input;
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 
@@ -473,17 +473,6 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
-}
-
-/**
- * An eve 0.66–0.68 caller names the background task it delegates from as `callback.taskId`. This
- * deployment never relays to such a caller, so the task id has no reader and is dropped.
- */
-function withoutLegacyTaskId(input: Record<string, unknown>): Record<string, unknown> {
-  const { callback } = input;
-  if (callback === null || typeof callback !== "object" || !("taskId" in callback)) return input;
-  const { taskId: _taskId, ...rest } = callback;
-  return { ...input, callback: rest };
 }
 
 /** Delegating callers must speak a remote agent protocol this deployment serves. */

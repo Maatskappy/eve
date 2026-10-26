@@ -227,13 +227,13 @@ Cancelling the parent turn or the agent task with `eve__task_cancel` also cancel
 When the workflow run that opened a remote child finishes, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for it. An agent task's run finishes when the parent session ends. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
 The parent names its remote agent protocol version when it creates the child, and the remote
-answers with the version it serves. This release serves protocols 1 through 3. A protocol-3 parent
-accepts earlier remotes' results and failures, but cannot follow their live streams. It relays a
-protocol-2 remote's approvals, questions, and sign-ins to the person it serves, as described below;
-a protocol-1 remote's still fail. A protocol-3 remote returns results and failures to callers on
-protocols 1 and 2, but cannot relay approvals, questions, or sign-ins to them: a turn that needs a
-person fails with upgrade guidance instead of waiting on an unreachable prompt. Unsupported versions
-fail at start with an error naming both versions.
+answers with the version it serves. This release serves protocols 2 and 3. A protocol-3 parent
+accepts a protocol-2 remote's results and failures, but cannot follow its live stream. It relays that
+remote's approvals, questions, and sign-ins to the person it serves, as described below.
+A protocol-3 remote returns results and failures to callers on protocol 2, but cannot relay
+approvals, questions, or sign-ins to them: a turn that needs a person fails with upgrade guidance
+instead of waiting on an unreachable prompt. Unsupported versions, including protocol 1 from
+eve 0.66 through 0.68, fail at start with an error naming both versions.
 
 A receiver on an earlier supported protocol can reject a new caller's create request
 before admission. After an explicit `409 REMOTE_AGENT_PROTOCOL_MISMATCH` rejection,
@@ -269,7 +269,7 @@ so the run receives it as it did before the upgrade.
 Each follow-up message and each set of answers a parent sends a protocol-3 child carries an
 `idempotencyKey` named by the parent's own durable step. When the child accepts a request but the
 parent doesn't hear back, the parent's retry is the same delivery: the child admits it once and
-returns the original receipt. Protocol 1 and 2 children don't accept the field, so the parent sends
+returns the original receipt. Protocol-2 children don't accept the field, so the parent sends
 it only to protocol-3 children.
 
 A failed start fails the call immediately. After a remote starts, a terminal failure callback

@@ -14,6 +14,7 @@ import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { storedProjection } from "#harness/session-machine/view.js";
+import type { HarnessSession } from "#harness/types.js";
 import {
   getSessionUsageGrant,
   resetSessionUsageWindow,
@@ -59,10 +60,10 @@ const NO_USAGE: UsageCredit = {
  * grant carries every asker, so whichever copy arrives first starts the same
  * window, and a later copy changes nothing.
  */
-export function continueSessionUsage(
-  session: DurableSession,
+export function continueSessionUsage<T extends Pick<HarnessSession, "state">>(
+  session: T,
   grant: SessionUsageGrant,
-): DurableSession {
+): T {
   const relays = readHitlState(session.state).relays;
   const tasks = readTaskTable(session.state).tasks;
   const byRun = new Map<string, UsageCredit>();

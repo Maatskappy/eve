@@ -64,7 +64,8 @@ import { modelFacingAuthorizationOutput, requestAuthorization } from "#harness/a
 import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
 import { requireSignIn } from "#harness/hitl/approvals.js";
 import { createAuthorizationRequiredEvent } from "#protocol/message.js";
-import { finishTurn, ownOpenRequestIds } from "#harness/session-machine/transitions.js";
+import { finishTurn, ownOpenRequestIds, relay } from "#harness/session-machine/transitions.js";
+import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
 import { answeredCallIds, runtimeWait, storedProjection } from "#harness/session-machine/view.js";
 import {
   foldingHandler,
@@ -82,6 +83,7 @@ import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-can
 import {
   getSessionTokenUsage,
   getSessionUsage,
+  getSessionUsageGrant,
   getSessionUsageWindow,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
@@ -2246,6 +2248,75 @@ describe("createToolLoopHarness", () => {
     // The total keeps the spend; the window restarted at the grant.
     expect(getSessionUsage(resumed.session)).toMatchObject({ costUsd: 1.51, inputTokens: 12 });
     expect(getSessionUsageWindow(resumed.session)).toMatchObject({ costUsd: 0, inputTokens: 0 });
+  });
+
+  it("credits a child's open prompt when the user continues the session's own", async () => {
+    // The session parked on its own limit while a child, whose run has reported nothing, asked
+    // at 45 tokens. The person answers only the session's own prompt.
+    const runStep = createToolLoopHarness(createLimitedConfig(foldingHandler()));
+    const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    const childTotal = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens: 45,
+      outputTokens: 0,
+    };
+    const childPrompt = createSessionLimitContinuationRequest({
+      sessionId: "child-session",
+      total: childTotal,
+      turnSequence: 0,
+      window: childTotal,
+      windowIndex: 0,
+    });
+    const relayed = relay(
+      sessionView(storedProjection(parked.session.state), parked.session.state),
+      {
+        payload: {
+          callId: "call-child",
+          childContinuationToken: "child-token",
+          childSessionId: "child-session",
+          event: { requests: [childPrompt], sequence: 0, stepIndex: 0, turnId: "child-turn" },
+          kind: "subagent-input-request",
+          subagentName: "child",
+        },
+        runId: "child-run",
+      },
+    );
+    const created = createTask(
+      { tasks: [] },
+      { callId: "call-child", kind: "agent", name: "child", resumable: true, turnId: "turn_0" },
+    );
+    const both = writeTaskTable(
+      withPublished(await applyTransition(parked.session, relayed, async () => {}), relayed.events),
+      {
+        tasks: created.table.tasks.map((task) => ({
+          ...task,
+          run: { hookToken: "child-hook", runId: "child-run", started: true },
+        })),
+      },
+    );
+    expect(Object.keys(storedProjection(both.state).inputs)).toEqual(
+      expect.arrayContaining([LIMIT_REQUEST_ID, childPrompt.requestId]),
+    );
+
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const resumed = await runStep(both, {
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    expect(getSessionUsageGrant(resumed.session)?.askers.map((asker) => asker.requestId)).toEqual(
+      expect.arrayContaining([LIMIT_REQUEST_ID, childPrompt.requestId]),
+    );
+    // The grant resumes the child, which reports the 45 tokens the Continue approved.
+    const before = getSessionUsageWindow(resumed.session).inputTokens;
+    const reported = countRunUsage(resumed.session, childTotal);
+    expect(getSessionUsageWindow(reported).inputTokens).toBe(before);
   });
 
   it("starts a new usage window when the user continues past the limit prompt", async () => {

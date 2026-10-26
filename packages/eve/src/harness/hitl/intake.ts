@@ -15,11 +15,8 @@ import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Step } from "#harness/step/context.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { SessionLimitAnswer } from "#harness/hitl/budget-request.js";
-import {
-  getSessionUsageWindowIndex,
-  mintSessionUsageGrant,
-  resetSessionUsageWindow,
-} from "#harness/turn-tag-state.js";
+import { continueSessionUsage } from "#execution/session-usage-continuation.js";
+import { getSessionUsageWindowIndex, mintSessionUsageGrant } from "#harness/turn-tag-state.js";
 import type { HarnessToolLookup, StepInput, StepResult } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
@@ -230,7 +227,7 @@ export async function admitApprovedWork(step: Step, work: ApprovedWork): Promise
     // started the next window.
     const current = getSessionUsageWindowIndex(step.session);
     if ((work.limit.windowIndex ?? current) === current) {
-      step.session = resetSessionUsageWindow(step.session, mintSessionUsageGrant(step.session));
+      step.session = continueSessionUsage(step.session, mintSessionUsageGrant(step.session));
     }
   }
   await step.apply(settle(step.view(), { results: [] }));

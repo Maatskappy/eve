@@ -85,6 +85,8 @@ import {
   getSessionUsage,
   getSessionUsageGrant,
   getSessionUsageWindow,
+  getSessionUsageWindowIndex,
+  mintSessionUsageGrant,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -100,6 +102,11 @@ import {
 import type { RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
+import {
+  continueSessionUsage,
+  settledSessionLimitPrompts,
+} from "#execution/session-usage-continuation.js";
+import { openInputs } from "#protocol/session-projection.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
@@ -2317,6 +2324,44 @@ describe("createToolLoopHarness", () => {
     const before = getSessionUsageWindow(resumed.session).inputTokens;
     const reported = countRunUsage(resumed.session, childTotal);
     expect(getSessionUsageWindow(reported).inputTokens).toBe(before);
+  });
+
+  it("goes on, without another window, when a child's Continue already settled its prompt", async () => {
+    // The person continued a child's relayed prompt: the root minted the grant there, which
+    // started the root's next window and queued a Continue for the root's own prompt.
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createLimitedConfig(foldingHandler(emit)));
+    const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    const granted = continueSessionUsage(parked.session, mintSessionUsageGrant(parked.session));
+    const approved = settledSessionLimitPrompts(granted, []);
+    expect(approved).toEqual([LIMIT_REQUEST_ID]);
+
+    const resumed = await runStep(granted, {
+      inputResponses: approved.map((requestId) => ({ optionId: "continue", requestId })),
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(getSessionUsageWindowIndex(resumed.session)).toBe(1);
+    expect(getSessionUsageWindow(resumed.session)).toMatchObject({ inputTokens: 7 });
+    expect(openInputs(storedProjection(resumed.session.state))).toEqual([]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          resolutions: [
+            expect.objectContaining({ outcome: "answered", requestId: LIMIT_REQUEST_ID }),
+          ],
+        }),
+        type: "input.resolved",
+      }),
+    );
   });
 
   it("starts a new usage window when the user continues past the limit prompt", async () => {

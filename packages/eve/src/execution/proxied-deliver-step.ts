@@ -14,6 +14,7 @@ import {
 import {
   continueSessionUsage,
   pushSessionUsageContinuation,
+  settledSessionLimitPrompts,
 } from "#execution/session-usage-continuation.js";
 import { mintSessionUsageGrant } from "#harness/turn-tag-state.js";
 import { isSteeringDelivery } from "#execution/session/input-queue.js";
@@ -54,6 +55,8 @@ export type RoutedDeliverResult =
     }
   | {
       readonly kind: "continue";
+      /** The session's own session-limit prompts this delivery's grant settled. */
+      readonly approved: readonly string[];
       readonly remainder: DeliverHookPayload | undefined;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
@@ -260,8 +263,15 @@ async function routeProxiedDeliver(
   // The grant raises this session's allowance before the prompts it credits close.
   const current = readDurableSession(published.sessionState);
   const session = usageGrant === undefined ? current : continueSessionUsage(current, usageGrant);
+  let approved: readonly string[] = [];
   if (session !== current && !published.cancelled) {
     await pushSessionUsageContinuation(session);
+    approved = settledSessionLimitPrompts(
+      session,
+      sourceDelivery.payloads.flatMap((payload) =>
+        (payload.inputResponses ?? []).map((response) => response.requestId),
+      ),
+    );
     published = {
       ...published,
       sessionState: replaceDurableSessionSnapshot({ session, state: published.sessionState }),
@@ -293,7 +303,7 @@ async function routeProxiedDeliver(
           deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
-  return { ...context, kind: "continue", remainder };
+  return { ...context, approved, kind: "continue", remainder };
 }
 
 function joinAnswerToTurn(

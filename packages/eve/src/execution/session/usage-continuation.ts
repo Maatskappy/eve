@@ -23,6 +23,17 @@ export async function applySessionUsageContinuation(input: {
       grant: input.grant,
     }),
   );
+  return continueSessionLimitPrompts(input.queue, approved);
+}
+
+/**
+ * Queues a Continue for the session's own prompts a grant settled. The answer
+ * carries no auth, so it acts as the turn's own identity.
+ */
+export function continueSessionLimitPrompts(
+  queue: SessionInputQueue,
+  approved: readonly string[],
+): DeliveryAdmission | undefined {
   if (approved.length === 0) return undefined;
   const delivery: DeliverHookPayload = {
     kind: "deliver",
@@ -35,5 +46,5 @@ export async function applySessionUsageContinuation(input: {
       },
     ],
   };
-  return input.queue.enqueueDelivery(delivery);
+  return queue.enqueueDelivery(delivery);
 }

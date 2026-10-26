@@ -13,13 +13,20 @@ import {
   SessionIdKey,
   SessionInboxKey,
 } from "#context/keys.js";
-import type { DurableSession } from "#execution/durable-session-store.js";
+import {
+  type DurableSession,
+  replaceDurableSessionSnapshot,
+} from "#execution/durable-session-store.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
-import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
+import { positionOf, withOpenTurn, withPublished } from "#internal/testing/session-machine.js";
 import { createSessionLimitContinuationRequest } from "#harness/hitl/budget-request.js";
 
-import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
+import {
+  createAuthorizationRequiredEvent,
+  createInputRequestedEvent,
+  type MessageStreamEvent,
+} from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -39,6 +46,8 @@ import {
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applySessionStateDelta } from "#execution/session/state-delta.js";
 import { createTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
 import { DEFAULT_SESSION_USAGE_LIMIT } from "#harness/hitl/budget.js";
@@ -1054,6 +1063,93 @@ describe("a Continue on a relayed session-limit prompt", () => {
     expect(
       sent.session.mock.calls.map((call) => (call[1] as DeliverHookPayload).usageGrant),
     ).toEqual([grant]);
+  });
+
+  /** The root parked on its own limit at 90M while its child's 45M prompt is relayed. */
+  async function rootAlsoAtItsLimit() {
+    const root = await rootWithChildPrompt({ root: "a" });
+    const own = createSessionLimitContinuationRequest({
+      sessionId: "parent-session",
+      total: usage(90 * M),
+      turnSequence: 1,
+      window: usage(90 * M),
+      windowIndex: 0,
+    });
+    const parked = readDurableSession(root.relayed.sessionState);
+    const session = withPublished(parked as never, [
+      createInputRequestedEvent({
+        requests: [own],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "parent-turn",
+      }),
+    ]);
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: async () => {} },
+      serializedContext: root.relayed.serializedContext,
+      sessionState: replaceDurableSessionSnapshot({
+        session: session as never,
+        state: root.relayed.sessionState,
+      }),
+      sessionWritable: root.f.sessionWritable,
+    });
+    expect(
+      openInputs(storedProjection(session.state)).map((input) => input.request.requestId),
+    ).toEqual(expect.arrayContaining([own.requestId, root.request.requestId]));
+    return { cursor, own, queue: new SessionInputQueue([]), root };
+  }
+
+  it("settles the root's own prompt when the person continues only the child's", async () => {
+    const { cursor, own, queue, root } = await rootAlsoAtItsLimit();
+
+    const routed = await routeSelectedDelivery(
+      {
+        delivery: continueOn(root.request.requestId, alice),
+        handoffEligible: false,
+        kind: "turn",
+        sequences: [],
+      },
+      { cursor, queue },
+    );
+
+    // The child resumes with the grant, and the root's window moved once.
+    expect(routed.kind).toBe("consumed");
+    expect(sent.session).toHaveBeenCalledTimes(1);
+    const session = readDurableSession(cursor.sessionState);
+    expect(getSessionUsageWindowIndex(session)).toBe(1);
+    expect(getSessionUsageGrant(session)?.askers.map((asker) => asker.requestId)).toEqual(
+      expect.arrayContaining([own.requestId, root.request.requestId]),
+    );
+    // The root's own prompt gets a Continue with no auth, so the turn goes on as its own.
+    expect(routed.approval).toBeDefined();
+    expect(queue.delivery(routed.approval!.sequence)).toEqual({
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "continue", requestId: own.requestId }] }],
+    });
+  });
+
+  it("leaves the root's own prompt to the Stop the same delivery carries", async () => {
+    const { cursor, own, queue, root } = await rootAlsoAtItsLimit();
+    const stop = { optionId: "stop", requestId: own.requestId };
+    const delivery: DeliverHookPayload = {
+      auth: alice,
+      kind: "deliver",
+      payloads: [
+        { inputResponses: [{ optionId: "continue", requestId: root.request.requestId }, stop] },
+      ],
+    };
+
+    const routed = await routeSelectedDelivery(
+      { delivery, handoffEligible: false, kind: "turn", sequences: [] },
+      { cursor, queue },
+    );
+
+    expect(routed.approval).toBeUndefined();
+    expect(queue.pendingCount).toBe(0);
+    expect(routed.kind === "turn" && routed.delivery.payloads).toEqual([
+      { inputResponses: [stop] },
+    ]);
   });
 
   it("pushes every prompt one payload approves, so each asker knows its copy", async () => {

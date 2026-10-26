@@ -2,7 +2,10 @@ import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
-import { applySessionUsageContinuation } from "#execution/session/usage-continuation.js";
+import {
+  applySessionUsageContinuation,
+  continueSessionLimitPrompts,
+} from "#execution/session/usage-continuation.js";
 import {
   isSteeringDelivery,
   isSteeringMessage,
@@ -143,7 +146,8 @@ export class ActiveTurn {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
-      const routed = await routeSelectedDelivery(selection, this.input.cursor);
+      const routed = await routeSelectedDelivery(selection, this.input);
+      if (routed.approval !== undefined) this.admitted.add(routed.approval.sequence);
       if (routed.kind === "cancel-turn") {
         this.abort();
         break;
@@ -323,6 +327,11 @@ export class ActiveTurn {
       const routed = await this.input.cursor.advance((state) =>
         routeDeliverToChildren({ delivery, ...state }),
       );
+      const approval = continueSessionLimitPrompts(
+        this.input.queue,
+        routed.kind === "continue" ? routed.approved : [],
+      );
+      if (approval !== undefined) this.admitted.add(approval.sequence);
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
         this.admitted.delete(sequence);

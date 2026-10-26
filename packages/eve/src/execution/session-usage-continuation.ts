@@ -110,10 +110,29 @@ export async function pushSessionUsageContinuation(session: DurableSession): Pro
 }
 
 /**
+ * The session's own open session-limit prompts a new window settled: the
+ * window starts at the session's totals, so they no longer hold. Prompts in
+ * `answered` are left to the delivery that answers them.
+ */
+export function settledSessionLimitPrompts(
+  session: Pick<HarnessSession, "state">,
+  answered: readonly string[],
+): readonly string[] {
+  const relays = readHitlState(session.state).relays;
+  return openInputs(storedProjection(session.state))
+    .filter(
+      ({ request }) =>
+        request.kind === "session-limit" &&
+        !relays.has(request.requestId) &&
+        !answered.includes(request.requestId),
+    )
+    .map(({ request }) => request.requestId);
+}
+
+/**
  * Applies a grant from above, pushed or carried by a forwarded answer, passes
  * it on, and answers the session's own open session-limit prompts with
- * Continue: the new window starts at the session's totals, so they no longer
- * hold. Prompts in `answered` are left to the delivery that answers them.
+ * Continue.
  */
 export async function applySessionUsageContinuationStep(
   input: SessionStepState & {
@@ -127,16 +146,8 @@ export async function applySessionUsageContinuationStep(
     const session = continueSessionUsage(current, input.grant);
     if (session === current) return { approved: [], sessionState: state.sessionState };
     await pushSessionUsageContinuation(session);
-    const relays = readHitlState(session.state).relays;
     return {
-      approved: openInputs(storedProjection(session.state))
-        .filter(
-          ({ request }) =>
-            request.kind === "session-limit" &&
-            !relays.has(request.requestId) &&
-            !input.answered.includes(request.requestId),
-        )
-        .map(({ request }) => request.requestId),
+      approved: settledSessionLimitPrompts(session, input.answered),
       sessionState: replaceDurableSessionSnapshot({ session, state: state.sessionState }),
     };
   });

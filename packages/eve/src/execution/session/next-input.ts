@@ -55,7 +55,7 @@ export async function nextTurnDelivery(input: {
     });
     if (selected?.kind === "control") return { kind: selected.control };
     if (selected?.kind === "turn") {
-      const routed = await routeSelectedDelivery(selected, cursor);
+      const routed = await routeSelectedDelivery(selected, { cursor, queue });
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;

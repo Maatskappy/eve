@@ -85,6 +85,7 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(
       routeWork(async ({ delivery, serializedContext, sessionState }) => ({
+        approved: [],
         kind: "continue",
         remainder: delivery,
         serializedContext,
@@ -1017,6 +1018,7 @@ describe("SessionExecution checkpoints", () => {
     );
     vi.mocked(routeDeliverToChildren).mockImplementation(
       routeWork(async () => ({
+        approved: [],
         kind: "continue",
         remainder: undefined,
         serializedContext: {},
@@ -1098,6 +1100,7 @@ describe("SessionExecution checkpoints", () => {
       routeWork(async (input) => {
         order.push("route");
         return {
+          approved: [],
           kind: "continue",
           remainder: correction,
           serializedContext: input.serializedContext,

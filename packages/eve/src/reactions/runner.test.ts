@@ -1,15 +1,23 @@
 import type { ModelMessage } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ChannelInstrumentationKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  AgentSessionRuntimeOverridesKey,
+  ChannelInstrumentationKey,
+  DynamicSubagentAgentConfigKey,
+  SessionIdKey,
+  SessionKey,
+} from "#context/keys.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { evaluateApproval, type ApprovalMemory } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
 import { session as publicSession } from "#protocol/session-projection/public-view.js";
 import { once } from "#tools/approval/policies.js";
 import { z } from "#compiled/zod/index.js";
-import type { DynamicContext } from "#dynamic/definition.js";
+import { defineDynamic, type DynamicContext } from "#dynamic/definition.js";
+import { markMockModel } from "#internal/mock-model-identity.js";
 import {
   enterSessionProjection,
   enterSessionProjectionAt,
@@ -24,8 +32,15 @@ import { defineTool } from "#tools/definition.js";
 import { runApprovedCalls } from "#harness/hitl/approved-calls.js";
 import { takeTurnFailure } from "./intents.js";
 import { takeUserInstructionMessages } from "./kinds/instructions.js";
+import { getEffectiveModelSelection } from "./kinds/model.js";
 import { dynamicTools } from "./kinds/tool.js";
-import { evaluateValues, isReactionFailedError, restoreReactions, runReactions } from "./runner.js";
+import {
+  evaluateValues,
+  isReactionFailedError,
+  prewarmModel,
+  restoreReactions,
+  runReactions,
+} from "./runner.js";
 import { MEMOS_CAP, forgetSessionLive, memoBytes, readReactionsState, slotsOf } from "./state.js";
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
@@ -116,6 +131,21 @@ function counted(runs: unknown[], evaluations: unknown[] = []): Evaluate {
 
 const noTools: Evaluate = () => null;
 
+function modelSession(evaluate: Evaluate) {
+  const ctx = session(noTools);
+  ctx.set(BundleKey, {
+    ...ctx.require(BundleKey),
+    moduleMap: {
+      nodes: { root: { modules: { model: { default: { model: defineDynamic(evaluate) } } } } },
+    },
+    turnAgent: {
+      id: "agent",
+      dynamicModel: { logicalPath: "agent.ts", sourceId: "model" },
+    },
+  } as never);
+  return ctx;
+}
+
 // A projection whose session started and whose turn-1 is running.
 const turnRunning = (ctx: ContextContainer) => {
   const projection = initialSessionProjection();
@@ -138,6 +168,65 @@ const turnRunning = (ctx: ContextContainer) => {
 afterEach(() => {
   delete process.env.EVE_DEV;
   delete process.env.EVE_LOG_LEVEL;
+});
+
+describe("prewarmModel", () => {
+  it.each(["provider", "reference"])(
+    "keeps the first turn's live provider when late prewarming returns a %s",
+    async (anticipatedKind) => {
+      const held = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const provider = () =>
+        markMockModel(
+          new MockLanguageModelV4({ provider: "openai.responses", modelId: "gpt-5.4" }),
+        );
+      const anticipated = provider();
+      const actual = provider();
+      let calls = 0;
+      const prewarm = modelSession(async () => {
+        if (++calls === 1) {
+          entered.resolve();
+          await held.promise;
+          return {
+            model: anticipatedKind === "provider" ? anticipated : "openai/gpt-5.4",
+            modelContextWindowTokens: 200_000,
+          };
+        }
+        return { model: actual, modelContextWindowTokens: 200_000 };
+      });
+      const turn = modelSession(noTools);
+      turn.set(BundleKey, prewarm.require(BundleKey));
+      turn.set(SessionIdKey, prewarm.require(SessionIdKey));
+      turn.set(SessionKey, prewarm.require(SessionKey));
+      const pending = prewarmModel(prewarm, []);
+      try {
+        await entered.promise;
+        await beforeCall(turn, [user("hello")]);
+        expect(getEffectiveModelSelection(turn)?.model).toBe(actual);
+        held.resolve();
+        await pending;
+        expect(getEffectiveModelSelection(turn)?.model).toBe(actual);
+      } finally {
+        held.resolve();
+        await pending;
+        forgetSessionLive(prewarm.require(SessionIdKey));
+      }
+    },
+  );
+
+  it.each([AgentSessionRuntimeOverridesKey, DynamicSubagentAgentConfigKey])(
+    "skips the authored selector when the parent has already selected the model (%s)",
+    async (key) => {
+      let calls = 0;
+      const ctx = modelSession(() => {
+        calls++;
+        return { model: "openai/gpt-5.4", modelContextWindowTokens: 200_000 };
+      });
+      ctx.set(key, {} as never);
+      await prewarmModel(ctx, []);
+      expect(calls).toBe(0);
+    },
+  );
 });
 
 describe("evaluateValues", () => {

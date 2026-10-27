@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 
 import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
@@ -13,7 +12,7 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import { bundleReactions } from "./bundle.js";
 import { sessionFrameOf } from "./frame.js";
 import { reportReactionFailure, takeIntents } from "./intents.js";
-import { effectiveModelId, loadModelReaction } from "./kinds/model.js";
+import { effectiveModelId } from "./kinds/model.js";
 import type {
   BundleReactions,
   CommitReaction,
@@ -116,20 +115,17 @@ export async function prewarmModel(
   ctx: ContextContainer,
   conversation: readonly ModelMessage[],
 ): Promise<void> {
-  const previous = readReactionsState(ctx);
   try {
-    const reaction = await loadModelReaction(ctx.require(BundleKey));
+    const { reactions } = await bundleReactions(ctx);
+    const reaction = values(reactions).find((reaction) => reaction.kind === "model");
     if (reaction !== undefined) {
-      await evaluate(ctx, reaction, { conversation, mode: "evaluate" });
+      await evaluate(ctx, reaction, { conversation, mode: "prewarm" });
     }
   } catch (error) {
     // Message-dependent selectors can only choose once the first message arrives.
     log.warn("Model prewarm failed; the next model call resolves it again.", {
       error: toErrorMessage(error),
     });
-  } finally {
-    // Only metadata is speculative: the first message must choose with its own memos.
-    writeReactionsState(ctx, previous);
   }
 }
 
@@ -259,7 +255,8 @@ function writeSlot(ctx: ContextContainer, id: string, slot: Slot): void {
 /**
  * Evaluates one definition and installs what it returns. Returns whether its kind's effects need
  * to run again: the value changed, or carries code, which the evaluation built anew. Throws
- * without changing the slot; the memos that ran are kept.
+ * without changing the slot; the memos that ran are kept. Prewarming resolves metadata without
+ * publishing slots, memos, or live providers, since a turn can already be running in another step.
  */
 async function evaluate(
   ctx: ContextContainer,
@@ -267,12 +264,12 @@ async function evaluate(
   run: {
     readonly abortSignal?: AbortSignal;
     readonly conversation?: readonly ModelMessage[];
-    readonly mode: "evaluate" | "restore";
+    readonly mode: "evaluate" | "restore" | "prewarm";
   },
 ): Promise<{ readonly changed: boolean }> {
   const abortSignal = run.abortSignal ?? neverAborted;
   const sessionId = sessionIdOf(ctx);
-  const kept = readReactionsState(ctx).memos?.[reaction.id];
+  const kept = run.mode === "prewarm" ? undefined : readReactionsState(ctx).memos?.[reaction.id];
   const memos = openMemos({
     abortSignal,
     kept,
@@ -286,11 +283,12 @@ async function evaluate(
     const context = internalContext(ctx, reaction, { ...run, abortSignal, memo: memos.memo });
     contribution = await reaction.contribute(await reaction.evaluate(context), context);
   } catch (error) {
-    mergeMemos(ctx, reaction.id, memos.used());
+    if (run.mode !== "prewarm") mergeMemos(ctx, reaction.id, memos.used());
     throw error;
   } finally {
     memos.close();
   }
+  if (run.mode === "prewarm") return { changed: false };
   const used = memos.used();
   keepMemos(ctx, reaction.id, used);
   const value = parseJsonValue(contribution.value ?? null);

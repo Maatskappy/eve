@@ -28,7 +28,7 @@ describe("fileMemory", () => {
       content: storedDocument(3, ["0: Likes concise answers.", "3: Prefers dark mode."]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const recalled = await recallAtTurnStart(provider);
     expect(recalled).toEqual({
@@ -54,7 +54,7 @@ describe("fileMemory", () => {
       ]),
       expectedVersion: stored.version,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     await expect(recallAtTurnStart(provider)).resolves.toEqual({
       messages: [{ content: expect.stringContaining("4: Uses vim."), id: "file-memory-document" }],
@@ -67,7 +67,7 @@ describe("fileMemory", () => {
       content: storedDocument(0, ["0: Likes concise answers."]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const provider = fileMemory({ backend });
 
@@ -81,13 +81,13 @@ describe("fileMemory", () => {
       content: storedDocument(7, ["7: Remove me."]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const provider = fileMemory({ backend });
     const tools = await resolveTools(provider);
 
     await expect(tools.remove_memory.execute({ index: 7 }, toolContext)).resolves.toBeUndefined();
-    await expect(backend.read({ key: "mem_scope", abortSignal: signal })).resolves.toMatchObject({
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: storedDocument(7),
     });
     await expect(recallAtTurnStart(provider)).resolves.toEqual({
@@ -114,7 +114,7 @@ describe("fileMemory", () => {
     await expect(
       tools.save_memory.execute({ text: "Likes concise answers." }, toolContext),
     ).resolves.toBeUndefined();
-    await expect(backend.read({ key: "mem_scope", abortSignal: signal })).resolves.toMatchObject({
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: storedDocument(1, ["0: Prefers dark mode.", "1: Likes concise answers."]),
     });
   });
@@ -125,23 +125,23 @@ describe("fileMemory", () => {
       content: storedDocument(2, ["0: First.", "1: Second.", "2: Third."]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const provider = fileMemory({ backend });
     const tools = await resolveTools(provider);
 
     await expect(tools.remove_memory.execute({ index: 2 }, toolContext)).resolves.toBeUndefined();
-    const removed = await backend.read({ key: "mem_scope", abortSignal: signal });
+    const removed = await backend.read({ key: "mem_scope", signal });
     expect(removed?.content).toBe(storedDocument(2, ["0: First.", "1: Second."]));
     expect(removed?.version).not.toBe(first.version);
 
     await expect(tools.remove_memory.execute({ index: 9 }, toolContext)).resolves.toBeUndefined();
-    await expect(backend.read({ key: "mem_scope", abortSignal: signal })).resolves.toEqual(removed);
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toEqual(removed);
 
     await expect(
       tools.save_memory.execute({ text: "Replacement." }, toolContext),
     ).resolves.toBeUndefined();
-    await expect(backend.read({ key: "mem_scope", abortSignal: signal })).resolves.toMatchObject({
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: storedDocument(3, ["0: First.", "1: Second.", "3: Replacement."]),
     });
   });
@@ -152,7 +152,7 @@ describe("fileMemory", () => {
       content: storedDocument(1, ["0: First.", "1: Second."]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const recalled = await recallAtTurnStart(fileMemory({ backend }));
     const maxCharacters = recalled?.messages[0]?.content.length;
@@ -169,7 +169,7 @@ describe("fileMemory", () => {
     await expect(
       tools.save_memory.execute({ text: "Third." }, toolContext),
     ).resolves.toBeUndefined();
-    await expect(backend.read({ key: "mem_scope", abortSignal: signal })).resolves.toMatchObject({
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toMatchObject({
       content: storedDocument(2, ["1: Second.", "2: Third."]),
     });
   });
@@ -180,7 +180,7 @@ describe("fileMemory", () => {
       content: storedDocument(1, [`0: ${"x".repeat(1_800)}`, `1: ${"y".repeat(1_800)}`]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const provider = fileMemory({ backend });
     const recalled = await recallAtTurnStart(provider);
@@ -198,7 +198,7 @@ describe("fileMemory", () => {
       content: storedDocument(0, [`0: ${"é".repeat(1_000)}`]),
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     const recalled = await recallAtTurnStart(fileMemory({ backend }));
     const maxCharacters = recalled?.messages[0]?.content.length;
@@ -227,7 +227,7 @@ describe("fileMemory", () => {
     );
     const content = storedDocument(31, entries);
     expect(new TextEncoder().encode(content).byteLength).toBeLessThanOrEqual(65_536);
-    await backend.write({ content, expectedVersion: null, key: "mem_scope", abortSignal: signal });
+    await backend.write({ content, expectedVersion: null, key: "mem_scope", signal });
 
     await expect(
       tools.save_memory.execute({ text: "y".repeat(2_040) }, toolContext),
@@ -248,7 +248,7 @@ describe("fileMemory", () => {
       content: "0: missing header\n",
       expectedVersion: null,
       key: "mem_scope",
-      abortSignal: signal,
+      signal,
     });
     await expect(recallAtTurnStart(provider)).rejects.toThrow("invalid versioned memory document");
   });

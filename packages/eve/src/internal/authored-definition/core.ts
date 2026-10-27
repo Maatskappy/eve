@@ -322,12 +322,15 @@ function rejectRemovedAgentCompactionFields(value: unknown, message: string): vo
       `${message} "compaction.thresholdPercent" was removed: eve compacts at 90% of the context window, and a hook can call ctx.compact() to compact sooner. See docs/concepts/compaction-strategies.`,
     );
   }
-  for (const field of ["model", "modelContextWindowTokens"]) {
-    if (record[field] !== undefined) {
-      throw new Error(
-        `${message} "compaction.${field}" was removed: pass \`${field}\` to \`fixedTail({ ${field} })\` in compaction.ts instead. See docs/concepts/compaction-strategies.`,
-      );
-    }
+  if (record.model !== undefined) {
+    throw new Error(
+      `${message} "compaction.model" was removed: pass \`model\` to \`fixedTail({ model })\` in compaction.ts instead. See docs/concepts/compaction-strategies.`,
+    );
+  }
+  if (record.modelContextWindowTokens !== undefined) {
+    throw new Error(
+      `${message} "compaction.modelContextWindowTokens" was removed: it never changed the compaction limit, which comes from the model's context window. Set top-level \`modelContextWindowTokens\` in agent.ts to change that window.`,
+    );
   }
   expectOnlyKnownKeys(record, [], message);
 }

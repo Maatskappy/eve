@@ -41,13 +41,7 @@ describe("fixedTail options", () => {
     expect(byDefault).toBeGreaterThan(small);
   });
 
-  it("fits the summary and the tail to the summary model's own window", async () => {
-    const session = await keptVerbatim({}, 100_000);
-    const narrow = await keptVerbatim({ modelContextWindowTokens: 4_000 }, 100_000);
-    expect(narrow).toBeLessThan(session);
-  });
-
-  it.each([{ recentTokens: 0 }, { modelContextWindowTokens: 1.5 }])("rejects %o", (options) => {
+  it.each([{ recentTokens: 0 }, { recentTokens: 1.5 }])("rejects %o", (options) => {
     expect(() => fixedTail(options)).toThrow(/must be a positive integer/);
   });
 });

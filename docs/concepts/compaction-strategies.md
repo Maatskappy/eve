@@ -60,7 +60,6 @@ Throw `CompactionOverLimitError` (exported from `eve/compaction`) when no histor
 
 - `model`: the model that writes the summary, a gateway model id or a language model. The session's model is the default.
 - `recentTokens`: how many tokens of the latest conversation stay word for word. 20,000 by default, and at most half the compaction limit.
-- `modelContextWindowTokens`: the context window of the summary `model`, for a model whose window eve can't look up. The summary and the kept tail then fit that model's 90% limit.
 
 For example:
 

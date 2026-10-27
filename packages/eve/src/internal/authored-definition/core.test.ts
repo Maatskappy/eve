@@ -74,22 +74,23 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(/takes only a function; unknown key\(s\): reasoning/);
   });
 
-  it.each(["model", "modelContextWindowTokens"])(
-    "names the removed compaction.%s and points at fixedTail",
-    (field) => {
-      expect(() =>
-        normalizeAgentDefinition(
-          {
-            compaction: { [field]: field === "model" ? "openai/gpt-5.5-mini" : 8_192 },
-            model: "openai/gpt-5.5",
-          },
-          FAILURE_MESSAGE,
-        ),
-      ).toThrow(
-        `"compaction.${field}" was removed: pass \`${field}\` to \`fixedTail({ ${field} })\``,
-      );
-    },
-  );
+  it("names the removed compaction.model and points at fixedTail", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { compaction: { model: "openai/gpt-5.5-mini" }, model: "openai/gpt-5.5" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.model" was removed: pass `model` to `fixedTail({ model })`');
+  });
+
+  it("names the removed compaction.modelContextWindowTokens and points at the top-level setting", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { compaction: { modelContextWindowTokens: 8_192 }, model: "openai/gpt-5.5" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow("never changed the compaction limit");
+  });
 
   it("names the removed compaction.thresholdPercent", () => {
     expect(() =>

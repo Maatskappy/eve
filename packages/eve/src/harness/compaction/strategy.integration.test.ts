@@ -229,6 +229,32 @@ describe("compaction triggers", () => {
     expect(events.at(-1)).toMatchObject({ data: { error: { code: "COMPACTION_FAILED" } } });
   });
 
+  it("counts a result that dropped messages by its estimate, whatever the provider reported", async () => {
+    const doStream = vi.fn(async () => textStream("Done.", 500));
+    const history: HarnessSession["history"] = Array.from({ length: 6 }, (_, index) => ({
+      content: `Note ${index}.`,
+      kind: "user" as const,
+      role: "user" as const,
+    }));
+    const base = session(history, 10_000);
+    const events = await run({
+      message: "Please continue.",
+      model: new MockLanguageModelV3({ doStream }),
+      session: {
+        ...base,
+        compaction: {
+          ...base.compaction,
+          lastKnownInputTokens: 30_000,
+          lastKnownPromptMessageCount: 6,
+        },
+      },
+      strategy: { compact: async (messages) => messages.slice(-1) },
+    });
+
+    expect(doStream).toHaveBeenCalled();
+    expect(events.at(-1)).not.toMatchObject({ data: { error: { code: "COMPACTION_FAILED" } } });
+  });
+
   it("gives a strategy a history with a URL file part, and compacts", async () => {
     const compact = vi.fn<CompactionStrategy["compact"]>(async (messages) => messages.slice(-1));
     const ctx = new ContextContainer();

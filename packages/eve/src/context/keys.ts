@@ -18,6 +18,7 @@ import type {
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
+import type { JsonValue } from "#shared/json.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   type SessionInboxAddress,
@@ -155,6 +156,12 @@ export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabili
 export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
+
+/** Authored data committed with the turn, never taken from caller input. */
+export const SessionCallbackDataKey = new ContextKey<{
+  readonly callId: string;
+  readonly value: JsonValue;
+}>("eve.sessionCallbackData");
 
 /** Present when a remote agent protocol 1 caller created the session. */
 export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller>(

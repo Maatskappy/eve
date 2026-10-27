@@ -1,4 +1,9 @@
+import {
+  closeSessionStreamStep,
+  emitCallbackDeliveredStep,
+} from "#execution/callback-delivered-step.js";
 import type { TurnCaller } from "#channel/types.js";
+import { callbackDataProperties } from "#context/callback-data.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -20,6 +25,7 @@ export type SessionTerminalOutcome =
 
 interface SessionFinalizationContext {
   readonly caller: TurnCaller | undefined;
+  readonly onCallerSettled?: () => void;
   readonly cursor: {
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState | undefined;
@@ -48,6 +54,7 @@ export async function finalizeSession(
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
+      deferStreamClose: context.caller?.replyTo.kind === "callback",
       serializedContext,
       turn: lastPublishedTurn(session?.state),
       usage,
@@ -56,6 +63,7 @@ export async function finalizeSession(
     await emitTerminalSessionFailureStep({
       error: normalizeSerializableError(outcome.error),
       sessionWritable: context.sessionWritable,
+      deferStreamClose: context.caller?.replyTo.kind === "callback",
       serializedContext,
       turnId: outcome.turnId,
       usage,
@@ -69,12 +77,24 @@ export async function finalizeSession(
       usage: settled.turnUsage,
     };
     if (settled.isError) notification.isError = true;
-    await notifyTurnCallerStep({
-      caller: context.caller,
-      lifecycle: "terminal",
-      sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
-      settled: notification,
-    });
+    try {
+      await notifyTurnCallerStep({
+        caller: context.caller,
+        lifecycle: "terminal",
+        sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
+        settled: notification,
+        ...callbackDataProperties(context.cursor.serializedContext, context.caller.callId),
+      });
+      context.onCallerSettled?.();
+      if (context.caller.replyTo.kind === "callback")
+        await emitCallbackDeliveredStep({
+          sessionWritable: context.sessionWritable,
+          callId: context.caller.callId,
+        });
+    } finally {
+      if (context.caller.replyTo.kind === "callback")
+        await closeSessionStreamStep(context.sessionWritable);
+    }
   }
   return outcome.kind === "done"
     ? {

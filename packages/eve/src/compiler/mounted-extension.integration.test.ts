@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { SessionCallbackKey, SessionCallbackDataKey } from "#context/keys.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
@@ -292,9 +293,9 @@ describe("mounted extension via authored-source loader", () => {
         }),
         "node_modules/@acme/crm/extension/extension.mjs": "export default {};",
         "node_modules/@acme/crm/extension/tools/count.mjs": [
-          'import { defineState } from "eve/context";',
-          'const count = defineState("requests", () => 0);',
-          'export default { description: "Count", inputSchema: {}, execute: () => { count.update(n => n + 1); return count.get(); } };',
+          'import { defineState, setCallbackData } from "eve/context";',
+          'const count = defineState("requests", () => 0, { onCancel: "preserve" });',
+          'export default { description: "Count", inputSchema: {}, execute: () => { count.update(n => n + 1); setCallbackData({ count: count.get() }); return count.get(); } };',
         ].join("\n"),
       },
     });
@@ -308,10 +309,20 @@ describe("mounted extension via authored-source loader", () => {
       ).execute();
     };
     const ctx = new ContextContainer();
+    ctx.set(SessionCallbackKey, {
+      callId: "mounted-report",
+      subagentName: "counter",
+      token: "synthetic",
+      url: "https://consumer.example/eve/v1/callback/synthetic",
+    });
     contextStorage.run(ctx, () => {
       expect(execute(moduleMap, "one")).toBe(1);
       expect(execute(moduleMap, "one")).toBe(2);
       expect(execute(moduleMap, "two")).toBe(1);
+    });
+    expect(ctx.get(SessionCallbackDataKey)).toEqual({
+      callId: "mounted-report",
+      value: { count: 1 },
     });
     const saved = serializeContext(ctx);
     expect(Object.keys(saved).filter((name) => name.startsWith("eve:mount.v1:"))).toHaveLength(2);
@@ -334,6 +345,10 @@ describe("mounted extension via authored-source loader", () => {
     contextStorage.run(restored, () => {
       expect(execute(generated.default, "one")).toBe(4);
       expect(execute(generated.default, "two")).toBe(3);
+      expect(restored.get(SessionCallbackDataKey)).toEqual({
+        callId: "mounted-report",
+        value: { count: 3 },
+      });
     });
   });
 

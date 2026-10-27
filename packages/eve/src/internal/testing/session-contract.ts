@@ -43,7 +43,8 @@ export function createSessionContract() {
         violations.push({ event, message, rule });
       const before = projection;
 
-      if (before.ended) violate("turn-order", `${event.type} after the session ended`);
+      if (before.ended && event.type !== "callback.delivered")
+        violate("turn-order", `${event.type} after the session ended`);
       if (event.type === "turn.started" && before.activeTurnId !== undefined) {
         violate(
           "turn-order",

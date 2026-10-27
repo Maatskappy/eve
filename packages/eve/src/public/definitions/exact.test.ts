@@ -118,7 +118,10 @@ describe("definition helper exact inputs", () => {
   });
 
   it("keeps the public hook event map aligned with runtime stream events", () => {
-    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<UnstampedMessageStreamEvent["type"]>();
+    // Callback delivery is a post-turn transport acknowledgement, not an authored hook.
+    expectTypeOf<keyof HookEventMap>().toEqualTypeOf<
+      Exclude<UnstampedMessageStreamEvent["type"], "callback.delivered">
+    >();
   });
 });
 

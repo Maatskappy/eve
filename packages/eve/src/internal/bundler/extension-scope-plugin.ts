@@ -38,8 +38,9 @@ function importerPath(importer: string): string {
 function shimSource(mountId: string): string {
   return [
     `import { defineMountedState } from "eve/internal/mount-state";`,
-    `export function defineState(name, initial) {`,
-    `  return defineMountedState(${JSON.stringify(mountId)}, name, initial);`,
+    `export { setCallbackData } from "eve/context";`,
+    `export function defineState(name, initial, options) {`,
+    `  return defineMountedState(${JSON.stringify(mountId)}, name, initial, options);`,
     `}`,
     "",
   ].join("\n");

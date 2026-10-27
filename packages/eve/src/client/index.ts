@@ -147,6 +147,7 @@ export type {
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
   TurnCancelledStreamEvent,
+  CallbackDeliveredStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,

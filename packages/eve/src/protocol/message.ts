@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "26";
+export const EVE_MESSAGE_STREAM_VERSION = "27";
 
 /** Version of transport control records understood by this eve release. */
 export const EVE_STREAM_CONTROL_VERSION = "1";
@@ -608,6 +608,12 @@ export interface StepFailedStreamEvent {
 /**
  * Stream event emitted when one turn reaches a terminal successful outcome.
  */
+/** Transport acknowledgement emitted after the original turn callback succeeds. */
+export interface CallbackDeliveredStreamEvent {
+  type: "callback.delivered";
+  data: { callId: string };
+}
+
 export interface TurnCompletedStreamEvent {
   data: {
     sequence: number;
@@ -848,6 +854,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | CallbackDeliveredStreamEvent
   | ActionInputAppendedStreamEvent
   | AgentStartedStreamEvent
   | ApprovalCandidateStreamEvent

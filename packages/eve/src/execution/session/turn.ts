@@ -1,3 +1,6 @@
+import { SessionCallbackDataKey, SessionCallbackKey } from "#context/keys.js";
+import { bindTurnCallerContext } from "#subagents/turn-caller-context.js";
+import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
@@ -93,11 +96,20 @@ export class SessionExecution {
     options: {
       /**
        * The delegated caller the turn answers, including for a first turn whose
-       * input carries no caller. The turn's first step binds it into the context.
+       * input carries no caller. The turn binds it before delivery code runs.
        */
       readonly caller?: TurnCaller;
     } = {},
   ): Promise<TurnOutcome> {
+    // Bind before running delivery code so failure finalization cannot read a prior turn's report.
+    await this.cursor.advance((state) =>
+      withSessionStateDelta(state, async () => {
+        const serializedContext = { ...state.serializedContext };
+        delete serializedContext[SessionCallbackDataKey.name];
+        delete serializedContext[SessionCallbackKey.name];
+        return { serializedContext: bindTurnCallerContext(options.caller, serializedContext) };
+      }),
+    );
     const turn = new ActiveTurn(this.input, {
       caller: options.caller,
       principal: resolveTurnPrincipal(delivery, this.input.cursor.serializedContext),
@@ -148,20 +160,12 @@ export class SessionExecution {
     delivery: TurnStepPayload | undefined,
   ): Promise<TurnOutcome> {
     let nextStepInput: TurnStepPayload | undefined = delivery;
-    // Only the first step binds the caller. A caller that steers in mid-turn is
-    // replied to at its own address (`TurnOutcome.caller`) and is bound by the
-    // next turn, so this turn's forwarding keeps its original caller.
-    let bindCaller = turn.caller;
-
     while (true) {
       const { cursor } = this.input;
-      const caller = bindCaller;
-      bindCaller = undefined;
       const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
           abortSignal: turn.signal,
-          caller,
           input: nextStepInput,
           steeringSignal: turn.steeringSignal,
         }),

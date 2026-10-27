@@ -159,7 +159,7 @@ describe("SessionExecution checkpoints", () => {
     }).runTurn(undefined);
     expect(outcome).toMatchObject({ compacted: true, kind: "park" });
   });
-  it("binds the delegated caller on the turn's first step only", async () => {
+  it("binds the delegated caller before the first step and preserves it through continuation", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],
       claimSessionHook: vi.fn(),
@@ -177,12 +177,12 @@ describe("SessionExecution checkpoints", () => {
       replyTo: { kind: "hook", token: "parent" },
       subagentName: "researcher",
     };
-    const callers: (TurnCaller | undefined)[] = [];
+    const callers: unknown[] = [];
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementation(
         turnStepWork(async (input) => {
-          callers.push(input.caller);
+          callers.push(input.serializedContext["eve.channel"]);
           return {
             action: callers.length === 1 ? "continue" : "done",
             serializedContext: input.serializedContext,
@@ -190,8 +190,12 @@ describe("SessionExecution checkpoints", () => {
           };
         }),
       );
-    await createExecution({ inbox, sessionState: state("") }).runTurn(undefined, { caller });
-    expect(callers).toEqual([caller, undefined]);
+    const serializedContext = delegatedContext(caller);
+    await createExecution({ inbox, serializedContext, sessionState: state("") }).runTurn(
+      undefined,
+      { caller },
+    );
+    expect(callers).toEqual([serializedContext["eve.channel"], serializedContext["eve.channel"]]);
   });
   it.each(["cancel", "reset"] as const)(
     "gives %s precedence over generation steering",
@@ -431,7 +435,11 @@ describe("SessionExecution checkpoints", () => {
       );
 
     await expect(
-      createExecution({ inbox, sessionState: state("") }).runTurn(
+      createExecution({
+        inbox,
+        serializedContext: delegatedContext(firstCall),
+        sessionState: state(""),
+      }).runTurn(
         { delivery: { kind: "deliver", payloads: [{ message: "Fill Alice's notebook." }] } },
         { caller: firstCall },
       ),
@@ -692,16 +700,25 @@ describe("SessionExecution checkpoints", () => {
   });
 
   it.each([
-    { capabilities: undefined, holds: false, serializedContext: {} },
-    { capabilities: { requestInput: true }, holds: true, serializedContext: {} },
+    { capabilities: undefined, holds: false, serializedContext: {}, caller: undefined },
+    { capabilities: { requestInput: true }, holds: true, serializedContext: {}, caller: undefined },
     {
       capabilities: undefined,
       holds: true,
-      serializedContext: { "eve.sessionCallback": { callId: "call_1", token: "parent" } },
+      serializedContext: {},
+      caller: {
+        callId: "call_1",
+        subagentName: "parent",
+        replyTo: {
+          kind: "callback" as const,
+          token: "parent",
+          url: "https://parent.example/callback",
+        },
+      },
     },
   ])(
     "holds on pending input only when someone can answer it: %o",
-    async ({ capabilities, holds, serializedContext }) => {
+    async ({ capabilities, holds, serializedContext, caller }) => {
       const inbox: SessionInbox = {
         claimedTokens: [],
         claimSessionHook: vi.fn(),
@@ -734,9 +751,12 @@ describe("SessionExecution checkpoints", () => {
           })),
         );
 
-      const turn = execution.runTurn({
-        delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
-      });
+      const turn = execution.runTurn(
+        {
+          delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+        },
+        { caller },
+      );
       if (holds) {
         // Someone can answer, so the turn waits for them.
         const outcome = await Promise.race([
@@ -1513,4 +1533,18 @@ function state(continuationToken: string): DurableSessionState {
     hasProxyInputRequests: false,
     sessionId: "session-1",
   });
+}
+
+function delegatedContext(caller: TurnCaller) {
+  return {
+    "eve.channel": {
+      kind: "subagent",
+      state: {
+        callId: caller.callId,
+        parentContinuationToken: caller.replyTo.token,
+        parentSessionId: "parent-session",
+        subagentName: caller.subagentName,
+      },
+    },
+  };
 }

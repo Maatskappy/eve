@@ -1,4 +1,5 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
+import { resolveKey } from "#context/key.js";
 import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { serializeContext } from "#context/serialize.js";
@@ -37,6 +38,12 @@ export async function createCancelledModelCallBatchResult(input: {
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
   };
+
+  // An interrupted call can already have external effects, such as model spend.
+  // Explicitly retained authored state reaches the cancellation settlement hook.
+  for (const [name, value] of Object.entries(interruptedContext)) {
+    if (resolveKey(name)?.onCancel === "preserve") checkpointContext[name] = value;
+  }
 
   return {
     action: "cancelled",

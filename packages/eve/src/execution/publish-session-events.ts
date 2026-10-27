@@ -421,6 +421,7 @@ type TerminalSessionEvent = Extract<
 export async function publishTerminalSessionEvent(input: {
   readonly errorId?: string;
   readonly event: TerminalSessionEvent;
+  readonly deferStreamClose?: boolean;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionWritable: WritableStream<Uint8Array>;
   /** The session's last turn, for channel handlers' `ctx.session.turn`. */
@@ -431,6 +432,7 @@ export async function publishTerminalSessionEvent(input: {
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   const fields = { errorId: input.errorId, sessionId };
   const { type } = input.event;
+  const closeStream = !input.deferStreamClose;
 
   let ctx: ContextContainer;
   let publisher: SessionEventPublisher;
@@ -444,8 +446,9 @@ export async function publishTerminalSessionEvent(input: {
     });
   } catch (error) {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
-    await writeUnroutedSessionEvent(input.sessionWritable, input.event).catch((writeError) =>
-      log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
+    await writeUnroutedSessionEvent(input.sessionWritable, input.event, closeStream).catch(
+      (writeError) =>
+        log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
     );
     return;
   }
@@ -465,7 +468,7 @@ export async function publishTerminalSessionEvent(input: {
   // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
     await publisher.emit(event);
-    await publisher.writer.close();
+    if (closeStream) await publisher.writer.close();
   };
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
@@ -500,12 +503,28 @@ export async function publishTerminalSessionEvent(input: {
 async function writeUnroutedSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
   event: UnstampedMessageStreamEvent,
+  closeStream = true,
 ): Promise<void> {
   const writer = openSessionEventWriter({ deliveryIds: () => undefined, sessionWritable });
   try {
     await writer.write(event);
-    await writer.close();
+    if (closeStream) await writer.close();
   } finally {
     writer.release();
   }
+}
+
+/** This transport receipt runs after turn hooks and does not invoke them again. */
+export async function publishCallbackDelivered(input: {
+  readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly callId: string;
+}): Promise<void> {
+  await writeUnroutedSessionEvent(
+    input.sessionWritable,
+    {
+      type: "callback.delivered",
+      data: { callId: input.callId },
+    },
+    false,
+  );
 }

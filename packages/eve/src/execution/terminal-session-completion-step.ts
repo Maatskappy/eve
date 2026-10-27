@@ -6,6 +6,7 @@ import { sessionCompleted } from "#harness/session-machine/transitions.js";
 /** Emits a terminal `session.completed` outside a turn. */
 export async function emitTerminalSessionCompletionStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly deferStreamClose?: boolean;
   readonly serializedContext: Record<string, unknown>;
   /** The session's last turn, reported to channel handlers as `ctx.session.turn`. */
   readonly turn?: HarnessTurnRef;

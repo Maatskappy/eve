@@ -10,6 +10,7 @@ const log = createLogger("execution.workflow-entry");
 export async function emitTerminalSessionFailureStep(input: {
   readonly error: unknown;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly deferStreamClose?: boolean;
   readonly serializedContext: Record<string, unknown>;
   readonly turnId?: string;
   readonly usage: TokenUsage | undefined;
@@ -43,6 +44,7 @@ export async function emitTerminalSessionFailureStep(input: {
 
   await publishTerminalSessionEvent({
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
+    deferStreamClose: input.deferStreamClose,
     event: sessionFailed({ code, details, message, sessionId, usage: input.usage }),
     sessionWritable: input.sessionWritable,
     serializedContext: input.serializedContext,

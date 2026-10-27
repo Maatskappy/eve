@@ -1,5 +1,7 @@
+import { emitCallbackDeliveredStep } from "#execution/callback-delivered-step.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import { callbackDataProperties } from "#context/callback-data.js";
 import {
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
@@ -129,6 +131,10 @@ export async function runPreparedSession(
       caller: progress.caller,
       cursor,
       sessionWritable: boot.sessionWritable,
+      onCallerSettled() {
+        progress.caller = undefined;
+        progress.terminalEmitted = true;
+      },
     });
     progress.terminalEmitted = true;
     return result;
@@ -345,10 +351,19 @@ async function runSessionLoop(
         const { caller } = progress;
         const settled = await settleCancelledTurn(caller !== undefined);
         if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
+          const notification = {
+            caller,
+            sessionId: boot.sessionId,
+            ...callbackDataProperties(cursor.serializedContext, caller.callId),
+          };
           await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
+          if (caller.replyTo.kind === "callback")
+            await emitCallbackDeliveredStep({
+              sessionWritable: boot.sessionWritable,
+              callId: caller.callId,
+            });
         }
       } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
@@ -357,7 +372,15 @@ async function runSessionLoop(
             lifecycle: "parked",
             sessionId: boot.sessionId,
             settled: action.settled,
+            ...callbackDataProperties(cursor.serializedContext, progress.caller.callId),
           });
+          const caller = progress.caller;
+          progress.caller = undefined;
+          if (caller.replyTo.kind === "callback")
+            await emitCallbackDeliveredStep({
+              sessionWritable: boot.sessionWritable,
+              callId: caller.callId,
+            });
         }
         progress.caller = undefined;
       }

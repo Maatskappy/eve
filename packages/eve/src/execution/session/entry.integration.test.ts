@@ -1,6 +1,7 @@
+import { FatalError } from "#compiled/@workflow/core/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
-import { hydrateWorkflowArguments } from "@workflow/core/serialization";
+import { getDeserializeStream, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -26,7 +27,10 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
-import { SessionTitleKey } from "#context/keys.js";
+import { SessionTitleKey, SessionCallbackKey } from "#context/keys.js";
+import { defineState, setCallbackData } from "#public/context/index.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import {
   buildSerializedContext,
   captureEvents,
@@ -43,6 +47,425 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it("delivers committed callback data after a transport retry and isolates later turns", async () => {
+    const callback = {
+      callId: "report-call",
+      subagentName: "reporter",
+      token: "report-token",
+      url: "https://consumer.example/eve/v1/callback/report-token",
+    };
+    const bodies: Record<string, unknown>[] = [];
+    const callbackAtGate = Promise.withResolvers<void>();
+    const acknowledgeCallback = Promise.withResolvers<void>();
+    const notifications = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ];
+    notifications.push(Promise.withResolvers<void>(), Promise.withResolvers<void>());
+    notifications.push(Promise.withResolvers<void>(), Promise.withResolvers<void>());
+    const accounting = defineState(
+      "callback-proof.accounting",
+      () => ({ dispatched: false, receipts: 0 }),
+      { onCancel: "preserve" },
+    );
+    const ordinary = defineState("callback-proof.ordinary", () => -1);
+    let modelSteps = 0;
+    let callerlessError: unknown;
+    const reportChannel = defineChannel({
+      state: {},
+      routes: [POST("/report-proof", async () => new Response("ok"))],
+      deliver(payload) {
+        if (payload.message === "Alice sends a request whose delivery fails.")
+          throw new Error("Controlled delivery failure");
+        return defaultDeliverResult(payload);
+      },
+    });
+    const fetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, options) => {
+        if (String(url) !== callback.url) return fetch(url, options);
+        bodies.push(JSON.parse(String(options?.body)));
+        if (bodies.length === 1) return new Response(null, { status: 503 });
+        if (bodies.length === 2) {
+          callbackAtGate.resolve();
+          await acknowledgeCallback.promise;
+        }
+        notifications[bodies.length - 2]?.resolve();
+        return new Response(null, { status: 200 });
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: { name: "callback-data" },
+      modules: [
+        {
+          logicalPath: "channels/report.ts",
+          loadNamespace: async () => ({ default: reportChannel }),
+        },
+        {
+          logicalPath: "hooks/report.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "message.appended"(_event, ctx) {
+                  accounting.update((value) => ({ ...value, dispatched: true }));
+                  ordinary.update(() => ctx.session.turn.sequence);
+                  if (ctx.session.turn.sequence === 5) ctx.cancel();
+                },
+                "step.completed"(_event, ctx) {
+                  modelSteps += 1;
+                  accounting.update((value) => ({ ...value, receipts: value.receipts + 1 }));
+                  if (ctx.session.turn.sequence === 6) ctx.cancel();
+                },
+                "turn.started"(_event, ctx) {
+                  accounting.update(() => ({ dispatched: false, receipts: 0 }));
+                  ordinary.update(() => -1);
+                  if (ctx.session.turn.sequence === 2) ctx.cancel();
+                },
+                "turn.completed"(_event, ctx) {
+                  if (ctx.session.turn.sequence === 0 || ctx.session.turn.sequence === 4)
+                    setCallbackData({ cost: "0.0007", outcome: "completed" });
+                  if (ctx.session.turn.sequence === 3) {
+                    try {
+                      setCallbackData({ outcome: "callerless" });
+                    } catch (error) {
+                      callerlessError = error;
+                    }
+                  }
+                },
+                "turn.cancelled"(_event, ctx) {
+                  setCallbackData(
+                    ctx.session.turn.sequence < 5
+                      ? { outcome: "cancelled" }
+                      : {
+                          outcome: "cancelled",
+                          ...accounting.get(),
+                          ordinary: ordinary.get(),
+                        },
+                  );
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Alice requests a short greeting." },
+            serializedContext: {
+              ...buildSerializedContext({ channelKind: "channel:report" }),
+              [SessionCallbackKey.name]: callback,
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await withTimeout(callbackAtGate.promise, "held callback");
+          const waiting = await stream.nextTurn();
+          expect(waiting.some((event) => event.type === "callback.delivered")).toBe(false);
+          acknowledgeCallback.resolve();
+          await withTimeout(notifications[0]!.promise, "callback retry");
+          const delivery = await stream.nextUntil((event) => event.type === "callback.delivered");
+          expect(delivery.at(-1)?.data).toEqual({ callId: callback.callId });
+          expect(modelSteps).toBe(1);
+          expect(bodies[1]).toEqual(bodies[0]);
+          expect(bodies[1]?.applicationData).toEqual({ cost: "0.0007", outcome: "completed" });
+          const workflowRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+          const caller = {
+            callId: callback.callId,
+            subagentName: callback.subagentName,
+            replyTo: { kind: "callback" as const, token: callback.token, url: callback.url },
+          };
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller,
+              payload: { message: "Alice requests another greeting." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[1]!.promise, "second callback");
+          await stream.nextTurn();
+          expect(
+            (await stream.nextUntil((event) => event.type === "callback.delivered")).at(-1)?.data,
+          ).toEqual({ callId: callback.callId });
+          expect(modelSteps).toBe(2);
+          expect(bodies[2]).not.toHaveProperty("applicationData");
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller: { ...caller, callId: "cancelled-call" },
+              payload: { message: "Alice cancels this request before the model starts." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[2]!.promise, "cancelled callback");
+          await stream.nextTurn();
+          expect(modelSteps).toBe(2);
+          expect(
+            (await stream.nextUntil((event) => event.type === "callback.delivered")).at(-1)?.data,
+          ).toEqual({ callId: "cancelled-call" });
+          expect(bodies[3]).toMatchObject({
+            callId: "cancelled-call",
+            applicationData: { outcome: "cancelled" },
+          });
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              payload: { message: "Bob asks for a greeting without a callback." },
+            },
+            sessionId: run.runId,
+          });
+          await stream.nextTurn();
+          expect(callerlessError).toBeInstanceOf(Error);
+          expect(String(callerlessError)).toContain("no native completion callback");
+          expect(bodies).toHaveLength(4);
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller,
+              payload: { message: "Alice requests a recorded greeting." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[3]!.promise, "recorded greeting");
+          await stream.nextTurn();
+          expect(
+            (await stream.nextUntil((event) => event.type === "callback.delivered")).at(-1)?.data,
+          ).toEqual({ callId: callback.callId });
+          expect(bodies[4]?.applicationData).toEqual({ cost: "0.0007", outcome: "completed" });
+          for (const [index, receipts] of [0, 1].entries()) {
+            await workflowRuntime.dispatchSession({
+              command: {
+                kind: "send",
+                caller,
+                payload: { message: "Alice cancels after the provider starts." },
+              },
+              sessionId: run.runId,
+            });
+            await withTimeout(notifications[4 + index]!.promise, "interrupted callback");
+            await stream.nextTurn();
+            expect(
+              (await stream.nextUntil((event) => event.type === "callback.delivered")).at(-1)?.data,
+            ).toEqual({ callId: callback.callId });
+            expect(bodies[5 + index]?.applicationData).toEqual({
+              outcome: "cancelled",
+              dispatched: true,
+              receipts,
+              ordinary: 4,
+            });
+          }
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller,
+              payload: { message: "Alice sends a request whose delivery fails." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[6]!.promise, "failed delivery callback");
+          expect(bodies[7]).toMatchObject({ callId: caller.callId, kind: "turn.failed" });
+          expect(bodies[7]).not.toHaveProperty("applicationData");
+          const terminal = await stream.nextUntil((event) => event.type === "callback.delivered");
+          expect(terminal.some((event) => event.type === "session.failed")).toBe(true);
+          expect(terminal.at(-1)?.data).toEqual({ callId: callback.callId });
+          expect(modelSteps).toBe(5);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("closes a retired session after its earlier callback was acknowledged", async () => {
+    const callback = {
+      callId: "retired-call",
+      subagentName: "reporter",
+      token: "synthetic",
+      url: "https://consumer.example/eve/v1/callback/synthetic",
+    };
+    let notifications = 0;
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, options) => {
+        if (String(url) !== callback.url) return originalFetch(url, options);
+        notifications++;
+        return new Response(null, { status: 200 });
+      }),
+    );
+    const runtime = await createTestRuntime({ agent: { name: "retired-callback" } });
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Greet Alice." },
+            serializedContext: {
+              ...buildSerializedContext({ channelKind: "http" }),
+              [SessionCallbackKey.name]: callback,
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await stream.nextUntil((event) => event.type === "callback.delivered");
+          const runtime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+          await runtime.dispatchSession({
+            command: { kind: "reset", reason: "Conversation finished" },
+            sessionId: run.runId,
+          });
+          await withTimeout(run.returnValue, "retired callback session");
+          const tail = await stream.nextUntil((event) => event.type === "session.completed");
+          expect(tail.at(-1)?.type).toBe("session.completed");
+          await expect(
+            withTimeout(
+              stream.nextUntil(() => false),
+              "retired stream EOF",
+            ),
+          ).rejects.toThrow("Workflow stream closed before reaching a turn boundary");
+          expect(notifications).toBe(1);
+        } finally {
+          stream.dispose();
+        }
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([false, true])(
+    "never sends a contradictory callback when acknowledgement publication fails, terminal=%s",
+    async (terminal) => {
+      const callback = {
+        callId: "accepted-call",
+        subagentName: "reporter",
+        token: "synthetic",
+        url: "https://consumer.example/eve/v1/callback/synthetic",
+      };
+      const bodies: unknown[] = [];
+      let modelCalls = 0;
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url, options) => {
+          if (String(url) !== callback.url) return originalFetch(url, options);
+          bodies.push(JSON.parse(String(options?.body)));
+          return new Response(null, { status: 200 });
+        }),
+      );
+      const runtime = await createTestRuntime({
+        agent: { name: "callback-publication" },
+        modules: [
+          {
+            logicalPath: "channels/proof.ts",
+            loadNamespace: async () => ({
+              default: defineChannel({
+                state: {},
+                routes: [POST("/publication-proof", async () => new Response("ok"))],
+                deliver(payload) {
+                  if (terminal) throw new Error("Controlled delivery failure");
+                  return defaultDeliverResult(payload);
+                },
+              }),
+            }),
+          },
+          {
+            logicalPath: "hooks/count.ts",
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "step.completed"() {
+                    modelCalls++;
+                  },
+                },
+              }),
+            }),
+          },
+        ],
+      });
+      const world = await getWorld();
+      const append = world.streams.writeMulti!.bind(world.streams);
+      const appendOne = world.streams.write.bind(world.streams);
+      let targetRun: string | undefined;
+      const inspect = async (runId: string, name: string, chunks: (string | Uint8Array)[]) => {
+        if (runId !== targetRun || !name.endsWith("_user")) return;
+        const decoded = ReadableStream.from(
+          chunks.map((chunk) =>
+            typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk,
+          ),
+        ).pipeThrough(
+          getDeserializeStream({ Uint8Array: (value) => Buffer.from(value, "base64") }, undefined),
+        );
+        for await (const chunk of decoded) {
+          if (new TextDecoder().decode(chunk).includes('"callback.delivered"'))
+            throw new FatalError("Controlled acknowledgement publication failure");
+        }
+      };
+      const write = vi.spyOn(world.streams, "writeMulti").mockImplementation(async (...args) => {
+        await inspect(...args);
+        return await append(...args);
+      });
+      const writeOne = vi.spyOn(world.streams, "write").mockImplementation(async (...args) => {
+        await inspect(args[0], args[1], [args[2]]);
+        return await appendOne(...args);
+      });
+      try {
+        await runtime.run(async () => {
+          const run = await start(workflowEntry, [
+            {
+              kind: "initial",
+              ownerDeploymentId: "dpl_inline",
+              input: { message: "Greet Alice." },
+              serializedContext: {
+                ...buildSerializedContext({ channelKind: "channel:proof" }),
+                [SessionCallbackKey.name]: callback,
+              },
+            },
+          ]);
+          targetRun = run.runId;
+          const stream = captureTurnEvents(run);
+          let finished = false;
+          try {
+            await expect(
+              withTimeout(run.returnValue, "failed acknowledgement publication"),
+            ).rejects.toThrow();
+            finished = true;
+            expect(bodies).toHaveLength(1);
+            expect(modelCalls).toBe(terminal ? 0 : 1);
+            await expect(
+              withTimeout(
+                stream.nextUntil(() => false),
+                "failed acknowledgement stream EOF",
+              ),
+            ).rejects.toThrow("Workflow stream closed before reaching a turn boundary");
+          } finally {
+            stream.dispose();
+            if (!finished) await run.cancel();
+          }
+        });
+      } finally {
+        write.mockRestore();
+        writeOne.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;

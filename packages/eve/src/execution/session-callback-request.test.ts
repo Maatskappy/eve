@@ -24,7 +24,7 @@ describe("postSessionCallbackRequest", () => {
   it.each(["session.completed", "turn.completed", "turn.failed"])(
     "logs %s HTTP failures with correlation fields and a redacted destination",
     async (kind) => {
-      const response = new Response("private response body", { status: 404 });
+      const response = new Response("confidential-fixture response body", { status: 404 });
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
 
       await expect(
@@ -34,12 +34,12 @@ describe("postSessionCallbackRequest", () => {
             callId: "call-1",
             sessionId: "child-session",
             subagentName: "research",
-            message: "private update",
-            output: "private result",
-            error: "private failure",
-            token: "private-body-token",
+            message: "confidential-fixture update",
+            output: "confidential-fixture result",
+            error: "confidential-fixture failure",
+            token: "confidential-fixture-body-token",
           },
-          url: "https://user:password@agent.example.com/eve/v1/eve/v1/callback/private-token?secret=query#fragment",
+          url: "https://user:password@agent.example.com/eve/v1/eve/v1/callback/confidential-fixture-token?secret=query#fragment",
         }),
       ).resolves.toBe(response);
 
@@ -57,7 +57,13 @@ describe("postSessionCallbackRequest", () => {
         }),
       );
       const logged = JSON.stringify(errorSpy.mock.calls);
-      for (const secret of ["private", "password", "user:", "secret=query", "fragment"]) {
+      for (const secret of [
+        "confidential-fixture",
+        "password",
+        "user:",
+        "secret=query",
+        "fragment",
+      ]) {
         expect(logged).not.toContain(secret);
       }
     },

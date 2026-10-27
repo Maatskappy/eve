@@ -1,4 +1,4 @@
-import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { SessionCallbackKey } from "#context/keys.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -95,12 +95,7 @@ export type { TurnStepInput };
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
-  return await withSessionStateDelta(input, (state) =>
-    runSessionStep({
-      ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-    }),
-  );
+  return await withSessionStateDelta(input, runSessionStep);
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
@@ -542,7 +537,8 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     stepResult = { ...stepResult, session: aliased };
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
-    if (durableResult.action === "done") await publisher.writer.close();
+    if (durableResult.action === "done" && ctx.get(SessionCallbackKey) === undefined)
+      await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
     publisher.writer.release();

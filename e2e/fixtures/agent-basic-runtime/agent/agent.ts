@@ -34,6 +34,12 @@ const config = e2eAgentConfig({
         ? { toolCalls: [{ name: "call_child", input: {} }] }
         : JSON.stringify(result.output);
     }
+    if (lastUserMessage?.includes("check_callback_context")) {
+      const result = toolResults.find((entry) => entry.name === "check_callback_context");
+      return result === undefined
+        ? { toolCalls: [{ name: "check_callback_context", input: {} }] }
+        : JSON.stringify(result.output);
+    }
     if (lastUserMessage?.includes("read_audit_outbox")) {
       const result = toolResults.find((entry) => entry.name === "read_audit_outbox");
       return result === undefined

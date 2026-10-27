@@ -6,4 +6,5 @@ export {
   type SessionParent,
   type SessionTurn,
   defineState,
+  setCallbackData,
 } from "../../src/public/context/index.ts";

@@ -25,6 +25,41 @@ const run = (command, args, options = {}) => {
   execFileSync(command, args, { cwd: repoRoot, stdio: "inherit", ...options });
 };
 
+// Templates that do not install or typecheck with their committed lockfile (#5400). Each entry
+// must fail the check below; remove it once the template works with the eve release it pins.
+const EXPECTED_LOCKFILE_FAILURES = new Set([
+  "eve-chat-template",
+  "eve-company-brain-template",
+  "eve-llm-council-template",
+  "eve-voice-template",
+  "personal-agent-template",
+]);
+
+/**
+ * Deploy with Vercel clones a template from main and installs its committed lockfile, so the
+ * template must typecheck with the published eve release that lockfile pins, not only with the
+ * packed eve checked afterwards.
+ */
+const checkCommittedLockfile = (template, destination) => {
+  let failure;
+  try {
+    run("pnpm", ["install", "--frozen-lockfile"], { cwd: destination });
+    run("pnpm", ["typecheck"], { cwd: destination });
+  } catch (error) {
+    failure = error;
+  }
+  if (!EXPECTED_LOCKFILE_FAILURES.has(template)) {
+    if (failure) throw failure;
+    return;
+  }
+  if (!failure) {
+    throw new Error(
+      `Template "${template}" now passes with its committed lockfile. Remove it from EXPECTED_LOCKFILE_FAILURES.`,
+    );
+  }
+  process.stdout.write(`Template "${template}" failed with its committed lockfile, as expected.\n`);
+};
+
 /**
  * Builds each authored `vercel.ts` service the way Vercel does: from the service root, where a
  * root-only pnpm install puts no framework binary on PATH. The template's own `pnpm build` runs
@@ -108,6 +143,10 @@ try {
     if (!manifest.dependencies?.eve) {
       throw new Error(`Template "${template}" does not declare eve in dependencies`);
     }
+
+    process.stdout.write(`\nChecking ${template} with its committed lockfile\n`);
+    checkCommittedLockfile(template, destination);
+
     manifest.dependencies.eve = `file:${tarball}`;
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

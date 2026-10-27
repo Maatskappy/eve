@@ -255,6 +255,39 @@ describe("compaction triggers", () => {
     expect(events.at(-1)).not.toMatchObject({ data: { error: { code: "COMPACTION_FAILED" } } });
   });
 
+  it("compacts when a strategy keeps every message and stubs the large one, under a large provider count", async () => {
+    const doStream = vi.fn(async () => textStream("Done.", 500));
+    const history: HarnessSession["history"] = [
+      { content: "Earlier notes.", kind: "user", role: "user" },
+      { content: "x".repeat(40_000), role: "assistant" },
+      { content: "More notes.", kind: "user", role: "user" },
+    ];
+    const base = session(history, 10_000);
+    const events = await run({
+      message: "Please continue.",
+      model: new MockLanguageModelV3({ doStream }),
+      session: {
+        ...base,
+        compaction: {
+          ...base.compaction,
+          lastKnownInputTokens: 30_000,
+          lastKnownPromptMessageCount: 3,
+        },
+      },
+      strategy: {
+        compact: async (messages) =>
+          messages.map((message) =>
+            typeof message.content === "string" && message.content.length > 1_000
+              ? { ...message, content: "[moved to a file]" }
+              : message,
+          ) as never,
+      },
+    });
+
+    expect(doStream).toHaveBeenCalled();
+    expect(events.at(-1)).not.toMatchObject({ data: { error: { code: "COMPACTION_FAILED" } } });
+  });
+
   it("gives a strategy a history with a URL file part, and compacts", async () => {
     const compact = vi.fn<CompactionStrategy["compact"]>(async (messages) => messages.slice(-1));
     const ctx = new ContextContainer();

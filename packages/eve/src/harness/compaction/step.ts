@@ -418,18 +418,17 @@ async function compactOnce(input: {
       };
       compactedOrdinary = await strategy.compact(cloneMessages(ordinary), context);
       validateCompactionResult(ordinary, compactedOrdinary);
-      // The provider's count beyond the character estimate still describes a result that keeps
-      // every message (an identity or trim-only strategy cannot slip under the limit). A result
-      // that dropped messages is counted by its estimate alone.
-      const undercount =
-        compactedOrdinary.length >= ordinary.length
-          ? Math.max(
-              0,
-              measured.inputTokens - (estimateTokens(ordinary) + context.requestEnvelopeTokens),
-            )
-          : 0;
-      const resultTokens =
-        estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens + undercount;
+      // Judged on the estimate alone: the provider's count can't say which messages its excess
+      // belongs to. A compaction that was needed because the history is over its limit must
+      // shrink it; one that doesn't would only run again on the next step.
+      const originalEstimate = estimateTokens(ordinary);
+      const resultEstimate = estimateTokens(compactedOrdinary);
+      if (overLimit && resultEstimate >= originalEstimate) {
+        throw new CompactionOverLimitError(
+          `The compacted history is no smaller than the history (about ${resultEstimate} tokens), which is over the limit.`,
+        );
+      }
+      const resultTokens = resultEstimate + context.requestEnvelopeTokens;
       if (exceedsLimit({ inputTokens: resultTokens, threshold: context.threshold })) {
         throw new CompactionOverLimitError(
           `The compacted history is still over the limit (about ${resultTokens} of ${context.threshold} tokens).`,

@@ -1,4 +1,6 @@
 import { e2eModel } from "@eve-e2e/config";
-import { fixedTail } from "eve/compaction";
+import { type CompactionStrategy, fixedTail } from "eve/compaction";
 
-export default fixedTail({ model: e2eModel() });
+const compaction: CompactionStrategy = fixedTail({ model: e2eModel() });
+
+export default compaction;

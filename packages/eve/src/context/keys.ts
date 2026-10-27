@@ -114,6 +114,8 @@ export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
 /** Accepted messages whose response owns the current turn's durable stream events. */
 export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
+/** The most input tokens a request may carry before the history is compacted; what hooks read as `ctx.view.context.limit`. */
+export const CompactionLimitKey = new ContextKey<number>("eve.compactionLimit");
 /** Last framework announcements recorded in the retained session history. */
 export interface HistoryState {
   /** Last announced value per keyed announcement (see `#harness/announcements.js`). */

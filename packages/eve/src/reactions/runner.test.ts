@@ -2,7 +2,12 @@ import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ChannelInstrumentationKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  ChannelInstrumentationKey,
+  CompactionLimitKey,
+  SessionIdKey,
+  SessionKey,
+} from "#context/keys.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { evaluateApproval, type ApprovalMemory } from "#approval/evaluation.js";
 import type { ApprovalDecision } from "#approval/status.js";
@@ -596,6 +601,20 @@ describe("runReactions", () => {
     const view = { ...initialSessionProjection().view, lastInputTokens: 61_000 };
     await commit(ctx, { written: written(2, "session.started", {}, false, view) });
     expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
+  });
+
+  it("lets a hook compare the input tokens with the compaction limit", async () => {
+    const seen: unknown[] = [];
+    const ctx = session(noTools, [
+      hook("limit", {
+        "*": (_event, ctx) => {
+          seen.push(ctx.view.context.limit);
+        },
+      }),
+    ]);
+    ctx.set(CompactionLimitKey, 90_000);
+    await commit(ctx, { written: written(1, "session.started") });
+    expect(seen).toEqual([90_000]);
   });
 
   it("keeps a compact request made during a turn, and a cancel does not take it", async () => {

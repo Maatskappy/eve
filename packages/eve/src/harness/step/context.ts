@@ -4,6 +4,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 
 import type { AlsContext, ContextContainer } from "#context/container.js";
 import {
+  CompactionLimitKey,
   ParentSessionKey,
   ScheduleIdKey,
   SessionCallbackKey,
@@ -90,6 +91,7 @@ export function createStep(input: {
   const { ctx, live } = input;
   const hasDelegatedCaller =
     ctx?.get(ParentSessionKey) !== undefined || ctx?.get(SessionCallbackKey) !== undefined;
+  ctx?.set(CompactionLimitKey, input.session.compaction.threshold);
   const step: Step = {
     session: input.session,
     frameworkToolNames: new Set(),
@@ -110,7 +112,10 @@ export function createStep(input: {
         await applyTransition(step.session, transition, input.publish, messages),
         live.read(),
       );
-      if (ctx !== undefined) recordAppliedSession(ctx, step.session);
+      if (ctx !== undefined) {
+        recordAppliedSession(ctx, step.session);
+        ctx.set(CompactionLimitKey, step.session.compaction.threshold);
+      }
     },
   };
   return step;

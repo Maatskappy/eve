@@ -2,6 +2,7 @@ import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextReader } from "#context/key.js";
 import {
   AuthKey,
+  CompactionLimitKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
   InitiatorAuthKey,
@@ -58,6 +59,6 @@ export function sessionFrameOf(
       schedule: readSessionSchedule(ctx),
     },
     turn: latestTurn(view),
-    view: snapshotOf(view),
+    view: snapshotOf(view, undefined, undefined, ctx.get(CompactionLimitKey)),
   };
 }

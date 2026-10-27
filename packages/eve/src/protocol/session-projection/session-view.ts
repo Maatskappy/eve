@@ -11,6 +11,8 @@ export interface SessionView {
   readonly context: {
     /** The input tokens of the latest settled model call; absent before the first one. */
     readonly inputTokens?: number;
+    /** The input tokens a request may carry before the history is compacted. */
+    readonly limit?: number;
   };
 }
 
@@ -61,9 +63,10 @@ export function snapshotOf(
   view: Tables,
   previews: SessionPreviews = emptyPreviews(),
   pending: readonly ReceivedEvent[] = [],
+  limit?: number,
 ): SessionView {
   const snapshot = Object.freeze({
-    context: Object.freeze({ inputTokens: view.lastInputTokens }),
+    context: Object.freeze({ inputTokens: view.lastInputTokens, limit }),
   }) as SessionView;
   snapshots.set(snapshot, {
     tables: Object.freeze({

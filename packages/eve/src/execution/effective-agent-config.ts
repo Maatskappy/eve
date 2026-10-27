@@ -52,7 +52,6 @@ export function resolveEffectiveAgentRuntimeFromConfig(
     };
   } else {
     const {
-      compactionModel: _compiledCompactionModel,
       configResolver: _configResolver,
       dynamicModel: _dynamicModel,
       model: _compiledModel,
@@ -62,7 +61,6 @@ export function resolveEffectiveAgentRuntimeFromConfig(
       limits: config.limits,
       turnAgent: {
         ...turnAgent,
-        compactionModel: config.compaction?.model,
         model: config.model,
         reasoning: config.reasoning,
       },

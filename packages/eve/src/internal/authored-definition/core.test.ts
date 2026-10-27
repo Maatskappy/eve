@@ -74,19 +74,20 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(/takes only a function; unknown key\(s\): reasoning/);
   });
 
-  it("rejects a dynamic compaction model", () => {
-    expect(() =>
-      normalizeAgentDefinition(
-        {
-          compaction: {
-            model: defineDynamic(() => "openai/gpt-5.5-mini"),
+  it.each(["model", "modelContextWindowTokens"])(
+    "names the removed compaction.%s and points at fixedTail",
+    (field) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            compaction: { [field]: field === "model" ? "openai/gpt-5.5-mini" : 8_192 },
+            model: "openai/gpt-5.5",
           },
-          model: "openai/gpt-5.5",
-        },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow('"compaction.model" does not support defineDynamic');
-  });
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow(`"compaction.${field}" was removed: pass \`model\` to \`fixedTail({ model })\``);
+    },
+  );
 
   it("names the removed compaction.thresholdPercent", () => {
     expect(() =>

@@ -8,9 +8,6 @@ describe("resolveEffectiveAgentRuntime", () => {
   it("applies the selected subagent model and runtime settings", () => {
     const ctx = new ContextContainer();
     ctx.set(DynamicSubagentAgentConfigKey, {
-      compaction: {
-        model: { id: "anthropic/claude-sonnet-4.5" },
-      },
       description: "Perform deep research.",
       limits: { sessionTimeoutMs: 120_000 },
       model: { id: "anthropic/claude-opus-4.6" },
@@ -39,7 +36,6 @@ describe("resolveEffectiveAgentRuntime", () => {
     expect(effective).toMatchObject({
       limits: { sessionTimeoutMs: 120_000 },
       turnAgent: {
-        compactionModel: { id: "anthropic/claude-sonnet-4.5" },
         model: { id: "anthropic/claude-opus-4.6" },
         reasoning: "high",
       },
@@ -51,9 +47,6 @@ describe("resolveEffectiveAgentRuntime", () => {
   it("overrides only the selected agent model for a ctx.agent session", () => {
     const ctx = new ContextContainer();
     ctx.set(DynamicSubagentAgentConfigKey, {
-      compaction: {
-        model: { id: "anthropic/claude-haiku-4.5" },
-      },
       description: "Perform deep research.",
       limits: { sessionTimeoutMs: 120_000 },
       model: { id: "anthropic/claude-opus-4.6" },
@@ -80,7 +73,6 @@ describe("resolveEffectiveAgentRuntime", () => {
     expect(effective).toMatchObject({
       limits: { sessionTimeoutMs: 120_000 },
       turnAgent: {
-        compactionModel: { id: "anthropic/claude-haiku-4.5" },
         instructions: ["Research carefully."],
         model: { id: "openai/gpt-5.5", reasoning: "low" },
         reasoning: "high",

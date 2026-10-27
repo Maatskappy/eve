@@ -16,9 +16,6 @@ function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): Runti
   return {
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
-    compactionModel: {
-      id: "summary-model",
-    },
     model: { id: "test-model" },
     tools: [
       {
@@ -69,7 +66,6 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent({ reasoning: "high" }),
     });
 
-    expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
     expect(session.agent.modelReference).toEqual({ id: "test-model" });
     expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
@@ -180,27 +176,6 @@ describe("createSession", () => {
     });
   });
 
-  it("copies the compaction model into the refreshed session", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent(),
-    });
-
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      turnAgent: createTestTurnAgent({
-        compactionModel: {
-          id: "updated-summary-model",
-        },
-      }),
-    });
-
-    expect(refreshed.agent.compactionModelReference).toEqual({
-      id: "updated-summary-model",
-    });
-  });
-
   it("persists run outputSchema through durable session projection and hydration", () => {
     const runOutputSchema = {
       properties: { title: { type: "string" } },
@@ -307,9 +282,6 @@ describe("refreshSessionFromTurnAgent", () => {
     expect(refreshed.history).toEqual([
       { content: "previous message", kind: "user", role: "user" },
     ]);
-    expect(refreshed.agent.compactionModelReference).toEqual({
-      id: "summary-model",
-    });
     expect(refreshed.agent.modelReference).toEqual({
       contextWindowTokens: 200_000,
       id: "updated-model",

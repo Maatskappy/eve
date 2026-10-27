@@ -50,12 +50,6 @@ export interface CompactionConfig extends CompactionState {
  * Serializable agent configuration stored on the session.
  */
 interface SessionAgentBase {
-  /**
-   * Optional model used only for compaction summaries.
-   *
-   * When omitted, the harness uses the active turn model for compaction.
-   */
-  readonly compactionModelReference?: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];

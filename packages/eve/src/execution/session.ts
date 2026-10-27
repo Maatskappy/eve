@@ -81,7 +81,6 @@ function createSessionAgent(
   tools: readonly SessionToolDefinition[],
 ): SessionAgent {
   const base = {
-    compactionModelReference: turnAgent.compactionModel,
     reasoning: turnAgent.reasoning,
     system,
     tools,

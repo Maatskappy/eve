@@ -1,4 +1,4 @@
-import { e2eAgentConfig, e2eModel } from "@eve-e2e/config";
+import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/evals";
 
@@ -15,7 +15,6 @@ import {
 import { assistantHasReport } from "../report-evidence";
 import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
-const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // The request envelope includes instructions, the task block, and 10 advertised
 // tools; nothing is deferred. Keep room for the review/handoff checkpoint while
 // forcing the raw 2000x2000 file exchange (~5k history tokens) to compact. Its
@@ -229,10 +228,6 @@ export default defineAgent({
   modelContextWindowTokens: Math.ceil(
     (TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS) / 0.9,
   ),
-  compaction: {
-    model: e2eModel(),
-    modelContextWindowTokens: TEST_CONTEXT_WINDOW_TOKENS,
-  },
   limits: {
     sessionUsage: ({ window }) => window.inputTokens - window.cacheReadTokens >= 100_000,
   },

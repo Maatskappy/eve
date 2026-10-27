@@ -30,7 +30,6 @@ function buildSyntheticSession(input: {
 
   return {
     agent: {
-      compactionModelReference: { id: "test", contextWindowTokens: 1_000_000 },
       modelReference: { id: "test", contextWindowTokens: 1_000_000 },
       system: input.marker,
       tools: [],

@@ -56,4 +56,10 @@ Throw `CompactionOverLimitError` (exported from `eve/compaction`) when no histor
 
 ## Reusing the default
 
-`fixedTail()` from `eve/compaction` returns the default strategy, so a strategy can wrap it, for example to compact earlier than the threshold.
+`fixedTail()` from `eve/compaction` returns the default strategy, so a strategy can wrap it, for example to compact earlier than the threshold. Its `model` option picks the model that writes the summary, a gateway model id or a language model; the session's model is the default:
+
+```ts title="agent/compaction.ts"
+import { fixedTail } from "eve/compaction";
+
+export default fixedTail({ model: "anthropic/claude-haiku-4.5" });
+```

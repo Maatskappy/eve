@@ -22,7 +22,6 @@ import {
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type AgentPromptCacheDefinition,
   type AnthropicPromptCacheTtl,
-  type PublicAgentStaticModelDefinition,
   type SessionUsageLimit,
 } from "#shared/agent-definition.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
@@ -93,7 +92,7 @@ export function normalizeAgentDefinition(
   }
 
   if (record.compaction !== undefined) {
-    definition.compaction = normalizeAgentCompactionDefinition(record.compaction, message);
+    rejectRemovedAgentCompactionFields(record.compaction, message);
   }
 
   if (record.build !== undefined) {
@@ -316,36 +315,21 @@ export function normalizeAgentPromptCache(
   return { anthropic: { ttl: ttl as AnthropicPromptCacheTtl } };
 }
 
-function normalizeAgentCompactionDefinition(
-  value: unknown,
-  message: string,
-): NonNullable<NormalizedAgentDefinition["compaction"]> {
+function rejectRemovedAgentCompactionFields(value: unknown, message: string): void {
   const record = expectObjectRecord(value, message);
   if (record.thresholdPercent !== undefined) {
     throw new Error(
       `${message} "compaction.thresholdPercent" was removed: eve compacts at 90% of the context window, and a hook can call ctx.compact() to compact sooner. See docs/concepts/compaction-strategies.`,
     );
   }
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens"], message);
-  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
-
-  if (record.model !== undefined) {
-    if (isDynamicSentinel(record.model)) {
+  for (const field of ["model", "modelContextWindowTokens"]) {
+    if (record[field] !== undefined) {
       throw new Error(
-        `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
+        `${message} "compaction.${field}" was removed: pass \`model\` to \`fixedTail({ model })\` in compaction.ts instead. See docs/concepts/compaction-strategies.`,
       );
     }
-    normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
   }
-
-  if (record.modelContextWindowTokens !== undefined) {
-    normalizedDefinition.modelContextWindowTokens = expectPositiveInteger(
-      record.modelContextWindowTokens,
-      message,
-    );
-  }
-
-  return normalizedDefinition;
+  expectOnlyKnownKeys(record, [], message);
 }
 
 /**

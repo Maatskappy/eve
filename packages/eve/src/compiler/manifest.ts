@@ -28,7 +28,6 @@ import {
   ANTHROPIC_PROMPT_CACHE_TTLS,
   type InternalAgentDefinition,
   type InternalAgentModelDefinition,
-  type InternalAgentCompactionDefinition,
   type AgentBuildDefinition,
   type ModelRouting,
 } from "#shared/agent-definition.js";
@@ -141,18 +140,9 @@ export type CompiledDynamicModelDefinition = ModuleSourceRef;
 type CompiledAgentBuildDefinition = AgentBuildDefinition;
 
 /**
- * Normalized authored compaction configuration preserved in the compiled
- * manifest.
- */
-type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition, "model"> & {
-  model?: CompiledRuntimeModelReference;
-};
-
-/**
  * Normalized additive agent configuration preserved in the compiled manifest.
  */
-type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model" | "compaction"> & {
-  compaction?: CompiledAgentCompactionDefinition;
+type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model"> & {
   source: ModuleSourceRef;
 };
 
@@ -571,7 +561,6 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
-    sourceField: z.literal("compaction.model").optional(),
     promptCache: z
       .object({
         anthropic: z
@@ -602,12 +591,6 @@ const compiledAgentWorkflowDefinitionSchema = z
   })
   .strict();
 
-const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> = z
-  .object({
-    model: compiledRuntimeModelReferenceSchema.optional(),
-  })
-  .strict();
-
 const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(false)]);
 
 const compiledAgentLimitsDefinitionSchema = z
@@ -619,7 +602,6 @@ const compiledAgentLimitsDefinitionSchema = z
 
 const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
-  compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
   description: z.string().optional(),
   experimental: z
@@ -1212,12 +1194,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
                 ? undefined
                 : [...config.build.externalDependencies],
           },
-    compaction: {
-      model:
-        config.compaction?.model === undefined
-          ? undefined
-          : cloneCompiledRuntimeModelReference(config.compaction.model),
-    },
     defaultTools: config.defaultTools,
     description: config.description,
     experimental:
@@ -1355,9 +1331,6 @@ function cloneCompiledRuntimeModelReference(
   }
   if (model.source !== undefined) {
     clone.source = { ...model.source };
-  }
-  if (model.sourceField !== undefined) {
-    clone.sourceField = model.sourceField;
   }
   return clone;
 }

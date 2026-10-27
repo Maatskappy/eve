@@ -212,7 +212,6 @@ function createResolvedAgentConfig(
   sessionUsage: SessionUsageLimit | undefined,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
-    compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
@@ -230,38 +229,6 @@ function createResolvedAgentConfig(
   }
   if (manifest.config.description !== undefined) {
     config.description = manifest.config.description;
-  }
-
-  if (manifest.config.compaction !== undefined) {
-    const compaction: {
-      model?: NonNullable<NonNullable<ResolvedAgent["config"]>["compaction"]>["model"];
-    } = {};
-
-    if (manifest.config.compaction.model !== undefined) {
-      compaction.model =
-        manifest.config.compaction.model.source === undefined
-          ? {
-              contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
-              id: manifest.config.compaction.model.id,
-              maxOutputTokens: manifest.config.compaction.model.maxOutputTokens,
-              providerOptions: manifest.config.compaction.model.providerOptions,
-            }
-          : {
-              contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
-              id: manifest.config.compaction.model.id,
-              maxOutputTokens: manifest.config.compaction.model.maxOutputTokens,
-              providerOptions: manifest.config.compaction.model.providerOptions,
-              source: {
-                exportName: manifest.config.compaction.model.source.exportName,
-                sourceKind: "module" as const,
-                logicalPath: manifest.config.compaction.model.source.logicalPath,
-                sourceId: manifest.config.compaction.model.source.sourceId,
-              },
-              sourceField: manifest.config.compaction.model.sourceField,
-            };
-    }
-
-    config.compaction = compaction;
   }
 
   if (manifest.config.experimental !== undefined) {

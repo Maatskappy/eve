@@ -26,16 +26,27 @@ describe("workflow hook cancellation", () => {
         toolName: "confirm_deploy",
       });
       await runtime.run(async () => {
+        const alice = {
+          attributes: {},
+          authenticator: "test",
+          principalId: "alice",
+          principalType: "user" as const,
+          issuer: "test",
+        };
         const run = await startSessionOwner(workflowEntry, [
           {
             kind: "initial",
             ownerDeploymentId: "dpl_inline",
             input: { message: 'Run confirm_deploy with service "api"' },
-            serializedContext: buildWorkflowToolSerializedContext({
-              acceptedDeploymentId: "dpl_inline",
-              continuationToken: `http:workflow-answer-delivery-${mode}`,
-              requestInput: true,
-            }),
+            // A typed answer joins the turn only from the principal that started it.
+            serializedContext: {
+              ...buildWorkflowToolSerializedContext({
+                acceptedDeploymentId: "dpl_inline",
+                continuationToken: `http:workflow-answer-delivery-${mode}`,
+                requestInput: true,
+              }),
+              "eve.auth": alice,
+            },
           },
         ]);
         const stream = captureTurnEvents(run);
@@ -47,13 +58,7 @@ describe("workflow hook cancellation", () => {
           expect(question).toBeDefined();
           await resumeSessionInbox(sessionCommandHookToken(run.runId), {
             kind: "send",
-            auth: {
-              attributes: {},
-              authenticator: "test",
-              principalId: "alice",
-              principalType: "user",
-              issuer: "test",
-            },
+            auth: alice,
             delivery: { channelKind: "http", channelName: "test", deliveryId: "answer-delivery" },
             payload:
               mode === "button"
@@ -303,7 +308,7 @@ describe("workflow hook cancellation", () => {
 describe("workflow typed answers", () => {
   // #4923: a typed answer is the person's next message, so its hooks and the
   // rest of the turn see the request that sent it, as a steering message does.
-  it.fails("runs a typed answer's turn under the auth of the request that sent it", async () => {
+  it("runs a typed answer's turn under the auth of the request that sent it", async () => {
     const asker = {
       attributes: { msg: "asking request" },
       authenticator: "test",
@@ -374,7 +379,7 @@ describe("workflow typed answers", () => {
 
   // #4923: a turn's principal is fixed. Another person's typed text must not
   // answer the turn's question; it waits and runs as their own turn.
-  it.fails.each([
+  it.each([
     {
       answers: { alice: "Deploy", bob: "Cancel" },
       execute: confirmDeployWorkflow,

@@ -40,6 +40,7 @@ import { failure } from "#protocol/session-projection/selectors.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook, type HookDefinition } from "#public/definitions/hook.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
+import { DENY_OPTION_ID } from "#shared/input.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { z } from "zod";
@@ -1567,7 +1568,7 @@ describe("work delegated to a child session", () => {
   // #4923: a typed answer to a relayed prompt is a message, so only the turn's
   // own principal may answer it by text; another person's text waits for the
   // turn to end instead of being forwarded to the child under alice's auth.
-  it.fails("keeps another principal's typed answer out of the turn that relays a child's prompt", async () => {
+  it("keeps another principal's typed answer out of the turn that relays a child's prompt", async () => {
     const seen: (readonly [string, string, unknown])[] = [];
     const { events, ran } = await withSession(
       "edge-child-foreign-typed-answer",
@@ -2007,5 +2008,69 @@ describe("controls between turns", () => {
     ]);
     // The cancelled turn's message stays in history once, as it would if its model had started.
     expect(prompts.at(-1)?.filter((content) => content.includes("Never mind."))).toHaveLength(1);
+  });
+});
+
+describe("turns parked on their own prompt", () => {
+  // #4923: a turn parked on its continuation prompt is still alice's turn, so
+  // bob's message waits for it to end instead of joining it.
+  it("keeps another principal's message out of a turn parked on its prompt", async () => {
+    const seen: (readonly [string, string, unknown])[] = [];
+    const { events } = await withSession(
+      "edge-limit-foreign-message",
+      {
+        hooks: {
+          observe: defineHook({
+            events: {
+              "delivery.consumed"(event, ctx) {
+                const text = event.data.parts.find((part) => part.kind === "text")?.text;
+                seen.push([
+                  text ?? "(answer)",
+                  event.data.turnId,
+                  ctx.session.auth.current?.principalId,
+                ]);
+              },
+              "turn.settled"(event, ctx) {
+                seen.push([event.type, event.data.turnId, ctx.session.auth.current?.principalId]);
+              },
+            },
+          }),
+        },
+        message: "Hello there",
+        model: scriptedModel(() => "Hello."),
+        // The first turn spends the whole budget, so the next one parks on the prompt.
+        sessionUsage: ({ window }) => window.inputTokens >= 1,
+        tools: [],
+      },
+      async (session) => {
+        await session.next("first reply");
+        await session.send("keep going please");
+        const parked = await session.until(
+          "continuation prompt",
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
+        );
+        const prompt = ofType(parked, "interaction.opened").at(-1)!.data.interactionId;
+        seen.length = 0;
+
+        await session.send("bob here", BOB);
+        await session.answer(prompt, DENY_OPTION_ID);
+        await session.until(
+          "declined",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+        // Bob's message runs as his own turn, which parks on its own prompt.
+        await session.until(
+          "Bob's prompt",
+          (event) => event.type === "interaction.opened" && event.data.request.kind === "budget",
+        );
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:cancelled"]);
+    expect(seen).toEqual([
+      ["(answer)", "turn_1", "alice"],
+      ["turn.settled", "turn_1", "alice"],
+      ["bob here", "turn_2", "bob"],
+    ]);
   });
 });

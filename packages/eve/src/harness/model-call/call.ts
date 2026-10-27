@@ -52,7 +52,10 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import {
+  CompactionInvalidResultError,
+  CompactionOverLimitError,
+} from "#harness/compaction/over-limit-error.js";
 import type { ContextContainer } from "#context/container.js";
 import { takeCompactRequest } from "#reactions/intents.js";
 import { compactedTurnInput, maybeCompact } from "#harness/compaction/step.js";
@@ -225,7 +228,10 @@ export class ModelCaller {
   async failIfCompactionFailed(): Promise<StepResult | undefined> {
     if (this.compactionFailure === undefined) return undefined;
     const { error } = this.compactionFailure;
-    if (error instanceof CompactionOverLimitError) {
+    if (
+      error instanceof CompactionOverLimitError ||
+      error instanceof CompactionInvalidResultError
+    ) {
       return reportCompactionFailure(this.step, error);
     }
     throw error;

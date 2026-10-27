@@ -4,9 +4,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
-  CompactionLimitKey,
   SessionIdKey,
   SessionKey,
+  StaticModelReferenceKey,
 } from "#context/keys.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { evaluateApproval, type ApprovalMemory } from "#approval/evaluation.js";
@@ -612,7 +612,7 @@ describe("runReactions", () => {
         },
       }),
     ]);
-    ctx.set(CompactionLimitKey, 90_000);
+    ctx.set(StaticModelReferenceKey, { id: "m", contextWindowTokens: 100_000 });
     await commit(ctx, { written: written(1, "session.started") });
     expect(seen).toEqual([90_000]);
   });

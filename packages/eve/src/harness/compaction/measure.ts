@@ -82,3 +82,12 @@ const OVERFLOW_GUARD_RATIO = 0.9;
 export function overflowThreshold(contextWindowTokens: number): number {
   return Math.max(1, Math.floor(contextWindowTokens * OVERFLOW_GUARD_RATIO));
 }
+
+const FALLBACK_COMPACTION_THRESHOLD = 100_000;
+
+/** The input tokens a request may carry before the history compacts, for a model's window. */
+export function compactionThreshold(contextWindowTokens?: number): number {
+  return contextWindowTokens === undefined
+    ? FALLBACK_COMPACTION_THRESHOLD
+    : overflowThreshold(contextWindowTokens);
+}

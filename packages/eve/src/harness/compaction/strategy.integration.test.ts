@@ -177,6 +177,94 @@ describe("compaction triggers", () => {
     expect(history[0]).toMatchObject({ content: "Original." });
   });
 
+  it("ends a compaction as COMPACTION_FAILED, once, when the strategy returns an invalid history", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const doStream = vi.fn(async () => textStream("Done.", 500));
+    const compact = vi.fn<CompactionStrategy["compact"]>(async () => [
+      { content: "No user message first.", role: "assistant" },
+    ]);
+    const events = await run({
+      message: "Please continue.",
+      model: new MockLanguageModelV3({ doStream }),
+      session: session(
+        [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
+        2_000,
+      ),
+      strategy: { compact },
+    });
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(doStream).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      type: "session.ended",
+      data: { outcome: "failed", error: { code: "COMPACTION_FAILED" } },
+    });
+  });
+
+  it("fails an unchanged history even when the strategy rebuilds its messages", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const doStream = vi.fn(async () => textStream("Done.", 500));
+    const history: HarnessSession["history"] = [
+      { content: "Earlier notes.", kind: "user", role: "user" },
+    ];
+    const base = session(history, 10_000);
+    const events = await run({
+      message: "Please continue.",
+      model: new MockLanguageModelV3({ doStream }),
+      session: {
+        ...base,
+        compaction: {
+          ...base.compaction,
+          lastKnownInputTokens: 11_000,
+          lastKnownPromptMessageCount: 1,
+        },
+      },
+      strategy: {
+        compact: async (messages) =>
+          messages.map((message) => ({
+            role: message.role,
+            kind: "user",
+            content: message.content,
+          })) as never,
+      },
+    });
+
+    expect(doStream).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ data: { error: { code: "COMPACTION_FAILED" } } });
+  });
+
+  it("gives a strategy a history with a URL file part, and compacts", async () => {
+    const compact = vi.fn<CompactionStrategy["compact"]>(async (messages) => messages.slice(-1));
+    const ctx = new ContextContainer();
+    writeReactionsState(ctx, {
+      ...readReactionsState(ctx),
+      intents: [{ occurrence: "o", reactionId: "hooks/trim.ts", type: "compact" }],
+    });
+    const events = await run({
+      ctx,
+      message: "Thanks.",
+      model: new MockLanguageModelV3({ doStream: async () => textStream("Done.", 500) }),
+      session: session(
+        [
+          {
+            content: [
+              { type: "file", data: new URL("https://example.com/a.png"), mediaType: "image/png" },
+            ],
+            kind: "user",
+            role: "user",
+          },
+        ],
+        100_000,
+      ),
+      strategy: { compact },
+    });
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+      { data: { outcome: "completed" } },
+    ]);
+  });
+
   it.each([
     ["throws", async (): Promise<never> => Promise.reject(new Error("strategy broke"))],
     [

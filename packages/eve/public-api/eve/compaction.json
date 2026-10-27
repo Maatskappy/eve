@@ -4,6 +4,7 @@
   "CompactionOverLimitError",
   "CompactionStrategy",
   "DefinedCompaction",
+  "HarnessModelMessage",
   "createCompactionUserMessage",
   "defineCompaction",
   "fixedTail"

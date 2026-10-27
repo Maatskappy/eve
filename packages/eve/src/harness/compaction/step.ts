@@ -4,10 +4,15 @@ import {
   withoutPromptMeasurement,
 } from "#harness/compaction/measure.js";
 import type { CompactionContext, CompactionStrategy } from "#harness/compaction/strategy.js";
+import { resolveMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
+import { cloneMessages } from "#harness/compaction/clone-messages.js";
 import { fixedTail } from "#harness/compaction/strategies/fixed-tail/index.js";
 import { type LanguageModel, type ModelMessage, streamText, type TelemetryOptions } from "ai";
 
-import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import {
+  CompactionInvalidResultError,
+  CompactionOverLimitError,
+} from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey, HistoryStateKey } from "#context/keys.js";
@@ -111,15 +116,12 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const runId = nextRunId(step.view().projection);
   let outcome: "applied" | "failed" = "applied";
   try {
-    await step.apply([runRequested({ changeId }, runId)], messages);
     const resolvedModel = await resolveEffectiveRuntimeModel({
       config,
       ctx: step.ctx,
       session: step.session,
     });
     step.session = resolvedModel.session;
-    const summaryModel = requireSessionModelReference(step.session);
-    await step.publish(runStarted({ attempt: 0, modelId: summaryModel.id, runId }));
     const compacted = await maybeCompact({
       abortSignal: config.abortSignal,
       auth: step.ctx?.get(AuthKey) ?? null,
@@ -242,7 +244,7 @@ async function compactOnce(input: {
   readonly betweenTurns?: boolean;
   /**
    * The change a compaction makes, and the run that writes its summary. `announced` when the
-   * caller already published the change's start and the run's request and start.
+   * caller already published the change's start. The summary run opens with its first call.
    */
   readonly change: {
     readonly changeId: string;
@@ -322,12 +324,15 @@ async function compactOnce(input: {
             ? input.model
             : typeof choice === "string"
               ? await input.resolveModel({ id: choice })
-              : choice;
+              : (resolveMockAuthoredRuntimeModel({ id: choice.modelId }) ?? choice);
         const profile = resolveModelProfile(model);
         const providerOptions = resolveCallProviderOptions({
           auth: input.auth,
           profile,
-          providerOptions: undefined,
+          providerOptions:
+            choice === undefined
+              ? requireSessionModelReference(session).providerOptions
+              : undefined,
           session,
         }) as Parameters<typeof streamText>[0]["providerOptions"];
         return {
@@ -347,7 +352,7 @@ async function compactOnce(input: {
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const { change } = input;
   // The summary run starts with its first call: `compactMessages` can keep the history without one.
-  let summaryRunOpen = change.announced === true;
+  let summaryRunOpen = false;
   const summarize = async ({ model: choice, ...prompt }: CompactionSummaryPrompt) => {
     const { modelId, ...call } = await resolveSummaryCall(choice);
     if (!summaryRunOpen) {
@@ -411,14 +416,15 @@ async function compactOnce(input: {
         estimateTokens,
         summarize,
       };
-      compactedOrdinary = await strategy.compact(structuredClone(ordinary), context);
+      compactedOrdinary = await strategy.compact(cloneMessages(ordinary), context);
       validateCompactionResult(ordinary, compactedOrdinary);
-      // A history the strategy left as it was keeps the provider's count, as the trigger counts
-      // it; a rewritten one has no provider count, so it is estimated.
+      // What the provider counted beyond the character estimate still applies to the result.
+      const undercount = Math.max(
+        0,
+        measured.inputTokens - (estimateTokens(ordinary) + context.requestEnvelopeTokens),
+      );
       const resultTokens =
-        JSON.stringify(compactedOrdinary) === JSON.stringify(ordinary)
-          ? measured.inputTokens
-          : estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens;
+        estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens + undercount;
       if (exceedsLimit({ inputTokens: resultTokens, threshold: context.threshold })) {
         throw new CompactionOverLimitError(
           `The compacted history is still over the limit (about ${resultTokens} of ${context.threshold} tokens).`,
@@ -529,23 +535,29 @@ function validateCompactionResult(
   const keptResults = results(result);
   for (const id of keptCalls) {
     if (!keptResults.has(id) && results(original).has(id)) {
-      throw new Error(`The compacted history dropped the result of tool call ${id}.`);
+      throw new CompactionInvalidResultError(
+        `The compacted history dropped the result of tool call ${id}.`,
+      );
     }
   }
   for (const id of keptResults) {
     if (!keptCalls.has(id)) {
-      throw new Error(`The compacted history kept the result of tool call ${id} without its call.`);
+      throw new CompactionInvalidResultError(
+        `The compacted history kept the result of tool call ${id} without its call.`,
+      );
     }
   }
   const waiting = [...calls(original)].filter((id) => !results(original).has(id));
   for (const id of waiting) {
     if (!keptCalls.has(id)) {
-      throw new Error(`The compacted history dropped tool call ${id}, which is still waiting.`);
+      throw new CompactionInvalidResultError(
+        `The compacted history dropped tool call ${id}, which is still waiting.`,
+      );
     }
   }
   const first = result[0];
   if (first !== undefined && first.role !== "user") {
-    throw new Error("The compacted history must start with a user message.");
+    throw new CompactionInvalidResultError("The compacted history must start with a user message.");
   }
 }
 

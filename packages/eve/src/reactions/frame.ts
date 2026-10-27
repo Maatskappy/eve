@@ -2,7 +2,6 @@ import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextReader } from "#context/key.js";
 import {
   AuthKey,
-  CompactionLimitKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
   InitiatorAuthKey,
@@ -14,6 +13,8 @@ import type { SessionFrame } from "#dynamic/definition.js";
 import { currentView } from "#harness/session-machine/current.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
+import { compactionThreshold } from "#harness/compaction/measure.js";
+import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
@@ -59,6 +60,11 @@ export function sessionFrameOf(
       schedule: readSessionSchedule(ctx),
     },
     turn: latestTurn(view),
-    view: snapshotOf(view, undefined, undefined, ctx.get(CompactionLimitKey)),
+    view: snapshotOf(
+      view,
+      undefined,
+      undefined,
+      compactionThreshold(getEffectiveModelSelection(ctx)?.reference.contextWindowTokens),
+    ),
   };
 }

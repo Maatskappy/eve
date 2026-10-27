@@ -8,11 +8,10 @@ import type {
   SessionAgent,
   SessionToolDefinition,
 } from "#harness/types.js";
-import { overflowThreshold } from "#harness/compaction/measure.js";
+import { compactionThreshold } from "#harness/compaction/measure.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
-const FALLBACK_COMPACTION_THRESHOLD = 100_000;
 
 /**
  * Creates the durable compaction configuration used by one harness session.
@@ -23,10 +22,7 @@ export function createCompactionConfig(
     readonly previous?: CompactionState;
   } = {},
 ): CompactionConfig {
-  const threshold =
-    input.contextWindowTokens === undefined
-      ? FALLBACK_COMPACTION_THRESHOLD
-      : overflowThreshold(input.contextWindowTokens);
+  const threshold = compactionThreshold(input.contextWindowTokens);
 
   return {
     ...input.previous,

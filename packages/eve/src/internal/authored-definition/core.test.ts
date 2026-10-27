@@ -85,7 +85,9 @@ describe("normalizeAgentDefinition", () => {
           },
           FAILURE_MESSAGE,
         ),
-      ).toThrow(`"compaction.${field}" was removed: pass \`model\` to \`fixedTail({ model })\``);
+      ).toThrow(
+        `"compaction.${field}" was removed: pass \`${field}\` to \`fixedTail({ ${field} })\``,
+      );
     },
   );
 

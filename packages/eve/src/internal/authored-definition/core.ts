@@ -325,7 +325,7 @@ function rejectRemovedAgentCompactionFields(value: unknown, message: string): vo
   for (const field of ["model", "modelContextWindowTokens"]) {
     if (record[field] !== undefined) {
       throw new Error(
-        `${message} "compaction.${field}" was removed: pass \`model\` to \`fixedTail({ model })\` in compaction.ts instead. See docs/concepts/compaction-strategies.`,
+        `${message} "compaction.${field}" was removed: pass \`${field}\` to \`fixedTail({ ${field} })\` in compaction.ts instead. See docs/concepts/compaction-strategies.`,
       );
     }
   }

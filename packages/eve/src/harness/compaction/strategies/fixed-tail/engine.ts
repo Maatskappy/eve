@@ -25,6 +25,11 @@ import type { CompactionConfig } from "#harness/types.js";
  */
 const KEPT_TAIL_TOKENS = 20_000;
 
+/** The session's compaction config, plus how many tokens of the latest conversation to keep. */
+export interface FixedTailConfig extends CompactionConfig {
+  readonly recentTokens?: number;
+}
+
 /**
  * Element type of a non-string `ModelMessage.content` array.
  */
@@ -136,7 +141,7 @@ function evaluateThreshold(
  */
 export async function compactMessages(
   messages: ModelMessage[],
-  config: CompactionConfig,
+  config: FixedTailConfig,
   summarize: CompactionSummarizer,
   forceSummary: boolean,
   historyInputTokenCount: number,
@@ -628,8 +633,8 @@ function assistantMessageText(message: ModelMessage): string {
     .trim();
 }
 
-function keptTailBudget(config: CompactionConfig): number {
-  return Math.min(KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
+function keptTailBudget(config: FixedTailConfig): number {
+  return Math.min(config.recentTokens ?? KEPT_TAIL_TOKENS, Math.floor(config.threshold / 2));
 }
 
 function selectRecentWindowSize(

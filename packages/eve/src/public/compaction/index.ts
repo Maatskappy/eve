@@ -11,6 +11,7 @@ export type { HarnessModelMessage } from "#harness/messages.js";
 export { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 export { createCompactionUserMessage } from "#harness/compaction/message.js";
 export { fixedTail } from "#harness/compaction/strategies/fixed-tail/index.js";
+export type { FixedTailOptions } from "#harness/compaction/strategies/fixed-tail/index.js";
 
 export type DefinedCompaction<T extends CompactionStrategy = CompactionStrategy> = T & {
   readonly [COMPACTION_DEFINITION_BRAND]: true;

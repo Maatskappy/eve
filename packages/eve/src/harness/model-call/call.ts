@@ -308,13 +308,14 @@ export class ModelCaller {
         abortSignal: config.abortSignal,
         auth: step.ctx?.get(AuthKey) ?? null,
         change: {
+          cause: requested,
           changeId: nextChangeId(projection),
           summaryRunId: nextRunId(projection),
           turnId: step.position().turnId,
         },
         ctx: step.ctx,
         emissionState: step.position(),
-        force: requested,
+        force: requested !== undefined,
         messages: [...prompt.messages],
         model: this.input.model,
         promptMessages: withClientContext(prompt),
@@ -336,7 +337,10 @@ export class ModelCaller {
       step.session = compaction.session;
       // A requested compaction that failed settled as failed and left the history as it was; the
       // call goes on unless the request is over the limit.
-      if (compaction.failure !== undefined && (compaction.overLimit === true || !requested)) {
+      if (
+        compaction.failure !== undefined &&
+        (compaction.overLimit === true || requested === undefined)
+      ) {
         throw compaction.failure.error;
       }
     } catch (error) {

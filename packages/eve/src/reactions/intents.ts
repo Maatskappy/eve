@@ -111,8 +111,14 @@ export function takeTurnFailure(ctx: ContextContainer | undefined): string | und
   return failure?.reason;
 }
 
-/** Takes the compaction hooks asked for, so the next model call compacts once. */
-export function takeCompactRequest(ctx: ContextContainer | undefined): boolean {
-  if (ctx === undefined) return false;
-  return takeIntents(ctx, (intent) => intent.type === "compact").length > 0;
+/**
+ * Takes the compaction hooks asked for, so the next model call compacts once. Returns the hook
+ * that asked first, or undefined when none did.
+ */
+export function takeCompactRequest(
+  ctx: ContextContainer | undefined,
+): { readonly hook: string } | undefined {
+  if (ctx === undefined) return undefined;
+  const [first] = takeIntents(ctx, (intent) => intent.type === "compact");
+  return first === undefined ? undefined : { hook: first.reactionId };
 }

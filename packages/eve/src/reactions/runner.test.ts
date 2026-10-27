@@ -577,8 +577,8 @@ describe("runReactions", () => {
     await commit(ctx, { written: written(2, "session.started") });
 
     expect((readReactionsState(ctx).intents ?? []).map(({ type }) => type)).toEqual(["compact"]);
-    expect(takeCompactRequest(ctx)).toBe(true);
-    expect(takeCompactRequest(ctx)).toBe(false);
+    expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
+    expect(takeCompactRequest(ctx)).toBeUndefined();
   });
 
   it("lets a hook read the latest call's input tokens and ask for a compaction", async () => {
@@ -591,11 +591,11 @@ describe("runReactions", () => {
     ]);
     const small = written(1, "session.started");
     await commit(ctx, { written: small });
-    expect(takeCompactRequest(ctx)).toBe(false);
+    expect(takeCompactRequest(ctx)).toBeUndefined();
 
     const view = { ...initialSessionProjection().view, lastInputTokens: 61_000 };
     await commit(ctx, { written: written(2, "session.started", {}, false, view) });
-    expect(takeCompactRequest(ctx)).toBe(true);
+    expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
   });
 
   it("keeps a compact request made during a turn, and a cancel does not take it", async () => {
@@ -613,7 +613,7 @@ describe("runReactions", () => {
     await commit(ctx, { cancelTurn: (cancel) => cancels.push(cancel), written: written(2) });
 
     expect(cancels).toHaveLength(1);
-    expect(takeCompactRequest(ctx)).toBe(true);
+    expect(takeCompactRequest(ctx)).toEqual({ hook: expect.any(String) });
   });
 
   it("throws for a command after the handler settled", async () => {

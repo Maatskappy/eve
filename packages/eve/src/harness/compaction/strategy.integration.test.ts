@@ -252,7 +252,7 @@ describe("compaction triggers", () => {
 
     expect(compact).toHaveBeenCalledOnce();
     expect(compact.mock.calls[0]?.[1]).toMatchObject({ forced: true });
-    expect(contextStarts(events)).toHaveLength(1);
+    expect(contextStarts(events)).toMatchObject([{ data: { cause: { hook: "hooks/trim.ts" } } }]);
     expect(readReactionsState(ctx).intents ?? []).toEqual([]);
   });
 });

@@ -27,6 +27,9 @@ export function transcriptToolCalls(transcript) {
       );
       return {
         name: event.tool.name,
+        // Claude Code's shell keeps its working directory between calls; Codex
+        // and OpenCode start each call in a fresh shell at the project root.
+        keepsCwd: /\/claude-code$/.test(transcript.agent ?? ""),
         command,
         paths: [args._extractedPath, args.path, args.filePath, args.file_path, args.pattern].filter(
           (value) => typeof value === "string",
@@ -42,13 +45,14 @@ export function transcriptToolCalls(transcript) {
  *
  * Agents often `cd` into the docs and then name pages relative to them, so
  * relative paths count while the shell sits in `eve/docs` (or `docs/<page>` in
- * the `eve` package root). The directory carries across calls because Claude
- * Code's shell keeps its working directory between commands.
+ * the `eve` package root). The directory carries across calls only for
+ * harnesses whose shell keeps it.
  */
 export function docsSequence(toolCalls) {
   const pages = [];
   let prefix = null;
   for (const call of toolCalls) {
+    if (!call.keepsCwd) prefix = null;
     const command = call.command ?? "";
     let start = 0;
     for (const cd of command.matchAll(cdPattern)) {
@@ -64,30 +68,35 @@ export function docsSequence(toolCalls) {
   return pages;
 }
 
-const cdPattern = /(?<=^|[\s;&|(])cd\s+(['"]?)([^\s'";&|)]*)\1/g;
-// Relative paths must start a shell word, so a path that merely ends in
+// Shell words start after whitespace, an operator, or a quote, so `cd` and
+// relative paths still match inside Codex's `bash -lc '...'` wrapper.
+const wordBoundary = String.raw`(?<=^|[\s'"=<>;&|(])`;
+const dirEnd = String.raw`(?:\*|$|[\s'"])`;
+const cdPattern = new RegExp(String.raw`${wordBoundary}cd\s+(['"]?)([^\s'";&|)]*)\1`, "g");
+const absolutePage = /eve\/docs\/([\w./-]*\.mdx?)/g;
+const absoluteDir = new RegExp(String.raw`eve/docs/([\w/-]+)/${dirEnd}`, "g");
+// A relative path must start a shell word, so a path that merely ends in
 // `<page>.md` (for example `/workspace/agent/x.md`) does not match.
-const wordStart = String.raw`(?<=^|[\s'"=<>;&|(])(?:\./)?`;
-const relativePage = new RegExp(String.raw`${wordStart}([\w-][\w./-]*\.mdx?)`, "g");
-const relativeDir = new RegExp(String.raw`${wordStart}([\w-][\w/-]*)/(?:\*|$|\s)`, "g");
+const relativePage = new RegExp(String.raw`${wordBoundary}(?:\./)?([\w-][\w./-]*\.mdx?)`, "g");
+const relativeDir = new RegExp(String.raw`${wordBoundary}(?:\./)?([\w-][\w/-]*)/${dirEnd}`, "g");
 
+/** Pages named in `text`, in the order they appear. */
 function segmentPages(text, prefix) {
-  const pages = [];
-  for (const match of text.matchAll(/eve\/docs\/([\w./-]*\.mdx?)/g)) pages.push(match[1]);
-  for (const match of text.matchAll(/eve\/docs\/([\w/-]+)\/(?:\*|$|\s)/g)) {
-    pages.push(`${match[1]}/*`);
-  }
-  if (prefix === null) return pages;
-  const relative = (path) => path.startsWith(prefix) && !path.includes("eve/docs/");
-  for (const match of text.matchAll(relativePage)) {
-    if (relative(match[1])) pages.push(match[1].slice(prefix.length));
-  }
-  for (const match of text.matchAll(relativeDir)) {
-    if (relative(match[1]) && match[1].length > prefix.length) {
-      pages.push(`${match[1].slice(prefix.length)}/*`);
+  const found = [];
+  for (const match of text.matchAll(absolutePage)) found.push([match.index, match[1]]);
+  for (const match of text.matchAll(absoluteDir)) found.push([match.index, `${match[1]}/*`]);
+  if (prefix !== null) {
+    const relative = (path) => path.startsWith(prefix) && !path.includes("eve/docs/");
+    for (const match of text.matchAll(relativePage)) {
+      if (relative(match[1])) found.push([match.index, match[1].slice(prefix.length)]);
+    }
+    for (const match of text.matchAll(relativeDir)) {
+      if (relative(match[1]) && match[1].length > prefix.length) {
+        found.push([match.index, `${match[1].slice(prefix.length)}/*`]);
+      }
     }
   }
-  return pages;
+  return found.sort((a, b) => a[0] - b[0]).map(([, page]) => page);
 }
 
 /** `""` inside the docs, `"docs/"` in the `eve` package root, otherwise `null`. */

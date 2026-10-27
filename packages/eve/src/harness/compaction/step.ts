@@ -118,8 +118,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       session: step.session,
     });
     step.session = resolvedModel.session;
-    const summaryModel =
-      step.session.agent.compactionModelReference ?? requireSessionModelReference(step.session);
+    const summaryModel = requireSessionModelReference(step.session);
     await step.publish(runStarted({ attempt: 0, modelId: summaryModel.id, runId }));
     const compacted = await maybeCompact({
       abortSignal: config.abortSignal,
@@ -309,41 +308,48 @@ async function compactOnce(input: {
     return { compacted: false, messages, session };
   }
 
-  const modelReference = requireSessionModelReference(session);
-  const compactionModelReference = session.agent.compactionModelReference ?? modelReference;
   // Resolved on the first summary, so a strategy that never summarizes needs no compaction model.
-  let summaryCall: Promise<SummaryCall & { readonly modelId: string }> | undefined;
-  const resolveSummaryCall = () => {
-    summaryCall ??= (async () => {
-      const model =
-        compactionModelReference === modelReference
-          ? input.model
-          : await input.resolveModel(compactionModelReference);
-      const profile = resolveModelProfile(model);
-      const providerOptions = resolveCallProviderOptions({
-        auth: input.auth,
-        profile,
-        providerOptions: compactionModelReference.providerOptions,
-        session,
-      }) as Parameters<typeof streamText>[0]["providerOptions"];
-      return {
-        abortSignal: input.abortSignal,
-        headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
-        model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
-        modelId: gatewayModelId(model) ?? "unknown",
-        providerOptions,
-        telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
-      };
-    })();
-    return summaryCall;
+  const summaryCalls = new Map<
+    string | LanguageModel | undefined,
+    Promise<SummaryCall & { readonly modelId: string }>
+  >();
+  const resolveSummaryCall = (choice: string | LanguageModel | undefined) => {
+    let call = summaryCalls.get(choice);
+    if (call === undefined) {
+      call = (async () => {
+        const model =
+          choice === undefined
+            ? input.model
+            : typeof choice === "string"
+              ? await input.resolveModel({ id: choice })
+              : choice;
+        const profile = resolveModelProfile(model);
+        const providerOptions = resolveCallProviderOptions({
+          auth: input.auth,
+          profile,
+          providerOptions: undefined,
+          session,
+        }) as Parameters<typeof streamText>[0]["providerOptions"];
+        return {
+          abortSignal: input.abortSignal,
+          headers: buildGatewayAttributionHeaders(profile, input.runtimeIdentity),
+          model: withGatewayTraceContext(model, profile, input.traceContextHeaders),
+          modelId: gatewayModelId(model) ?? "unknown",
+          providerOptions,
+          telemetry: input.telemetry && { ...input.telemetry, functionId: "eve.compaction" },
+        };
+      })();
+      summaryCalls.set(choice, call);
+    }
+    return call;
   };
   let summaryTelemetry: TelemetryOptions | undefined;
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   const { change } = input;
   // The summary run starts with its first call: `compactMessages` can keep the history without one.
   let summaryRunOpen = change.announced === true;
-  const summarize = async (prompt: CompactionSummaryPrompt) => {
-    const { modelId, ...call } = await resolveSummaryCall();
+  const summarize = async ({ model: choice, ...prompt }: CompactionSummaryPrompt) => {
+    const { modelId, ...call } = await resolveSummaryCall(choice);
     if (!summaryRunOpen) {
       summaryRunOpen = true;
       await publish([

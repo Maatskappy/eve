@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 
 import type { HarnessModelMessage } from "#harness/messages.js";
 
@@ -23,7 +23,12 @@ export interface CompactionContext {
   /** Estimates tokens the way the core measures the history. */
   estimateTokens(messages: readonly ModelMessage[]): number;
   /** Runs the compaction model over `messages`, billed to the session. */
-  summarize(input: { readonly messages: ModelMessage[]; readonly system: string }): Promise<string>;
+  summarize(input: {
+    readonly messages: ModelMessage[];
+    readonly system: string;
+    /** A gateway model id or a language model for this call; the session's model when omitted. */
+    readonly model?: string | LanguageModel;
+  }): Promise<string>;
 }
 
 /**

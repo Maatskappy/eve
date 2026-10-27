@@ -418,13 +418,21 @@ async function compactOnce(input: {
       };
       compactedOrdinary = await strategy.compact(cloneMessages(ordinary), context);
       validateCompactionResult(ordinary, compactedOrdinary);
-      // What the provider counted beyond the character estimate still applies to the result.
-      const undercount = Math.max(
-        0,
-        measured.inputTokens - (estimateTokens(ordinary) + context.requestEnvelopeTokens),
-      );
-      const resultTokens =
-        estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens + undercount;
+      // The provider's count beyond the character estimate belongs to the content the result still
+      // holds: an unchanged history keeps all of it (an identity strategy cannot slip under the
+      // limit), and removed content takes its share away.
+      const originalEstimate = estimateTokens(ordinary);
+      const resultEstimate = estimateTokens(compactedOrdinary);
+      const undercount =
+        originalEstimate === 0
+          ? 0
+          : Math.round(
+              Math.max(
+                0,
+                measured.inputTokens - (originalEstimate + context.requestEnvelopeTokens),
+              ) * Math.min(1, resultEstimate / originalEstimate),
+            );
+      const resultTokens = resultEstimate + context.requestEnvelopeTokens + undercount;
       if (exceedsLimit({ inputTokens: resultTokens, threshold: context.threshold })) {
         throw new CompactionOverLimitError(
           `The compacted history is still over the limit (about ${resultTokens} of ${context.threshold} tokens).`,

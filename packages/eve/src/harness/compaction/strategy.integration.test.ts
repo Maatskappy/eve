@@ -221,11 +221,7 @@ describe("compaction triggers", () => {
       },
       strategy: {
         compact: async (messages) =>
-          messages.map((message) => ({
-            role: message.role,
-            kind: "user",
-            content: message.content,
-          })) as never,
+          messages.map((message) => Object.fromEntries(Object.entries(message).reverse())) as never,
       },
     });
 

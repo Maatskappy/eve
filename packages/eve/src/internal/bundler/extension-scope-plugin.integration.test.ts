@@ -155,7 +155,7 @@ describe("extension-scope plugin (bundled)", () => {
       createExtensionScopePlugin([{ sourceRoot, mountId: "extensions/crm" }]),
       externalizeEvePlugin,
     ]);
-    expect(code).toContain('defineMountedState("extensions/crm", name, initial)');
+    expect(code).toContain('defineMountedState("extensions/crm", name, initial, options)');
     expect(code).toContain("eve/internal/mount-state");
   });
 
@@ -192,6 +192,6 @@ describe("extension-scope plugin (bundled)", () => {
       createFixedMountScopePlugin("extensions/crm"),
       externalizeEvePlugin,
     ]);
-    expect(code).toContain('defineMountedState("extensions/crm", name, initial)');
+    expect(code).toContain('defineMountedState("extensions/crm", name, initial, options)');
   });
 });

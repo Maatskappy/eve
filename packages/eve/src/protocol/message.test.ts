@@ -30,8 +30,8 @@ import { isEventId } from "#internal/testing/event-id.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
-  it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("26");
+  it("pins the stream version for native callback acknowledgements", () => {
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("27");
   });
 
   it.each(["21", "22", "23", "24"] as const)(

@@ -280,3 +280,12 @@ Stream-event hooks and channel adapter event handlers are structurally identical
 - [Context control](../concepts/context-control)
 - [Session context](../reference/typescript-api)
 - [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming)
+
+### Observe callback acknowledgement
+
+`session.waiting` marks the model's turn boundary. It does not mean a native
+completion callback has been acknowledged. Stream consumers that need that
+external result wait for `callback.delivered` with the original `callId`.
+The event follows successful callback delivery, including native redelivery,
+and contains no report, callback address, or credential. It is a transport
+receipt, not an authored lifecycle hook. For terminal sessions it precedes EOF.

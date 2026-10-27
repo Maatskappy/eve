@@ -105,7 +105,7 @@ describe("shim baking (shared)", () => {
       "\0eve-ext-scope:context:extensions%2Fcrm",
     );
     expect(shim?.code).toContain(`import { defineMountedState } from "eve/internal/mount-state"`);
-    expect(shim?.code).toContain(`defineMountedState("extensions/crm", name, initial)`);
+    expect(shim?.code).toContain(`defineMountedState("extensions/crm", name, initial, options)`);
   });
 
   it("passes through non-shim ids in load", () => {

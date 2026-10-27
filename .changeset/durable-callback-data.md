@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `setCallbackData` in `eve/context` so terminal hooks can attach an authored JSON report to the existing native completion callback. Reports commit with turn state and callback retries deliver them without repeating model execution. New turns clear prior data; completed, failed and cancelled turns support the same report payload.
+Add `setCallbackData` so terminal hooks can commit JSON reports for native completion callbacks. Explicit `defineState` cancellation preservation keeps external-effect facts available to terminal hooks; the `callback.delivered` stream receipt identifies an acknowledged result without repeating execution.

@@ -63,6 +63,7 @@ export interface ContextKeyCodec<T> {
 }
 
 export interface ContextKeyOptions<T> {
+  readonly onCancel?: "rollback" | "preserve";
   readonly codec?: ContextKeyCodec<T>;
 }
 
@@ -71,10 +72,12 @@ export interface ContextKeyOptions<T> {
  */
 export class ContextKey<T> {
   readonly name: string;
+  readonly onCancel: "rollback" | "preserve";
   readonly codec?: ContextKeyCodec<T>;
 
   constructor(name: string, options: ContextKeyOptions<T> = {}) {
     this.name = name;
+    this.onCancel = options.onCancel ?? "rollback";
     this.codec = options.codec;
 
     // The registry is last-write-wins and is re-populated per Nitro chunk, so a

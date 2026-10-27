@@ -240,7 +240,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const lines = screen.snapshot().trimEnd().split("\n");
-    expect(lines.at(-1)).toMatch(/^☰eve v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)? · session ses_0123456789$/u);
+    expect(lines.at(-1)).toMatch(
+      /^☰eve v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)? · session ses_0123456789$/u,
+    );
 
     // Repeated reports keep the latest id; a renderer that never received
     // one prints the bare tag.
@@ -290,7 +292,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/☰eve v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)? · Weather Agent · Run \/help for commands/u);
+    expect(snapshot).toMatch(
+      /☰eve v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)? · Weather Agent · Run \/help for commands/u,
+    );
     expect(snapshot).not.toContain("http://localhost:3000");
   });
 

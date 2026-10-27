@@ -1,3 +1,4 @@
+import { emitCallbackDeliveredStep } from "#execution/callback-delivered-step.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import { callbackDataProperties } from "#context/callback-data.js";
@@ -130,6 +131,10 @@ export async function runPreparedSession(
       caller: progress.caller,
       cursor,
       sessionWritable: boot.sessionWritable,
+      onCallerSettled() {
+        progress.caller = undefined;
+        progress.terminalEmitted = true;
+      },
     });
     progress.terminalEmitted = true;
     return result;
@@ -354,6 +359,11 @@ async function runSessionLoop(
           await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
+          if (caller.replyTo.kind === "callback")
+            await emitCallbackDeliveredStep({
+              sessionWritable: boot.sessionWritable,
+              callId: caller.callId,
+            });
         }
       } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
@@ -364,6 +374,13 @@ async function runSessionLoop(
             settled: action.settled,
             ...callbackDataProperties(cursor.serializedContext, progress.caller.callId),
           });
+          const caller = progress.caller;
+          progress.caller = undefined;
+          if (caller.replyTo.kind === "callback")
+            await emitCallbackDeliveredStep({
+              sessionWritable: boot.sessionWritable,
+              callId: caller.callId,
+            });
         }
         progress.caller = undefined;
       }

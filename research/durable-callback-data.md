@@ -19,3 +19,19 @@ Tests must cover the actual notification payload after serialization, completion
 The native Workflow integration covers notification retry without another model step, a later turn with the same call ID, cancellation, a callerless turn, and failed delivery after a successful report. The previous callerless binding accepted data incorrectly; clearing only inside the failing turn step delivered the previous report. Both mutations failed their observed-outcome assertions. The corrected native integration passes.
 
 108 focused unit checks, package TypeScript and the mechanical invariants pass. Published docs and import snippets pass. The fixture-owned eval exercises the public context export from an authored tool; its CI execution remains pending. Consumer integration and immutable package delivery are separate rollout checks.
+
+## Cancellation evidence
+
+Real consumer execution reproduced a cancellation after provider dispatch being
+reported as undispatched. Ordinary state rollback removed its accounting facts.
+`defineState(name, initial, { onCancel: "preserve" })` retains explicitly selected
+slots through cooperative cancellation, so terminal hooks can author an accurate
+report. Ordinary state and history still restore the completed checkpoint.
+
+## Observing delivery
+
+The synchronous consumer can reach `session.waiting` before native notification
+finishes. `callback.delivered` identifies the acknowledged `callId` on the same
+stream. A separate publication step follows notification, so a stream write
+retry does not repeat an acknowledged HTTP request. Callback-bearing terminal
+streams remain open through that publication. Ordinary turn boundaries stay unchanged.

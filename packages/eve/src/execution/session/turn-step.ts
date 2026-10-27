@@ -1,3 +1,4 @@
+import { SessionCallbackKey } from "#context/keys.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -536,7 +537,8 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     stepResult = { ...stepResult, session: aliased };
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
-    if (durableResult.action === "done") await publisher.writer.close();
+    if (durableResult.action === "done" && ctx.get(SessionCallbackKey) === undefined)
+      await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
     publisher.writer.release();

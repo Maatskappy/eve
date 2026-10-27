@@ -28,7 +28,9 @@ jobs:
       - run: pnpm guard:invariants
       - run: pnpm docs:check
       - name: Verify native callback lifecycle
-        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/execution/session/entry.integration.test.ts -t 'delivers committed callback data'
+        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/execution/session/entry.integration.test.ts -t 'committed callback data|retired session|acknowledgement publication fails'
+      - name: Verify mounted extension context
+        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/compiler/mounted-extension.integration.test.ts -t 'keeps state independent'
       - name: Verify authored public API
         env:
           EVE_E2E_MODEL: mock

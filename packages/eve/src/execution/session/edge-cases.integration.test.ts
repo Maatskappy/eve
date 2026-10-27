@@ -264,7 +264,7 @@ interface Session {
     label: string,
     matches: (event: SessionStreamEvent) => boolean,
   ) => Promise<Stage>;
-  readonly send: (message: string) => Promise<void>;
+  readonly send: (message: string, auth?: SessionAuthContext) => Promise<void>;
   readonly forward: (callId: string, message: string) => Promise<void>;
   readonly answer: (
     interactionId: string,
@@ -457,9 +457,9 @@ async function withSession(
           });
         },
         next: (label) => read(label, stream.nextTurn()),
-        async send(message) {
+        async send(message, auth = ALICE) {
           await resumeHook(sessionInboxHookToken(continuationToken), {
-            auth: ALICE,
+            auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
             payload: { message },
@@ -1562,6 +1562,78 @@ describe("work delegated to a child session", () => {
     ).toMatchObject({ outcome: "completed", output: "Child deployed." });
     expect(ofType(events, "child.opened")).toHaveLength(1);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  // #4923: a typed answer to a relayed prompt is a message, so only the turn's
+  // own principal may answer it by text; another person's text waits for the
+  // turn to end instead of being forwarded to the child under alice's auth.
+  it.fails("keeps another principal's typed answer out of the turn that relays a child's prompt", async () => {
+    const seen: (readonly [string, string, unknown])[] = [];
+    const { events, ran } = await withSession(
+      "edge-child-foreign-typed-answer",
+      {
+        hooks: {
+          observe: defineHook({
+            events: {
+              "delivery.consumed"(event, ctx) {
+                const text = event.data.parts.find((part) => part.kind === "text")?.text;
+                // The child session runs the same hooks; only the parent's deliveries count.
+                if (text === undefined || text.includes("CHILD:")) return;
+                seen.push([text, event.data.turnId, ctx.session.auth.current?.principalId]);
+              },
+            },
+          }),
+        },
+        message: "Delegate the deploy.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:")) {
+            return called("deploy")
+              ? "Child deployed."
+              : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
+          }
+          if (!called("agent"))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          if (!called("eve__task_wait"))
+            return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
+          return "The child is done.";
+        }),
+        // Bob may press the child's approve button; his typed text is still his own message.
+        tools: [{ allowOtherResponders: true, approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("relayed approval pause");
+        // "1" names the first option, approve, as well as its id does.
+        await session.send("1", BOB);
+        await session.send("approve");
+        await session.until(
+          "Alice's answer runs the child's call",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+        // Only Alice's text answered; Bob's is still waiting for its own turn.
+        expect(seen).toEqual([
+          ["Delegate the deploy.", "turn_0", "alice"],
+          ["approve", "turn_0", "alice"],
+        ]);
+        await session.next("Bob's turn");
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    expect(seen).toEqual([
+      ["Delegate the deploy.", "turn_0", "alice"],
+      ["approve", "turn_0", "alice"],
+      ["1", "turn_1", "bob"],
+    ]);
   });
 
   it("tells the person work is underway while a child works, then reports its result", async () => {

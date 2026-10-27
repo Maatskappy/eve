@@ -36,7 +36,7 @@ export default defineHook({
 
 `ctx.view.context.inputTokens` is the input tokens of the latest settled model call.
 
-If a strategy's result still leaves the request over the guard, eve runs the default `fixedTail()` once on it, and that result must fit.
+If a strategy's result is still over the guard, or drops a tool call or result, the compaction fails: a requested one leaves the history as it was and the turn goes on, and one the guard forced ends the session with `COMPACTION_FAILED`.
 
 ## What eve does and what the strategy does
 

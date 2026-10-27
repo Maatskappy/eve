@@ -1,4 +1,5 @@
 import type { TurnCaller } from "#channel/types.js";
+import { callbackDataProperties } from "#context/callback-data.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -74,6 +75,7 @@ export async function finalizeSession(
       lifecycle: "terminal",
       sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
       settled: notification,
+      ...callbackDataProperties(context.cursor.serializedContext, context.caller.callId),
     });
   }
   return outcome.kind === "done"

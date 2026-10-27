@@ -18,4 +18,5 @@ export type {
   SessionTurn,
 } from "#context/accessors.js";
 export { defineState, type StateHandle } from "#public/definitions/state.js";
+export { setCallbackData } from "#public/definitions/callback-data.js";
 export type { SessionContext } from "#public/definitions/callback-context.js";

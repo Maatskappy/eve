@@ -192,6 +192,40 @@ eve logs a thrown or rejected handler with the hook slug, subscription, event ty
 
 A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.settled`, or `agent.started` event fails, the workflow runtime retries the publishing step, which can publish the event again.
 
+## Attach data to a completion callback
+
+When a turn has a native caller callback, a terminal hook can attach a JSON
+report with `setCallbackData` from `eve/context`:
+
+```ts title="agent/hooks/completion-report.ts"
+import { setCallbackData } from "eve/context";
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    "turn.completed"() {
+      setCallbackData({ report: "completed" });
+    },
+    "turn.cancelled"() {
+      setCallbackData({ report: "cancelled" });
+    },
+  },
+});
+```
+
+The value commits with the turn's durable context. The existing post-turn
+notification step sends it as `applicationData` alongside the normal callback
+payload. If callback delivery fails, eve retries that notification with the same
+report, without repeating model execution. The setter performs no external IO.
+This avoids a separate report-storage write between inference and notification.
+
+Use this in terminal hooks, including `turn.failed` when a failure report is
+needed. Data belongs to the current callback call ID and is cleared when a new
+turn is delivered. Calls outside managed execution or without a native callback
+throw. Existing callbacks without authored data retain their payload. Application
+data does not alter the model's output, and receivers still authenticate callbacks
+and validate their reports before applying effects.
+
 ## Cancel the running turn from a hook
 
 Call `ctx.cancel()` when a hook finds that the turn cannot proceed. For example, a `turn.started` hook that cannot load the caller's credentials can stop the turn before the model runs, instead of letting every tool call fail:

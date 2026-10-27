@@ -8,7 +8,7 @@ import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/ke
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
-import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { bindTurnCallerContext } from "#subagents/turn-caller-context.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];

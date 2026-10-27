@@ -254,8 +254,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   config: { current: 1, supported: [1], dropped: {} },
   state: {
-    current: 9,
-    supported: [1, 2, 3, 4, 5, 7, 9],
+    current: 10,
+    supported: [1, 2, 3, 4, 5, 7, 9, 10],
     dropped: {
       6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       8: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",

@@ -26,7 +26,10 @@ import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineInteractiveAuthorization } from "#shared/connection-types.js";
-import { SessionTitleKey } from "#context/keys.js";
+import { SessionTitleKey, SessionCallbackKey } from "#context/keys.js";
+import { setCallbackData } from "#public/context/index.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
+import { defaultDeliverResult } from "#channel/adapter.js";
 import {
   buildSerializedContext,
   captureEvents,
@@ -43,6 +46,179 @@ afterEach(() => {
 });
 
 describe("workflowEntry integration", () => {
+  it("delivers committed callback data after a transport retry and isolates later turns", async () => {
+    const callback = {
+      callId: "report-call",
+      subagentName: "reporter",
+      token: "report-token",
+      url: "https://consumer.example/eve/v1/callback/report-token",
+    };
+    const bodies: Record<string, unknown>[] = [];
+    const notifications = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ];
+    notifications.push(Promise.withResolvers<void>(), Promise.withResolvers<void>());
+    let modelSteps = 0;
+    let callerlessError: unknown;
+    const reportChannel = defineChannel({
+      state: {},
+      routes: [POST("/report-proof", async () => new Response("ok"))],
+      deliver(payload) {
+        if (payload.message === "Alice sends a request whose delivery fails.")
+          throw new Error("Controlled delivery failure");
+        return defaultDeliverResult(payload);
+      },
+    });
+    const fetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, options) => {
+        if (String(url) !== callback.url) return fetch(url, options);
+        bodies.push(JSON.parse(String(options?.body)));
+        if (bodies.length === 1) return new Response(null, { status: 503 });
+        notifications[bodies.length - 2]?.resolve();
+        return new Response(null, { status: 200 });
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: { name: "callback-data" },
+      modules: [
+        {
+          logicalPath: "channels/report.ts",
+          loadNamespace: async () => ({ default: reportChannel }),
+        },
+        {
+          logicalPath: "hooks/report.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "step.completed"() {
+                  modelSteps += 1;
+                },
+                "turn.started"(_event, ctx) {
+                  if (ctx.session.turn.sequence === 2) ctx.cancel();
+                },
+                "turn.completed"(_event, ctx) {
+                  if (ctx.session.turn.sequence === 0 || ctx.session.turn.sequence === 4)
+                    setCallbackData({ cost: "0.0007", outcome: "completed" });
+                  if (ctx.session.turn.sequence === 3) {
+                    try {
+                      setCallbackData({ outcome: "callerless" });
+                    } catch (error) {
+                      callerlessError = error;
+                    }
+                  }
+                },
+                "turn.cancelled"() {
+                  setCallbackData({ outcome: "cancelled" });
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    try {
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Alice requests a short greeting." },
+            serializedContext: {
+              ...buildSerializedContext({ channelKind: "channel:report" }),
+              [SessionCallbackKey.name]: callback,
+            },
+          },
+        ]);
+        const stream = captureTurnEvents(run);
+        try {
+          await withTimeout(notifications[0]!.promise, "callback retry");
+          await stream.nextTurn();
+          expect(modelSteps).toBe(1);
+          expect(bodies[1]).toEqual(bodies[0]);
+          expect(bodies[1]?.applicationData).toEqual({ cost: "0.0007", outcome: "completed" });
+          const workflowRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+          });
+          const caller = {
+            callId: callback.callId,
+            subagentName: callback.subagentName,
+            replyTo: { kind: "callback" as const, token: callback.token, url: callback.url },
+          };
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller,
+              payload: { message: "Alice requests another greeting." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[1]!.promise, "second callback");
+          await stream.nextTurn();
+          expect(modelSteps).toBe(2);
+          expect(bodies[2]).not.toHaveProperty("applicationData");
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller: { ...caller, callId: "cancelled-call" },
+              payload: { message: "Alice cancels this request before the model starts." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[2]!.promise, "cancelled callback");
+          await stream.nextTurn();
+          expect(modelSteps).toBe(2);
+          expect(bodies[3]).toMatchObject({
+            callId: "cancelled-call",
+            applicationData: { outcome: "cancelled" },
+          });
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              payload: { message: "Bob asks for a greeting without a callback." },
+            },
+            sessionId: run.runId,
+          });
+          await stream.nextTurn();
+          expect(callerlessError).toBeInstanceOf(Error);
+          expect(String(callerlessError)).toContain("no native completion callback");
+          expect(bodies).toHaveLength(4);
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller,
+              payload: { message: "Alice requests a recorded greeting." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[3]!.promise, "recorded greeting");
+          await stream.nextTurn();
+          expect(bodies[4]?.applicationData).toEqual({ cost: "0.0007", outcome: "completed" });
+          await workflowRuntime.dispatchSession({
+            command: {
+              kind: "send",
+              caller,
+              payload: { message: "Alice sends a request whose delivery fails." },
+            },
+            sessionId: run.runId,
+          });
+          await withTimeout(notifications[4]!.promise, "failed delivery callback");
+          expect(bodies[5]).toMatchObject({ callId: caller.callId, kind: "turn.failed" });
+          expect(bodies[5]).not.toHaveProperty("applicationData");
+          expect(modelSteps).toBe(4);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;

@@ -1,5 +1,6 @@
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import { callbackDataProperties } from "#context/callback-data.js";
 import {
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
@@ -345,7 +346,11 @@ async function runSessionLoop(
         const { caller } = progress;
         const settled = await settleCancelledTurn(caller !== undefined);
         if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
+          const notification = {
+            caller,
+            sessionId: boot.sessionId,
+            ...callbackDataProperties(cursor.serializedContext, caller.callId),
+          };
           await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
@@ -357,6 +362,7 @@ async function runSessionLoop(
             lifecycle: "parked",
             sessionId: boot.sessionId,
             settled: action.settled,
+            ...callbackDataProperties(cursor.serializedContext, progress.caller.callId),
           });
         }
         progress.caller = undefined;

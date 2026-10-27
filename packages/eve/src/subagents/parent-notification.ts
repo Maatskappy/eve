@@ -6,16 +6,12 @@ import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { SessionCallbackKey } from "#context/keys.js";
-import {
-  isSubagentAdapterState,
-  SUBAGENT_ADAPTER_KIND,
-  type SubagentAdapterState,
-} from "#subagents/adapter-state.js";
+import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { createLogger } from "#internal/logging.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { parseJsonValue } from "#shared/json.js";
+import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
@@ -54,6 +50,7 @@ export async function notifyTurnCallerStep(input: {
   readonly lifecycle: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly settled: SettledTurnNotification;
+  readonly applicationData?: JsonValue;
 }): Promise<void> {
   "use step";
 
@@ -71,6 +68,7 @@ export async function notifyTurnCallerStep(input: {
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
       result,
+      applicationData: input.applicationData,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
     });
@@ -85,6 +83,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   readonly caller: TurnCaller;
   readonly sessionId: string;
   readonly usage?: TokenUsage;
+  readonly applicationData?: JsonValue;
 }): Promise<void> {
   "use step";
 
@@ -110,6 +109,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
       result,
+      applicationData: input.applicationData,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
     });
@@ -202,84 +202,24 @@ export async function resolveInitialTurnCallerStep(input: {
   };
 }
 
-/**
- * Points child event forwarding at the caller that owns the next accepted turn,
- * so the turn's input requests and progress reach that caller and not the
- * previous one.
- */
-export function bindTurnCallerContext(
-  caller: TurnCaller | undefined,
-  serializedContext: Record<string, unknown>,
-): Record<string, unknown> {
-  if (caller === undefined) return serializedContext;
-  if (caller.replyTo.kind === "callback") {
-    const callback = {
-      callId: caller.callId,
-      subagentName: caller.subagentName,
-      token: caller.replyTo.token,
-      url: caller.replyTo.url,
-    };
-    return { ...serializedContext, [SessionCallbackKey.name]: callback };
-  }
-
-  const adapter = serializedContext[ChannelKey.name];
-  if (
-    adapter === null ||
-    typeof adapter !== "object" ||
-    Reflect.get(adapter, "kind") !== SUBAGENT_ADAPTER_KIND ||
-    !isSubagentAdapterState(Reflect.get(adapter, "state"))
-  ) {
-    throw new Error("Delegated local turn is missing its subagent adapter binding.");
-  }
-  const state = Reflect.get(adapter, "state") as SubagentAdapterState;
-  const nextState: SubagentAdapterState = {
-    ...state,
-    callId: caller.callId,
-    parentContinuationToken: caller.replyTo.token,
-    subagentName: caller.subagentName,
-  };
-  return {
-    ...serializedContext,
-    [ChannelKey.name]: {
-      ...adapter,
-      state: nextState,
-    },
-  };
-}
-
 async function postSettledTurnCallback(input: {
   readonly result: RuntimeSubagentChildResult;
   /** Informational on the wire (tracing); the receiver never verifies it. */
   readonly sessionId: string;
   readonly url: string;
+  readonly applicationData?: JsonValue;
 }): Promise<void> {
-  const { sessionId } = input;
-  if (input.result.isError === true) {
-    await postCallbackPayload({
-      payload: {
-        callId: input.result.callId,
-        error: input.result.output,
-        kind: "turn.failed",
-        outcome: input.result.outcome,
-        sessionId,
-        subagentName: input.result.subagentName,
-      },
-      url: input.url,
-    });
-    return;
-  }
-
-  await postCallbackPayload({
-    payload: {
-      callId: input.result.callId,
-      kind: "turn.completed",
-      outcome: input.result.outcome,
-      output: input.result.output,
-      sessionId,
-      subagentName: input.result.subagentName,
-    },
-    url: input.url,
-  });
+  const payload: Record<string, unknown> = {
+    callId: input.result.callId,
+    kind: input.result.isError === true ? "turn.failed" : "turn.completed",
+    outcome: input.result.outcome,
+    sessionId: input.sessionId,
+    subagentName: input.result.subagentName,
+  };
+  if (input.result.isError === true) payload.error = input.result.output;
+  else payload.output = input.result.output;
+  if (input.applicationData !== undefined) payload.applicationData = input.applicationData;
+  await postCallbackPayload({ payload, url: input.url });
 }
 
 async function postCallbackPayload(input: {

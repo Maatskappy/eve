@@ -2073,4 +2073,61 @@ describe("turns parked on their own prompt", () => {
       ["bob here", "turn_2", "bob"],
     ]);
   });
+
+  // A turn waiting on its own tool approval gives way to its person's message,
+  // but not to anyone else's: bob's waits for alice's turn to end.
+  it("keeps another principal's message out of a turn waiting on its own approval", async () => {
+    const seen: (readonly [string, string, unknown])[] = [];
+    const { events, ran } = await withSession(
+      "edge-approval-foreign-message",
+      {
+        hooks: {
+          observe: defineHook({
+            events: {
+              "delivery.consumed"(event, ctx) {
+                const text = event.data.parts.find((part) => part.kind === "text")?.text;
+                seen.push([
+                  text ?? "(answer)",
+                  event.data.turnId,
+                  ctx.session.auth.current?.principalId,
+                ]);
+              },
+              "turn.settled"(event, ctx) {
+                seen.push([event.type, event.data.turnId, ctx.session.auth.current?.principalId]);
+              },
+            },
+          }),
+        },
+        message: "Deploy.",
+        model: scriptedModel(({ results }) =>
+          results.length === 0 ? [{ toolName: "deploy", toolCallId: "call_a" }] : "Done.",
+        ),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("the approval");
+        const [approval] = session.approvals();
+        await session.send("bob here", BOB);
+        await session.answer(approval!, "approve");
+        await session.until(
+          "the approved turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+        // Bob's message runs as his own turn, which asks for its own approval.
+        await session.until(
+          "Bob's approval",
+          (event) => event.type === "turn.paused" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+    expect(seen).toEqual([
+      ["Deploy.", "turn_0", "alice"],
+      ["(answer)", "turn_0", "alice"],
+      ["turn.settled", "turn_0", "alice"],
+      ["bob here", "turn_1", "bob"],
+    ]);
+  });
 });

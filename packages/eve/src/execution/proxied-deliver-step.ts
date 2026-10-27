@@ -141,9 +141,10 @@ async function routeProxiedDeliver(
           return askedTurn(row) !== undefined;
         });
       const turnId = askedIn === undefined ? undefined : askedTurn(askedIn);
+      // The text joins the asking turn even when the payload leaves fields for this session.
+      if (message !== undefined && turnId !== undefined) typedAnswer = true;
       if (routed.forSelf === undefined && turnId !== undefined) {
         answerDeliveryIds.push(...payloadMetadata.map((metadata) => metadata.deliveryId));
-        if (message !== undefined) typedAnswer = true;
       }
       for (const metadata of payloadMetadata) {
         // Input left for this session goes on to its turn, which admits nothing twice.

@@ -27,6 +27,16 @@ interface Snapshot {
 const KEY = Symbol.for("eve.session-view-registry.v1");
 type Shared = typeof globalThis & { [KEY]?: WeakMap<SessionView, Snapshot> };
 const snapshots = ((globalThis as Shared)[KEY] ??= new WeakMap());
+const contexts = new WeakMap<object, SessionView["context"]>();
+// `context` lives on the prototype so a snapshot has no own keys: it stays an opaque handle.
+const snapshotPrototype = Object.freeze(
+  Object.defineProperty({}, "context", {
+    enumerable: true,
+    get(this: object) {
+      return contexts.get(this);
+    },
+  }),
+);
 const immutableRows = new WeakMap<object, object>();
 
 function immutable<T>(value: T): T {
@@ -65,9 +75,8 @@ export function snapshotOf(
   pending: readonly ReceivedEvent[] = [],
   limit?: number,
 ): SessionView {
-  const snapshot = Object.freeze({
-    context: Object.freeze({ inputTokens: view.lastInputTokens, limit }),
-  }) as SessionView;
+  const snapshot = Object.freeze(Object.create(snapshotPrototype)) as SessionView;
+  contexts.set(snapshot, Object.freeze({ inputTokens: view.lastInputTokens, limit }));
   snapshots.set(snapshot, {
     tables: Object.freeze({
       position: view.position,

@@ -267,13 +267,13 @@ async function compactOnce(input: {
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
   readonly strategy?: CompactionStrategy;
-  /** The strategy's name when a hook asked for a named one. */
-  readonly strategyName?: string;
   readonly telemetry?: TelemetryOptions;
   readonly prepareTelemetry?: (runId: string) => TelemetryOptions | undefined;
   readonly traceContextHeaders?: () => Record<string, string> | undefined;
 }): Promise<{
   readonly compacted: boolean;
+  /** The request was over the limit, so a failed compaction cannot let the model call go on. */
+  readonly overLimit?: boolean;
   /** The summary failed; `session` still counts the summary calls that finished. */
   readonly failure?: { readonly error: unknown };
   readonly messages: HarnessModelMessage[];
@@ -303,8 +303,8 @@ async function compactOnce(input: {
     requestEnvelopeTokens: requestEnvelopeTokens + protectedTokens,
     threshold: session.compaction.threshold,
   };
-  const needsSummary =
-    input.force === true || (projectedPromptMessages.length > 0 && exceedsLimit(measured));
+  const overLimit = projectedPromptMessages.length > 0 && exceedsLimit(measured);
+  const needsSummary = input.force === true || overLimit;
   if (!needsSummary) {
     return { compacted: false, messages, session };
   }
@@ -376,7 +376,6 @@ async function compactOnce(input: {
         cause: change.cause,
         changeId: change.changeId,
         kind: "compaction",
-        ...(input.strategyName !== undefined && { strategy: input.strategyName }),
         trigger: input.force === true ? undefined : { inputTokens: measured.inputTokens },
         turnId: change.turnId,
       }),
@@ -407,20 +406,12 @@ async function compactOnce(input: {
         summarize,
       };
       compactedOrdinary = await strategy.compact([...ordinary], context);
-      // The core's guard: a strategy's result that still leaves the request over the limit is
-      // compacted once more by the default, which must fit.
-      if (
-        input.strategy !== undefined &&
-        exceedsLimit({
-          inputTokens: estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens,
-          threshold: context.threshold,
-        })
-      ) {
-        compactedOrdinary = await fixedTail().compact([...compactedOrdinary], {
-          ...context,
-          forced: false,
-          inputTokens: estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens,
-        });
+      validateCompactionResult(ordinary, compactedOrdinary);
+      const resultTokens = estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens;
+      if (exceedsLimit({ inputTokens: resultTokens, threshold: context.threshold })) {
+        throw new CompactionOverLimitError(
+          `The compacted history is still over the limit (about ${resultTokens} of ${context.threshold} tokens).`,
+        );
       }
     }
   } catch (error) {
@@ -440,7 +431,7 @@ async function compactOnce(input: {
         ...(usage !== undefined && { spent: { runId, usage } }),
       }),
     );
-    return { compacted: false, failure, messages: input.messages, session };
+    return { compacted: false, failure, messages: input.messages, overLimit, session };
   }
   messages = validateHarnessModelMessages(compactedOrdinary);
 
@@ -510,4 +501,53 @@ async function streamCompactionSummary(
     text,
     usage: extractTokenUsageDelta({ costUsd: extractGatewayCostUsd(providerMetadata), usage }),
   };
+}
+
+/**
+ * A strategy's result must keep every tool call beside its result, keep the calls the turn is
+ * waiting on, and start with a user message, or the next provider call rejects the history.
+ */
+function validateCompactionResult(
+  original: readonly HarnessModelMessage[],
+  result: readonly HarnessModelMessage[],
+): void {
+  const calls = (messages: readonly HarnessModelMessage[]) => toolPartIds(messages, "tool-call");
+  const results = (messages: readonly HarnessModelMessage[]) =>
+    toolPartIds(messages, "tool-result");
+  const keptCalls = calls(result);
+  const keptResults = results(result);
+  for (const id of keptCalls) {
+    if (!keptResults.has(id) && results(original).has(id)) {
+      throw new Error(`The compacted history dropped the result of tool call ${id}.`);
+    }
+  }
+  for (const id of keptResults) {
+    if (!keptCalls.has(id)) {
+      throw new Error(`The compacted history kept the result of tool call ${id} without its call.`);
+    }
+  }
+  const waiting = [...calls(original)].filter((id) => !results(original).has(id));
+  for (const id of waiting) {
+    if (!keptCalls.has(id)) {
+      throw new Error(`The compacted history dropped tool call ${id}, which is still waiting.`);
+    }
+  }
+  const first = result[0];
+  if (first !== undefined && first.role !== "user") {
+    throw new Error("The compacted history must start with a user message.");
+  }
+}
+
+function toolPartIds(
+  messages: readonly HarnessModelMessage[],
+  type: "tool-call" | "tool-result",
+): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (typeof message.content === "string") continue;
+    for (const part of message.content) {
+      if (part.type === type && "toolCallId" in part) ids.add(part.toolCallId);
+    }
+  }
+  return ids;
 }

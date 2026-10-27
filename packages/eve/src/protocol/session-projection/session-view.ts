@@ -14,18 +14,6 @@ export interface SessionView {
   };
 }
 
-/** Walks runs from the newest, so it costs the calls since the latest settled one. */
-function latestInputTokens(runs: Tables["runs"]): number | undefined {
-  const ids = Object.keys(runs);
-  for (let index = ids.length - 1; index >= 0; index--) {
-    const run = runs[ids[index]!];
-    if (run?.step !== undefined && run.status === "settled" && run.usage !== undefined) {
-      return run.usage.inputTokens;
-    }
-  }
-  return undefined;
-}
-
 interface Snapshot {
   readonly tables: Tables;
   readonly previews: SessionPreviews;
@@ -74,14 +62,8 @@ export function snapshotOf(
   previews: SessionPreviews = emptyPreviews(),
   pending: readonly ReceivedEvent[] = [],
 ): SessionView {
-  let inputTokens: { readonly value: number | undefined } | undefined;
   const snapshot = Object.freeze({
-    context: Object.freeze({
-      get inputTokens() {
-        inputTokens ??= { value: latestInputTokens(snapshotState(snapshot).tables.runs) };
-        return inputTokens.value;
-      },
-    }),
+    context: Object.freeze({ inputTokens: view.lastInputTokens }),
   }) as SessionView;
   snapshots.set(snapshot, {
     tables: Object.freeze({
@@ -99,6 +81,7 @@ export function snapshotOf(
       turns: table(view.turns),
       usage: immutable(view.usage),
       selection: immutable(view.selection),
+      lastInputTokens: view.lastInputTokens,
     }),
     previews: Object.freeze({ calls: table(previews.calls), parts: table(previews.parts) }),
     pending: immutable(pending),

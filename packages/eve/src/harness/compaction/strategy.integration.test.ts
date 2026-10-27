@@ -5,6 +5,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import type { CompactionStrategy } from "#harness/compaction/strategy.js";
 import { eventsOf } from "#harness/publication.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -102,36 +103,75 @@ describe("compaction triggers", () => {
     expect(events.some((event) => event.type === "session.ended")).toBe(false);
   });
 
-  it("runs the default strategy once when a strategy's result is still over the limit", async () => {
-    let summaries = 0;
-    const model = new MockLanguageModelV3({
-      doStream: async ({ prompt }) => {
-        if (isSummaryCall(prompt)) {
-          summaries++;
-          return textStream("Earlier notes, summarized.", 120);
-        }
-        return textStream("Done.", 500);
-      },
-    });
-    const compact = vi.fn<CompactionStrategy["compact"]>(async (history) => history);
-
+  it("fails the step when the strategy's result is still over the limit", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const doStream = vi.fn(async () => textStream("Done.", 500));
     const events = await run({
       message: "Please continue.",
-      model,
+      model: new MockLanguageModelV3({ doStream }),
       session: session(
         [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
         2_000,
       ),
-      strategy: { compact },
+      strategy: { compact: async (history) => history },
     });
 
-    expect(compact).toHaveBeenCalledOnce();
-    expect(summaries).toBe(1);
-    expect(contextStarts(events)).toHaveLength(1);
-    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
-      { data: { outcome: "completed" } },
-    ]);
+    expect(doStream).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      type: "session.ended",
+      data: { outcome: "failed", error: { code: "COMPACTION_FAILED" } },
+    });
   });
+
+  it.each([
+    ["throws", async (): Promise<never> => Promise.reject(new Error("strategy broke"))],
+    [
+      "drops a tool result",
+      async (history: readonly HarnessModelMessage[]) =>
+        history.filter(({ role }) => role !== "tool"),
+    ],
+  ])(
+    "settles a requested compaction as failed when the strategy %s, and the turn goes on",
+    async (_name, compact) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const ctx = new ContextContainer();
+      writeReactionsState(ctx, {
+        ...readReactionsState(ctx),
+        intents: [{ occurrence: "o", reactionId: "hooks/trim.ts", type: "compact" }],
+      });
+      const history: HarnessSession["history"] = [
+        { content: "Look it up.", kind: "user", role: "user" },
+        {
+          content: [{ input: {}, toolCallId: "c1", toolName: "lookup", type: "tool-call" }],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "text", value: "Two cases." },
+              toolCallId: "c1",
+              toolName: "lookup",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ];
+      const events = await run({
+        ctx,
+        message: "Thanks.",
+        model: new MockLanguageModelV3({ doStream: async () => textStream("Done.", 500) }),
+        session: session(history, 100_000),
+        strategy: { compact },
+      });
+
+      expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+        { data: { outcome: "failed" } },
+      ]);
+      expect(events.map(({ type }) => type)).toContain("turn.settled");
+      expect(events.some((event) => event.type === "session.ended")).toBe(false);
+    },
+  );
 
   it("compacts before the next model call when a hook asked, and only once", async () => {
     const model = new MockLanguageModelV3({

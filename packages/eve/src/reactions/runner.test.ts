@@ -30,7 +30,13 @@ import { MEMOS_CAP, forgetSessionLive, memoBytes, readReactionsState, slotsOf } 
 
 const user = (content: string): ModelMessage => ({ content, role: "user" });
 
-function written(line: number, type = "turn.started", data: object = {}, progress = false) {
+function written(
+  line: number,
+  type = "turn.started",
+  data: object = {},
+  progress = false,
+  view: object = initialSessionProjection().view,
+) {
   return [
     {
       event: {
@@ -40,7 +46,7 @@ function written(line: number, type = "turn.started", data: object = {}, progres
       },
       position: { index: 0, line },
       progress,
-      view: initialSessionProjection().view,
+      view,
     },
   ] as never;
 }
@@ -573,6 +579,23 @@ describe("runReactions", () => {
     expect((readReactionsState(ctx).intents ?? []).map(({ type }) => type)).toEqual(["compact"]);
     expect(takeCompactRequest(ctx)).toBe(true);
     expect(takeCompactRequest(ctx)).toBe(false);
+  });
+
+  it("lets a hook read the latest call's input tokens and ask for a compaction", async () => {
+    const ctx = session(noTools, [
+      hook("trim", {
+        "*": (_event, ctx) => {
+          if ((ctx.view.context.inputTokens ?? 0) > 60_000) ctx.compact();
+        },
+      }),
+    ]);
+    const small = written(1, "session.started");
+    await commit(ctx, { written: small });
+    expect(takeCompactRequest(ctx)).toBe(false);
+
+    const view = { ...initialSessionProjection().view, lastInputTokens: 61_000 };
+    await commit(ctx, { written: written(2, "session.started", {}, false, view) });
+    expect(takeCompactRequest(ctx)).toBe(true);
   });
 
   it("keeps a compact request made during a turn, and a cancel does not take it", async () => {

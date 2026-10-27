@@ -334,7 +334,11 @@ export class ModelCaller {
         traceContextHeaders: step.instrumentation?.gatewayTraceContextHeaders,
       });
       step.session = compaction.session;
-      if (compaction.failure !== undefined) throw compaction.failure.error;
+      // A requested compaction that failed settled as failed and left the history as it was; the
+      // call goes on unless the request is over the limit.
+      if (compaction.failure !== undefined && (compaction.overLimit === true || !requested)) {
+        throw compaction.failure.error;
+      }
     } catch (error) {
       this.compactionFailure = { error };
       throw error;

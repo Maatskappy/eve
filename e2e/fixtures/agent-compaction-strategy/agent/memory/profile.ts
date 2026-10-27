@@ -8,13 +8,6 @@ export default defineMemory({
       async "turn.started"() {
         return { messages: [{ content: "PROFILE_VALUE=RECALLED", id: "profile" }] };
       },
-      async "compaction.completed"() {
-        return {
-          messages: [
-            { content: "PROFILE_RECALLED_AFTER_COMPACTION=YES", id: "profile-compaction" },
-          ],
-        };
-      },
     },
   },
   scope: byPrincipal,

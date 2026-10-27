@@ -25,7 +25,7 @@ const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
 // runs in this fixture. The allowance is below the actual envelope, so the
 // effective history budget is slightly less than 5,000 tokens.
 const TEST_REQUEST_ENVELOPE_TOKENS = 2_082;
-const TEST_HISTORY_BUDGET_TOKENS = 5_000;
+const TEST_HISTORY_BUDGET_TOKENS = 4_500;
 // Just over the threshold, without claiming a history far bigger than it has.
 const COMPACTION_PRESSURE_USAGE = {
   inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + TEST_HISTORY_BUDGET_TOKENS + 1,

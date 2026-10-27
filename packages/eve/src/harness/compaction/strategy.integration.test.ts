@@ -123,6 +123,60 @@ describe("compaction triggers", () => {
     });
   });
 
+  it("fails when a strategy leaves a history the provider measured over the limit", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const doStream = vi.fn(async () => textStream("Done.", 500));
+    const history: HarnessSession["history"] = [
+      { content: "Earlier notes.", kind: "user", role: "user" },
+    ];
+    const base = session(history, 10_000);
+    const events = await run({
+      message: "Please continue.",
+      model: new MockLanguageModelV3({ doStream }),
+      session: {
+        ...base,
+        compaction: {
+          ...base.compaction,
+          lastKnownInputTokens: 11_000,
+          lastKnownPromptMessageCount: 1,
+        },
+      },
+      strategy: { compact: async (messages) => messages },
+    });
+
+    expect(doStream).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      type: "session.ended",
+      data: { outcome: "failed", error: { code: "COMPACTION_FAILED" } },
+    });
+  });
+
+  it("leaves the session's messages as they were when a strategy edits them and throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const ctx = new ContextContainer();
+    writeReactionsState(ctx, {
+      ...readReactionsState(ctx),
+      intents: [{ occurrence: "o", reactionId: "hooks/trim.ts", type: "compact" }],
+    });
+    const history: HarnessSession["history"] = [
+      { content: "Original.", kind: "user", role: "user" },
+    ];
+    await run({
+      ctx,
+      message: "Thanks.",
+      model: new MockLanguageModelV3({ doStream: async () => textStream("Done.", 500) }),
+      session: session(history, 100_000),
+      strategy: {
+        compact: async (messages) => {
+          (messages[0] as { content: string }).content = "Edited.";
+          throw new Error("strategy broke");
+        },
+      },
+    });
+
+    expect(history[0]).toMatchObject({ content: "Original." });
+  });
+
   it.each([
     ["throws", async (): Promise<never> => Promise.reject(new Error("strategy broke"))],
     [

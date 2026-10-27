@@ -405,9 +405,14 @@ async function compactOnce(input: {
         estimateTokens,
         summarize,
       };
-      compactedOrdinary = await strategy.compact([...ordinary], context);
+      compactedOrdinary = await strategy.compact(structuredClone(ordinary), context);
       validateCompactionResult(ordinary, compactedOrdinary);
-      const resultTokens = estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens;
+      // A history the strategy left as it was keeps the provider's count, as the trigger counts
+      // it; a rewritten one has no provider count, so it is estimated.
+      const resultTokens =
+        JSON.stringify(compactedOrdinary) === JSON.stringify(ordinary)
+          ? measured.inputTokens
+          : estimateTokens(compactedOrdinary) + context.requestEnvelopeTokens;
       if (exceedsLimit({ inputTokens: resultTokens, threshold: context.threshold })) {
         throw new CompactionOverLimitError(
           `The compacted history is still over the limit (about ${resultTokens} of ${context.threshold} tokens).`,

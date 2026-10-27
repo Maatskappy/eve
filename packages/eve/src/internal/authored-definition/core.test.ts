@@ -88,6 +88,15 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"compaction.model" does not support defineDynamic');
   });
 
+  it("names the removed compaction.thresholdPercent", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { compaction: { thresholdPercent: 0.7 }, model: "openai/gpt-5.5" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.thresholdPercent" was removed');
+  });
+
   it("accepts Anthropic prompt cache options", () => {
     const definition = normalizeAgentDefinition(
       { model: "openai/gpt-5.5", modelOptions: { promptCache: { anthropic: { ttl: "1h" } } } },

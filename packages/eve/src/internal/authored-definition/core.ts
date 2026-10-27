@@ -321,6 +321,11 @@ function normalizeAgentCompactionDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["compaction"]> {
   const record = expectObjectRecord(value, message);
+  if (record.thresholdPercent !== undefined) {
+    throw new Error(
+      `${message} "compaction.thresholdPercent" was removed: eve compacts at 90% of the context window, and a hook can call ctx.compact() to compact sooner. See docs/concepts/compaction-strategies.`,
+    );
+  }
   expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
 

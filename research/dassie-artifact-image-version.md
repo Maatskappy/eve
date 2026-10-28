@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/Maatskappy/dassie/actions/runs/40741483639
 status: implementation
-last_updated: 2026-10-28
+last_updated: "2026-10-28"
 ---
 
 # Dassie artifact versions use the upstream sandbox image

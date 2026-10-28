@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const packageInfo = vi.hoisted(() => ({ name: "eve", version: "1.2.3" }));
@@ -44,6 +45,15 @@ describe("eve sandbox image", () => {
     expect(images.DEFAULT_EVE_SANDBOX_IMAGE).toBe(`ghcr.io/vercel/eve:${tag}`);
     expect(images.resolveVercelEveSandboxImage()).toBe(`vcr.vercel.com/vercel/eve/base:${tag}`);
     expect(images.VERCEL_EVE_SANDBOX_IMAGE).toBe(`vcr.vercel.com/vercel/eve/base:${tag}`);
+  });
+
+  it("uses the upstream images for the actual Dassie package artifact", () => {
+    const metadata = JSON.parse(
+      readFileSync(new URL("../../../../package.json", import.meta.url), "utf8"),
+    );
+    packageInfo.version = metadata.version;
+    expect(resolveEveSandboxImage()).toBe("ghcr.io/vercel/eve:0.72.1");
+    expect(resolveVercelEveSandboxImage()).toBe("vcr.vercel.com/vercel/eve/base:0.72.1");
   });
 
   it("uses EVE_SANDBOX_IMAGE_TAG for both registries", async () => {

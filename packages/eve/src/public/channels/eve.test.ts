@@ -9,7 +9,7 @@ import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { readClientContext } from "#internal/client-context.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
-import { type AuthFn, none } from "#public/channels/auth.js";
+import { type AuthFn, httpBasic, none } from "#public/channels/auth.js";
 import {
   eveChannel,
   defaultEveAuth,
@@ -340,12 +340,12 @@ function createEveCompactHandler(input: EveChannelInput) {
 }
 
 /** Creates a GET handler test harness for the durable session stream route. */
-function createEveStreamHandler(input: EveChannelInput) {
+function createEveStreamHandler(input: EveChannelInput, method: "GET" | "HEAD" = "GET") {
   const channel = eveChannel(input);
   const streamRoute = channel.routes.find(
-    (route) => route.method === "GET" && route.path === "/eve/v1/session/:sessionId/stream",
+    (route) => route.method === method && route.path === "/eve/v1/session/:sessionId/stream",
   );
-  if (!streamRoute) throw new Error("No session stream GET route found");
+  if (!streamRoute) throw new Error(`No session stream ${method} route found`);
 
   const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
   const getStreamTailIndex = vi.fn().mockResolvedValue(-1);
@@ -634,6 +634,27 @@ describe("eveChannel — stream cursor", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+  });
+
+  it("serves the authenticated HEAD route without opening a live stream", async () => {
+    const handler = createEveStreamHandler(
+      { auth: httpBasic({ username: "reader", password: "secret" }) },
+      "HEAD",
+    );
+    const url = "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1";
+    const denied = await handler.fetch(url, { method: "HEAD" });
+    expect(denied.status).toBe(401);
+    expect(handler.getStreamTailIndex).not.toHaveBeenCalled();
+
+    handler.getStreamTailIndex.mockResolvedValueOnce(41);
+    const response = await handler.fetch(url, {
+      method: "HEAD",
+      headers: { authorization: `Basic ${btoa("reader:secret")}` },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+    expect(response.body).toBeNull();
+    expect(handler.getEventStream).not.toHaveBeenCalled();
   });
 
   it("closes a tail-indexed replay after its durable events", async () => {

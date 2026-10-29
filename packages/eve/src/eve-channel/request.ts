@@ -287,7 +287,6 @@ export async function createSessionStreamResponse(
     // unreachable session would otherwise answer 200 and then fail mid-body.
     // Resolving the tail first surfaces that before any bytes are committed.
     const tailIndex = await session.getStreamTailIndex();
-    const events = await session.getEventStream({ startIndex });
     const controlVersion =
       new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
       EVE_STREAM_CONTROL_VERSION
@@ -304,6 +303,8 @@ export async function createSessionStreamResponse(
     if (includeTailIndex) {
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
+    if (request.method === "HEAD") return new Response(null, { headers });
+    const events = await session.getEventStream({ startIndex });
     return new Response(
       serializeAsNdjson(
         events,

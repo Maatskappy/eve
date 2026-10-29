@@ -585,13 +585,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         );
       }),
 
-      GET(EVE_SESSION_STREAM_ROUTE_PATTERN, async (req, { attachSession, params }) => {
-        const authResult = await routeAuth(req, input.auth);
-        if (authResult instanceof Response) return authResult;
-        const sessionId = requireSessionId(params);
-        if (sessionId instanceof Response) return sessionId;
-        return await createSessionStreamResponse(req, attachSession(sessionId));
-      }),
+      ...[GET, HEAD].map((method) =>
+        method(EVE_SESSION_STREAM_ROUTE_PATTERN, async (req, { attachSession, params }) => {
+          const authResult = await routeAuth(req, input.auth);
+          if (authResult instanceof Response) return authResult;
+          const sessionId = requireSessionId(params);
+          if (sessionId instanceof Response) return sessionId;
+          return await createSessionStreamResponse(req, attachSession(sessionId));
+        }),
+      ),
 
       GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);

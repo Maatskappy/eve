@@ -296,6 +296,14 @@ curl -i "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<cou
 
 The lookup is opt-in; requests without the parameter get no header. The TypeScript client wraps this into `stream({ follow: false })`.
 
+Use `HEAD` when you only need the cursor. It returns the same headers without opening the event stream or returning a body:
+
+```bash
+curl -I "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?includeTailIndex=1"
+```
+
+This is useful before sending a new turn when an observer needs to start after the existing history. The route uses the same authentication and session lookup as `GET`.
+
 ## Use the client from TypeScript
 
 For scripts, server-to-server calls, tests, evals, and custom UIs, `eve/client` wraps these routes in a typed client so you don't hand-roll the POST and NDJSON stream loop.

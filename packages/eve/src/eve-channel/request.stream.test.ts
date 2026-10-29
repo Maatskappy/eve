@@ -33,6 +33,29 @@ afterEach(() => {
 });
 
 describe("createSessionStreamResponse", () => {
+  it("answers a HEAD cursor read without opening the event stream", async () => {
+    const getEventStream = vi.fn(() => {
+      throw new Error("A metadata read must not open a live event stream");
+    });
+    const session: Session = {
+      ...stubSession(new ReadableStream()),
+      getStreamTailIndex: async () => 41,
+      getEventStream,
+    };
+
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?includeTailIndex=1", {
+        method: "HEAD",
+      }),
+      session,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
+    expect(response.body).toBeNull();
+    expect(getEventStream).not.toHaveBeenCalled();
+  });
+
   it("ends a negotiated response after its lease and cancels the source", async () => {
     vi.useFakeTimers();
     let cancelled = false;

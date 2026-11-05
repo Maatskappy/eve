@@ -124,6 +124,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 }
 
 interface ParsedSessionMessageBody {
+  operationId?: string;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -136,6 +137,13 @@ export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
   const { payload } = splitLegacyTaskFields(input);
+  const operationId = payload.operationId;
+  if (operationId !== undefined && (typeof operationId !== "string" || operationId.length === 0)) {
+    return Response.json(
+      { error: "Expected operationId to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -170,6 +178,7 @@ export function parseSessionMessageBody(
   }
 
   return {
+    operationId,
     callback,
     message,
     inputResponses,

@@ -215,6 +215,27 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -d '{"inputResponses":[{"requestId":"req_A","optionId":"approve"}]}'
 ```
 
+Authenticated callers can add a nonempty `operationId` when a follow-up may be retried:
+
+```json
+{ "operationId": "answer-42", "message": "Use the blue option." }
+```
+
+A successful response is HTTP 202 with `sessionId`, `operationId`, and `deliveryId`.
+Concurrent copies and retries of the same payload return the original receipt and
+admit one durable command. Reusing that operation ID with a different payload
+returns HTTP 409 with `code: "operation_conflict"`. The identity is scoped to the
+exact session and authenticated caller, including any trusted forwarded principal.
+Existing authentication and message policy still apply to every replay.
+
+Receipts remain readable after session completion and deployment handoff for as
+long as the session's Workflow history is retained. Retry the same request after
+an unknown transport outcome; do not mint a new operation ID. Requests without
+`operationId` remain independent deliveries. Anonymous callers cannot request
+replay. The health endpoint advertises protocol support with
+`x-eve-continuation-replay: operation-id-v1`; the Workflow World must support atomic
+hook resume admission for new operations to be accepted.
+
 Message sends default to `"steer"`. Before assistant output begins, eve interrupts pending model generation and continues the same turn with the correction. Reasoning and provider search progress do not count as assistant output. An executing eve tool finishes safely, and its result is preserved before the correction reaches the next model call. A steering message aborts the [`ctx.abortSignal`](/docs/tools/workflows#stop-early-for-a-new-message) of each `execute` workflow tool call the turn is waiting on: its questions are withdrawn, `sleep` and `ask_question` stop early, and the call settles with what its body returns. A steering message ends a `task_wait` but never interrupts a task. Only the turn's own caller steers it; another caller's message waits for the turn to end. After assistant output starts, steering applies at the next committed workflow boundary; text already streamed remains visible. Channels and TypeScript `Session.send(...)` calls can select `turnPolicy: "queue"` when the active turn should finish first. Structured `inputResponses` answer their addressed requests.
 
 If the session is waiting on a human-in-the-loop approval, respond with the channel’s Approve or Cancel controls. Text that doesn't match an option doesn't approve the call. From the person the turn serves, it steers the turn and cancels the approval, even when sent with `turnPolicy: "queue"`, since the turn can't end until that person acts; from anyone else, it waits until the turn ends. If they had already approved some calls in the batch, those calls still run. Cancelling the turn withdraws the approval, and a later answer to it approves nothing.

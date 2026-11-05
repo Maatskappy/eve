@@ -1,3 +1,4 @@
+import { operationDeliveryId, readContinuationOperation } from "#channel/continuation-operation.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
   createChannelDeliveryMetadata,
@@ -104,7 +105,12 @@ export function createSession(
   return {
     id,
     async send(message, options) {
-      const delivery = createDelivery(metadata);
+      const operation = readContinuationOperation(options);
+      const sourceDelivery = createDelivery(metadata);
+      const delivery =
+        sourceDelivery === undefined || operation === undefined
+          ? sourceDelivery
+          : { ...sourceDelivery, deliveryId: operationDeliveryId(id, operation) };
       const caller = sessionCallbackToTurnCaller(options.callback);
       const payload = attachClientContext<{
         context?: readonly string[];
@@ -117,6 +123,7 @@ export function createSession(
         auth: options.auth,
         delivery,
         kind: "send" as const,
+        operation: operation,
         payload,
         requestId: metadata.requestId,
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
@@ -133,7 +140,12 @@ export function createSession(
       }
       const validatedInputResponses = parseInputResponses(inputResponses);
       const caller = sessionCallbackToTurnCaller(options.callback);
-      const delivery = createDelivery(metadata);
+      const operation = readContinuationOperation(options);
+      const sourceDelivery = createDelivery(metadata);
+      const delivery =
+        sourceDelivery === undefined || operation === undefined
+          ? sourceDelivery
+          : { ...sourceDelivery, deliveryId: operationDeliveryId(id, operation) };
       const payload = attachClientContext<{
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
@@ -145,6 +157,7 @@ export function createSession(
         auth: options.auth,
         delivery,
         kind: "send" as const,
+        operation: operation,
         payload,
         requestId: metadata.requestId,
       };

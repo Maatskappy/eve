@@ -1,9 +1,12 @@
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
+import type { LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { activateDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -60,6 +63,90 @@ afterEach(() => {
 });
 
 describe("parent development Workflow World", () => {
+  it("attests real resume support for existing hooks and forwards interrupted claim bytes", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-resume-");
+    await seedGeneration(appRoot, "generation-a");
+    const parent = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    const payload = new Uint8Array([1, 2, 3]);
+    const resumeId = "existing-session-operation";
+    let linked: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await parent.start();
+      connectWorkerToWorld(parent, appRoot);
+      const worker = createDevelopmentWorkflowWorld();
+      const created = await worker.events.create(null, {
+        eventType: "run_created",
+        specVersion: 6,
+        eventData: {
+          deploymentId: "generation-a",
+          executionContext: {},
+          input: new Uint8Array(),
+          workflowName: workflowEntryReference.workflowId,
+        },
+      });
+      const runId = readCreatedRunId(created);
+      await worker.events.create(runId, { eventType: "run_started", specVersion: 6 });
+      const hookId = "hook_01J00000000000000000000001";
+      const token = `retained-hook-${runId}`;
+      await worker.events.create(runId, {
+        eventType: "hook_created",
+        specVersion: 6,
+        correlationId: hookId,
+        eventData: { token },
+      });
+      const hook = await worker.hooks.getByToken(token);
+      expect(hook.specVersion).toBe(6);
+      expect(hook.resumeCapabilities, "the parent attests its actual backend support").toEqual({
+        hookResumeDedupVersion: 1,
+      });
+      const storedHook = JSON.parse(
+        await fs.readFile(
+          join(resolveLocalWorkflowWorldDataDirectory(appRoot), "hooks", `${hookId}.json`),
+          "utf8",
+        ),
+      );
+      expect(
+        storedHook.resumeCapabilities,
+        "capability is response-only, including for existing hooks",
+      ).toBeUndefined();
+      const event = {
+        eventType: "hook_received" as const,
+        specVersion: 6 as const,
+        correlationId: hookId,
+        eventData: { token, payload },
+      };
+      const params = {
+        resumeId,
+        resumePayloadDigest: createHash("sha256").update(payload).digest("hex"),
+        eveRetainResumePayload: true,
+      };
+      const link = fs.link.bind(fs);
+      linked = vi.spyOn(fs, "link").mockImplementation(async (source, destination) => {
+        if (String(destination).includes(`/events/${runId}-`)) {
+          const staged = JSON.parse(await fs.readFile(source, "utf8")) as { resumeId?: string };
+          if (staged.resumeId === resumeId) throw new Error("Interrupted local admission over RPC");
+        }
+        return await link(source, destination);
+      });
+      await expect(worker.events.create(runId, event, params)).rejects.toThrow(
+        "Interrupted local admission over RPC",
+      );
+      linked.mockRestore();
+      const events = worker.events as LocalWorld["events"];
+      await expect(events.eveReadResumePayload(runId, resumeId, hookId)).resolves.toEqual(payload);
+      await Promise.all([
+        worker.events.create(runId, event, params),
+        worker.events.create(runId, event, params),
+      ]);
+      const stored = await worker.events.list({ runId });
+      expect(stored.data.filter((entry) => entry.eventType === "hook_received")).toHaveLength(1);
+      await expect(events.eveReadResumePayload(runId, resumeId, hookId)).resolves.toBeUndefined();
+    } finally {
+      linked?.mockRestore();
+      await parent.close();
+    }
+  });
+
   it("defaults local delivery timeouts to unbounded", async () => {
     for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
       delete process.env[name];

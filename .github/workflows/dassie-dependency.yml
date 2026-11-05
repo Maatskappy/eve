@@ -30,7 +30,7 @@ jobs:
       - name: Verify native callback lifecycle
         run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/execution/session/entry.integration.test.ts -t 'committed callback data|retired session|acknowledgement publication fails'
       - name: Verify continuation replay and handoff
-        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/eve-channel/continuation-replay.integration.test.ts src/execution/session-inbox/inbox.integration.test.ts src/execution/session/entry-handoff.integration.test.ts
+        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/eve-channel/continuation-replay.integration.test.ts src/execution/session-inbox/inbox.integration.test.ts src/execution/session/entry-handoff.integration.test.ts src/internal/workflow/development-world-server.integration.test.ts
       - name: Verify mounted extension context
         run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/compiler/mounted-extension.integration.test.ts -t 'keeps state independent'
       - name: Verify authored public API

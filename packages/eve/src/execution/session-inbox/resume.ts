@@ -1,3 +1,5 @@
+import { readContinuationOperation } from "#channel/continuation-operation.js";
+import { resumeReplaySessionInbox } from "#execution/session-inbox/replay.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type {
   DeliverHookPayload,
@@ -41,6 +43,13 @@ export async function resumeSessionInbox(
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalToken(address);
+  const operation = readContinuationOperation(command);
+  if (typeof address !== "string" && command.kind === "send" && operation !== undefined) {
+    return await resumeReplaySessionInbox(address.sessionId, {
+      ...command,
+      operation,
+    });
+  }
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
   while (true) {
     let hook;

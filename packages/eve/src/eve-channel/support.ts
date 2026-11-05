@@ -18,11 +18,14 @@ import {
 const log = createLogger("eve.channel");
 
 export function healthResponse(): Response {
-  return Response.json({
-    ok: true,
-    status: "ready",
-    workflowId: workflowEntryReference.workflowId,
-  });
+  return Response.json(
+    {
+      ok: true,
+      status: "ready",
+      workflowId: workflowEntryReference.workflowId,
+    },
+    { headers: { "x-eve-continuation-replay": "operation-id-v1" } },
+  );
 }
 
 /** Where a remote child the parent session recorded runs, and its credential key. */

@@ -1,3 +1,8 @@
+import {
+  continuationOperation,
+  attachContinuationOperation,
+  ContinuationOperationConflictError,
+} from "#channel/continuation-operation.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
@@ -383,6 +388,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (forwarded instanceof Response) return forwarded;
         const body = parseSessionMessageBody(payload);
         if (body instanceof Response) return body;
+        if (body.operationId !== undefined && authResult.principalType === "anonymous") {
+          return Response.json(
+            { ok: false, error: "Continuation replay requires authentication." },
+            { status: 401 },
+          );
+        }
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -408,14 +419,19 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           const session = attachSession(sessionId);
           const options = attachClientContext(
-            {
-              auth: dispatchAuth,
-              callback: body.callback,
-              context,
-              outputSchema: body.outputSchema,
-              turnPolicy: body.turnPolicy,
-              title,
-            },
+            attachContinuationOperation(
+              {
+                auth: dispatchAuth,
+                callback: body.callback,
+                context,
+                outputSchema: body.outputSchema,
+                turnPolicy: body.turnPolicy,
+                title,
+              },
+              body.operationId === undefined
+                ? undefined
+                : continuationOperation(body.operationId, authResult, body, forwarded.auth),
+            ),
             body.context,
           );
           result =
@@ -423,6 +439,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               ? await session.send(body.message!, options)
               : await session.respond(body.inputResponses, options);
         } catch (error) {
+          if (error instanceof ContinuationOperationConflictError) {
+            return Response.json(
+              { ok: false, code: "operation_conflict", error: error.message },
+              { status: 409, headers: { "cache-control": "no-store" } },
+            );
+          }
           const errorId = logError(log, "session-message request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to send the session message.", errorId, ok: false },
@@ -449,6 +471,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             sessionId: result.sessionId,
             status: "accepted",
             deliveryId: result.deliveryId,
+            operationId: body.operationId,
           },
           {
             headers: {

@@ -34,6 +34,7 @@ export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery
  */
 export const DEVELOPMENT_WORLD_OPERATIONS = [
   "events.create",
+  "events.eveReadResumePayload",
   "events.get",
   "events.list",
   "events.listByCorrelationId",

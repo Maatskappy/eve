@@ -301,6 +301,12 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
           "Local Workflow run was not resumed. Start a new conversation, or restart eve dev with --resume to attempt recovery.",
         );
       }
+      // The worker cannot see the parent World's static capability. Use the
+      // upstream response-only attestation, freshly derived from the backend,
+      // so existing hooks also expose the actual atomic resume contract.
+      if (this.#world.capabilities?.hookResumeDedup === true) {
+        return { ...hook, resumeCapabilities: { hookResumeDedupVersion: 1 } };
+      }
       return hook;
     }
     if (call.operation === "streams.writeMulti" && this.#world.streams.writeMulti === undefined) {

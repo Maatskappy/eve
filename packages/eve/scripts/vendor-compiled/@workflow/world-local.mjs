@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 import { loadDeclaration } from "../_shared.mjs";
+import { continuationReplayPlugin } from "./world-local-continuation.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -60,7 +61,11 @@ export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
   chunkGroup: "workflow",
-  fingerprintFiles: ["dist/fs.js"],
+  fingerprintFiles: [
+    "dist/fs.js",
+    "dist/storage/events-storage.js",
+    "dist/storage/run-retention.js",
+  ],
   declaration: await loadDeclaration("workflow-world-local.d.ts"),
-  plugins: [workflowWorldLocalVersionPlugin],
+  plugins: [workflowWorldLocalVersionPlugin, continuationReplayPlugin(workflowWorldLocalVersion)],
 };

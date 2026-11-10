@@ -40,15 +40,24 @@ jobs:
       - run: pnpm --filter eve test:unit
       - name: Verify callback data, its receipt and the stream cursor read
         run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/execution/session/callback-data.integration.test.ts
+      # Packed with npm from the staged package: pnpm drops the build metadata from the version.
       - name: Pack
         id: pack
-        working-directory: packages/eve
         run: |
+          pnpm build:eve
+          node scripts/stage-package.mjs packages/eve
           mkdir -p "$RUNNER_TEMP/pack"
-          pnpm pack --pack-destination "$RUNNER_TEMP/pack"
+          (cd packages/eve/.package && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack")
           file="$(ls "$RUNNER_TEMP/pack"/*.tgz)"
+          packed="$(tar xzOf "$file" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+          if [ "v$packed" != "$TAG" ]; then
+            echo "::error::Packed version $packed does not match tag $TAG." >&2
+            exit 1
+          fi
           echo "file=$file" >> "$GITHUB_OUTPUT"
           echo "sha512-$(openssl dgst -sha512 -binary "$file" | base64 -w0)"
+        env:
+          TAG: ${{ github.ref_name }}
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}

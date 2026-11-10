@@ -3,6 +3,8 @@ import type { ControlSettlement } from "#harness/facts.js";
 import { latestTurnIdOf, turnCoordinatesOf } from "#protocol/session-projection.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { callbackDataProperties } from "#context/callback-data.js";
+import { emitTerminalCallbackDeliveredStep } from "#execution/callback-delivered-step.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
@@ -92,8 +94,11 @@ export async function finalizeSession(
   const stored = storedProjection(session?.state);
   const latestTurnId = latestTurnIdOf(stored);
   const latest = latestTurnId === undefined ? undefined : turnCoordinatesOf(stored, latestTurnId);
+  // A caller reached by callback reads its receipt on this stream, after the session's end.
+  const holdsStream = context.caller?.replyTo.kind === "callback";
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
+      deferStreamClose: holdsStream,
       control: outcome.control,
       settles: outcome.settles,
       projection: stored,
@@ -105,6 +110,7 @@ export async function finalizeSession(
     });
   } else if (outcome.kind === "failed") {
     await emitTerminalSessionFailureStep({
+      deferStreamClose: holdsStream,
       error: normalizeSerializableError(outcome.error),
       sessionState,
       projection: stored,
@@ -113,7 +119,7 @@ export async function finalizeSession(
       turnId: outcome.turnId ?? latest?.turnId,
       usage,
     });
-  } else {
+  } else if (!holdsStream) {
     // The turn published the session's end; the run still closes the stream.
     await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
   }
@@ -125,12 +131,23 @@ export async function finalizeSession(
       usage: settled.turnUsage,
     };
     if (settled.isError) notification.isError = true;
-    await notifyTurnCallerStep({
-      caller: context.caller,
-      lifecycle: "terminal",
-      sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
-      settled: notification,
-    });
+    try {
+      await notifyTurnCallerStep({
+        caller: context.caller,
+        lifecycle: "terminal",
+        sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
+        settled: notification,
+        ...callbackDataProperties(serializedContext, context.caller.callId),
+      });
+      if (holdsStream) {
+        await emitTerminalCallbackDeliveredStep({
+          callId: context.caller.callId,
+          sessionWritable: context.sessionWritable,
+        });
+      }
+    } finally {
+      if (holdsStream) await closeSessionStreamStep({ sessionWritable: context.sessionWritable });
+    }
   }
   return outcome.kind === "done"
     ? {

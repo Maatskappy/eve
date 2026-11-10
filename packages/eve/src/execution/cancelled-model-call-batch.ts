@@ -1,5 +1,6 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { createLogger } from "#internal/logging.js";
+import { resolveKey } from "#context/key.js";
 import { AuthKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { DefinitionsStateKey } from "#definitions/state.js";
 import { withContextScope } from "#context/run-step.js";
@@ -87,13 +88,18 @@ export async function createCancelledModelCallBatchResult(input: {
     input.checkpoint?.result.session ??
     (await cancelledWithoutCheckpoint(input.ctx, input.initialSession, input.stepInput));
   // The stream keeps every event the cancelled batch published, so the projection does too.
-  const checkpointContext = {
+  const checkpointContext: Record<string, unknown> = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
     // Reactions saw every commit the stream kept.
     [DefinitionsStateKey.name]: interruptedContext[DefinitionsStateKey.name],
   };
+  // An interrupted call can already have external effects, such as model spend.
+  // Explicitly retained authored state reaches the cancellation settlement hook.
+  for (const [name, value] of Object.entries(interruptedContext)) {
+    if (resolveKey(name)?.onCancel === "preserve") checkpointContext[name] = value;
+  }
 
   return {
     action: "cancelled",

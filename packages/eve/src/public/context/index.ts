@@ -17,6 +17,7 @@ export type {
   SessionPredecessor,
   SessionTurn,
 } from "#context/accessors.js";
-export { defineState, type StateHandle } from "#public/definitions/state.js";
+export { defineState, type StateHandle, type StateOptions } from "#public/definitions/state.js";
+export { setCallbackData } from "#public/definitions/callback-data.js";
 export type { SessionContext, SessionInfo, SessionSchedule } from "#context/session-context.js";
 export type { HistoryMessage } from "#shared/history-message.js";

@@ -5,6 +5,7 @@
  */
 
 import type { LanguageModel } from "ai";
+import type { JsonValue } from "#shared/json.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 
 import type {
@@ -167,6 +168,15 @@ export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabili
 export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
+
+/** The call whose completion callback the running turn answers; absent for any other turn. */
+export const ActiveCallbackCallKey = new ContextKey<string>("eve.activeCallbackCallId");
+
+/** Authored data committed with the turn, never taken from caller input. */
+export const SessionCallbackDataKey = new ContextKey<{
+  readonly callId: string;
+  readonly value: JsonValue;
+}>("eve.sessionCallbackData");
 
 /**
  * The remote agent protocol of a {@link SessionCallbackKey} caller that speaks an earlier one. That

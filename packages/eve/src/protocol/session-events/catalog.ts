@@ -116,6 +116,7 @@ export const TERMINAL_OUTCOMES: { readonly [TType in TerminalType]: readonly str
 };
 
 export const FACT_CATALOG: { readonly [TType in Fact["type"]]: FactDescriptor } = {
+  "callback.delivered": { family: "session", idField: "callId", role: "record" },
   "call.requested": { family: "call", idField: "callId", role: "introduces" },
   "call.settled": { family: "call", idField: "callId", role: "terminal" },
   "call.started": { family: "call", idField: "callId", role: "updates" },

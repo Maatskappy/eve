@@ -52,9 +52,15 @@ export interface SessionEndedData {
   readonly error?: ErrorInfo;
 }
 
+/** The native completion callback for a delegated call was acknowledged by its receiver. */
+export interface CallbackDeliveredData {
+  readonly callId: string;
+}
+
 export type SessionStarted = Envelope<"session.started", SessionStartedData>;
 export type SessionEnded = Envelope<"session.ended", SessionEndedData>;
-export type SessionFact = SessionStarted | SessionEnded;
+export type CallbackDelivered = Envelope<"callback.delivered", CallbackDeliveredData>;
+export type SessionFact = SessionStarted | SessionEnded | CallbackDelivered;
 
 const sessionStartedData = conforming<SessionStartedData>()(
   z.object({
@@ -89,6 +95,10 @@ const sessionEndedData = conforming<SessionEndedData>()(
 );
 
 export const sessionSchemas = {
+  "callback.delivered": envelopeOf(
+    "callback.delivered",
+    conforming<CallbackDeliveredData>()(z.object({ callId: id })),
+  ),
   "session.ended": envelopeOf("session.ended", sessionEndedData),
   "session.started": envelopeOf("session.started", sessionStartedData),
 };

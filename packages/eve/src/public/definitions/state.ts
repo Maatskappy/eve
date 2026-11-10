@@ -9,6 +9,11 @@ import { isInWorkflowStep } from "#context/workflow-step.js";
  * All operations require an active eve context (ALS scope) and throw
  * when called outside one.
  */
+export interface StateOptions {
+  /** Keep updates from an interrupted call when cooperative cancellation settles. Defaults to rollback. */
+  readonly onCancel?: "rollback" | "preserve";
+}
+
 export interface StateHandle<T> {
   /** Read the current value. Returns `initial()` on first access within a context. */
   get(): T;
@@ -31,6 +36,8 @@ const RESERVED_STATE_NAME_PREFIXES = ["eve.", "eve:mount."] as const;
  * return the value from the workflow tool and update state in a `call.settled` hook.
  *
  * State is durable: values survive across workflow step boundaries.
+ * Set `onCancel: "preserve"` for facts such as dispatched spend that must
+ * survive cooperative cancellation of an interrupted call.
  * To reset per-turn, call `update(() => freshValue)` in a lifecycle
  * hook.
  *
@@ -42,14 +49,18 @@ const RESERVED_STATE_NAME_PREFIXES = ["eve.", "eve:mount."] as const;
  * const current = budget.get();
  * ```
  */
-export function defineState<T>(name: string, initial: () => T): StateHandle<T> {
+export function defineState<T>(
+  name: string,
+  initial: () => T,
+  options?: StateOptions,
+): StateHandle<T> {
   const reserved = RESERVED_STATE_NAME_PREFIXES.find((prefix) => name.startsWith(prefix));
   if (reserved !== undefined) {
     throw new Error(
       `defineState() name "${name}" uses the reserved "${reserved}" prefix. Use an application-owned namespace instead.`,
     );
   }
-  return createStateHandle(name, initial);
+  return createStateHandle(name, initial, options);
 }
 
 /** Internal registration of generated, mount-owned keys. */
@@ -57,8 +68,9 @@ export function defineMountedState<T>(
   mountId: string,
   name: string,
   initial: () => T,
+  options?: StateOptions,
 ): StateHandle<T> {
-  return createStateHandle(mountedStateKeyName(mountId, name), initial);
+  return createStateHandle(mountedStateKeyName(mountId, name), initial, options);
 }
 
 /** Durable context key name of one mount's state slot. */
@@ -66,8 +78,12 @@ export function mountedStateKeyName(mountId: string, name: string): string {
   return `eve:mount.v1:${encodeURIComponent(mountId)}:${encodeURIComponent(name)}`;
 }
 
-function createStateHandle<T>(name: string, initial: () => T): StateHandle<T> {
-  const key = new ContextKey<T>(name);
+function createStateHandle<T>(
+  name: string,
+  initial: () => T,
+  options?: StateOptions,
+): StateHandle<T> {
+  const key = new ContextKey<T>(name, options);
 
   return {
     get(): T {

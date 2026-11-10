@@ -1,14 +1,14 @@
 import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#definitions/frame.js";
-import { bindTurnCallerContext } from "#subagents/parent-notification.js";
+import { bindTurnRunCaller } from "#subagents/parent-notification.js";
 import { signInsAnswered, type SignInAnswer } from "#subagents/event-proxy-step.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
-import { contextStorage } from "#context/container.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
 import { startSessionPrewarmers } from "#context/prewarm.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { sessionProvider } from "#context/providers/session.js";
@@ -31,6 +31,7 @@ import {
   HandleEventKey,
   ToolChannelKey,
   TurnDeliveryIdsKey,
+  ActiveCallbackCallKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -145,7 +146,10 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   return await withSessionStateDelta(input, (state) =>
     runSessionStep({
       ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+      serializedContext:
+        state.bindsCaller === true
+          ? bindTurnRunCaller(state.caller, state.serializedContext)
+          : state.serializedContext,
     }),
   );
 }
@@ -616,7 +620,9 @@ async function runSessionStepBody(
       if ("result" in recovered) {
         await instrumentation?.flush();
         // The attempt that ended the session may have closed its stream already.
-        if (recovered.result.action === "done") await publisher.writer.close().catch(() => {});
+        if (recovered.result.action === "done" && !answersCallback(ctx)) {
+          await publisher.writer.close().catch(() => {});
+        }
         return recovered.result;
       }
       initialSession = recovered.session;
@@ -757,7 +763,7 @@ async function runSessionStepBody(
       if (disagreement !== undefined && disagreement !== "dispatch-deferred")
         log.warn("a turn step's decision disagrees with the session's tables", { disagreement });
     }
-    if (durableResult.action === "done") await publisher.writer.close();
+    if (durableResult.action === "done" && !answersCallback(ctx)) await publisher.writer.close();
     return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
     publisher.writer.release();
@@ -792,4 +798,9 @@ function ownSignInAnswer(
   const error = callback.params["error"];
   if (signIn === undefined || (error !== undefined && error !== SIGN_IN_DECLINED)) return undefined;
   return { interactionId, outcome: error === undefined ? "accepted" : "declined", signIn };
+}
+
+/** A session that ends answering a callback stays open for the receipt its finalization writes. */
+function answersCallback(ctx: ContextContainer): boolean {
+  return ctx.get(ActiveCallbackCallKey) !== undefined;
 }

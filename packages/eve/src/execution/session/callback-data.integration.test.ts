@@ -29,7 +29,7 @@ it("delivers a turn's committed callback data across a transport retry, then its
   const fetch = globalThis.fetch;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: RequestInfo | URL, options?: RequestInit) => {
+    vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
       if (String(url) !== callback.url) return fetch(url, options);
       bodies.push(JSON.parse(String(options?.body)) as Record<string, unknown>);
       // The first delivery fails in transport: the retry must carry the same report.

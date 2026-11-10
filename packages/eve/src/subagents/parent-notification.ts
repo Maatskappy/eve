@@ -287,19 +287,17 @@ async function postSettledTurnCallback(input: {
   readonly applicationData?: JsonValue;
 }): Promise<void> {
   const failed = input.result.isError === true;
-  await postCallbackPayload({
-    payload: {
-      callId: input.result.callId,
-      ...(failed ? { error: input.result.output } : {}),
-      kind: failed ? "turn.failed" : "turn.completed",
-      outcome: input.result.outcome,
-      ...(failed ? {} : { output: input.result.output }),
-      sessionId: input.sessionId,
-      subagentName: input.result.subagentName,
-      ...(input.applicationData === undefined ? {} : { applicationData: input.applicationData }),
-    },
-    url: input.url,
-  });
+  const payload: Record<string, unknown> = {
+    callId: input.result.callId,
+    kind: failed ? "turn.failed" : "turn.completed",
+    outcome: input.result.outcome,
+    sessionId: input.sessionId,
+    subagentName: input.result.subagentName,
+  };
+  if (failed) payload.error = input.result.output;
+  else payload.output = input.result.output;
+  if (input.applicationData !== undefined) payload.applicationData = input.applicationData;
+  await postCallbackPayload({ payload, url: input.url });
 }
 
 /**

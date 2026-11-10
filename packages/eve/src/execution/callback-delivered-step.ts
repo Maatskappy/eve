@@ -1,6 +1,5 @@
 import { encodeLineBytes } from "#protocol/session-events/envelope.js";
-import { callbackDelivered } from "#harness/session-machine/runs.js";
-import { fact } from "#harness/facts.js";
+import { callbackDelivered, callbackDeliveredAfterEnd } from "#harness/session-machine/runs.js";
 import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
 import type { SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
@@ -38,7 +37,7 @@ export async function emitTerminalCallbackDeliveredStep(input: {
       await writer.write(
         encodeLineBytes({
           at: new Date().toISOString(),
-          facts: [fact("callback.delivered", { callId: input.callId })],
+          facts: [callbackDeliveredAfterEnd(input.callId)],
         }),
       );
     } finally {

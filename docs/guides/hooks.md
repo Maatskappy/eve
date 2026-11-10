@@ -364,3 +364,32 @@ Hooks and channel event handlers have the same shape. When both handle an event,
 - [Context control](../concepts/context-control)
 - [Session context](../reference/typescript-api)
 - [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming)
+
+## Attach data to a completion callback
+
+When a turn answers a caller by native callback, a `turn.settled` hook can attach a
+JSON report with `setCallbackData` from `eve/context`:
+
+```ts title="agent/hooks/completion-report.ts"
+import { setCallbackData } from "eve/context";
+import { defineHook } from "eve/hooks";
+
+export default defineHook({
+  events: {
+    "turn.settled"(event) {
+      setCallbackData({ report: event.data.outcome });
+    },
+  },
+});
+```
+
+The value commits with the turn's durable context. The post-turn notification
+step sends it as `applicationData` alongside the normal callback payload. If
+callback delivery fails, eve retries that notification with the same report,
+without repeating model execution. The setter performs no external IO.
+
+Data belongs to the call the turn answers and is dropped when the turn next
+runs. Calls outside managed execution, or in a turn no caller waits on by
+callback, throw. Callbacks without authored data keep their payload. Application
+data does not alter the model's output, and receivers still authenticate
+callbacks and validate their reports before applying effects.

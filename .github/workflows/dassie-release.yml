@@ -1,0 +1,70 @@
+name: Dassie release
+
+# Builds the maintained eve package from a `v<version>+dassie.<n>` tag and attaches the packed
+# tarball to a GitHub release. Dassie pins that tarball by URL and integrity hash.
+
+on:
+  push:
+    tags: ["v*+dassie.*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dassie-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check the tag names the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p "require('./packages/eve/package.json').version")"
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match packages/eve version $version." >&2
+            exit 1
+          fi
+      - run: pnpm --filter eve exec tsc --noEmit
+      - run: pnpm --filter eve test:unit
+      - name: Verify callback data, its receipt and the stream cursor read
+        run: pnpm --filter eve exec vitest run --config vitest.integration.config.ts src/execution/session/callback-data.integration.test.ts
+      # Packed with npm from the staged package: pnpm drops the build metadata from the version.
+      - name: Pack
+        id: pack
+        run: |
+          pnpm build:eve
+          node scripts/stage-package.mjs packages/eve
+          mkdir -p "$RUNNER_TEMP/pack"
+          (cd packages/eve/.package && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack")
+          file="$(ls "$RUNNER_TEMP/pack"/*.tgz)"
+          packed="$(tar xzOf "$file" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+          if [ "v$packed" != "$TAG" ]; then
+            echo "::error::Packed version $packed does not match tag $TAG." >&2
+            exit 1
+          fi
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "sha512-$(openssl dgst -sha512 -binary "$file" | base64 -w0)"
+        env:
+          TAG: ${{ github.ref_name }}
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          FILE: ${{ steps.pack.outputs.file }}
+        run: |
+          gh release create "$TAG" "$FILE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "Maintained eve package for Dassie, built from tag $TAG."

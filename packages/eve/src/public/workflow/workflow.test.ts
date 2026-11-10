@@ -22,6 +22,21 @@ describe("eve/workflow", () => {
     expect(new workflow.FatalError("stop")).toBeInstanceOf(sdk.FatalError);
   });
 
+  it("types a run's streams without the SDK's wider options", () => {
+    // Type-checked only; a run handle needs a running World.
+    const calls = () => {
+      const streams = api.getRunStreams("wrun_1", { resilientStart: true });
+      expectTypeOf(streams.getReadable<string>().getTailIndex).returns.resolves.toBeNumber();
+      expectTypeOf(streams.getWritable<string>({ namespace: "log", ops: [] })).toEqualTypeOf<
+        WritableStream<string>
+      >();
+      // @ts-expect-error The SDK's hydration options are not part of eve's stream options.
+      void streams.getReadable({ global: globalThis });
+    };
+    expect(calls).toBeTypeOf("function");
+    expectTypeOf(sdkRuntime.getRun).returns.toExtend<api.WorkflowRunStreams>();
+  });
+
   it("declares signatures the SDK values satisfy", () => {
     expectTypeOf(sdk.createWebhook).toExtend<typeof workflow.createWebhook>();
     expectTypeOf(sdk.getWorkflowMetadata).toExtend<typeof workflow.getWorkflowMetadata>();

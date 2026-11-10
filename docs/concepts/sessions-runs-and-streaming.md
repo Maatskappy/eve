@@ -478,3 +478,31 @@ Channels and hooks observe what was written and can't change it.
 - [Channels](/docs/channels): how platform addresses map to sessions.
 - [Client SDK](/docs/guides/client): call these routes from scripts and server-side code.
 - [Frontend](/docs/guides/frontend): `useEveAgent` instead of raw routes.
+
+## Read the stream cursor without opening the stream
+
+Use `HEAD` when you only need the cursor. It returns the same headers as `GET`
+without opening the line stream or returning a body:
+
+```bash
+curl -I "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?includeTailIndex=1"
+```
+
+This is useful before sending a new turn when an observer needs to start after
+the existing history. The route uses the same authentication and session lookup
+as `GET`.
+
+## Observe callback acknowledgement
+
+A settled turn does not mean a native completion callback has been
+acknowledged. Stream consumers that need that external result wait for the
+`callback.delivered` fact with the original `callId`. It follows successful
+callback delivery, including a retried delivery, and contains no report,
+callback address, or credential. It is a transport receipt, not an authored
+lifecycle hook, and hooks do not run for it.
+
+For a session that goes on, the receipt is an ordinary committed line. For a
+session that ended with the turn, the stream stays open after `session.ended`
+until the callback is acknowledged, and the receipt is the last line before the
+stream ends. That last line is written best effort: a reader that reaches the end
+of the stream without it should read the callback's own record.

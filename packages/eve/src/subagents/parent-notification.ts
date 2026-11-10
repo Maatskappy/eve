@@ -5,7 +5,11 @@ import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { SessionCallbackKey } from "#context/keys.js";
+import {
+  ActiveCallbackCallKey,
+  SessionCallbackDataKey,
+  SessionCallbackKey,
+} from "#context/keys.js";
 import {
   isSubagentAdapterState,
   SUBAGENT_ADAPTER_KIND,
@@ -15,7 +19,7 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { createLogger } from "#internal/logging.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { parseJsonValue } from "#shared/json.js";
+import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
@@ -58,6 +62,8 @@ export async function notifyTurnCallerStep(input: {
   readonly lifecycle: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly settled: SettledTurnNotification;
+  /** Authored data the turn committed for this call; see `setCallbackData`. */
+  readonly applicationData?: JsonValue;
 }): Promise<void> {
   "use step";
 
@@ -74,6 +80,7 @@ export async function notifyTurnCallerStep(input: {
 
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
+      applicationData: input.applicationData,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
@@ -89,6 +96,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   readonly caller: TurnCaller;
   readonly sessionId: string;
   readonly usage?: TokenUsage;
+  readonly applicationData?: JsonValue;
 }): Promise<void> {
   "use step";
 
@@ -113,6 +121,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   const result = input.usage === undefined ? base : { ...base, usage: input.usage };
   if (input.caller.replyTo.kind === "callback") {
     await postSettledTurnCallback({
+      applicationData: input.applicationData,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
@@ -251,39 +260,44 @@ export function bindTurnCallerContext(
   };
 }
 
+/**
+ * Binds the caller a run of a turn answers, as its first step. A report set for an earlier call
+ * is dropped, and only a caller reached by callback can receive a new one.
+ */
+export function bindTurnRunCaller(
+  caller: TurnCaller | undefined,
+  serializedContext: Record<string, unknown>,
+): Record<string, unknown> {
+  const {
+    [SessionCallbackDataKey.name]: _report,
+    [ActiveCallbackCallKey.name]: _call,
+    ...rest
+  } = serializedContext;
+  const bound = bindTurnCallerContext(caller, rest);
+  return caller?.replyTo.kind === "callback"
+    ? { ...bound, [ActiveCallbackCallKey.name]: caller.callId }
+    : bound;
+}
+
 async function postSettledTurnCallback(input: {
   readonly result: RuntimeSubagentChildResult;
   /** Informational on the wire (tracing); the receiver never verifies it. */
   readonly sessionId: string;
   readonly url: string;
+  readonly applicationData?: JsonValue;
 }): Promise<void> {
-  const { sessionId } = input;
-  if (input.result.isError === true) {
-    await postCallbackPayload({
-      payload: {
-        callId: input.result.callId,
-        error: input.result.output,
-        kind: "turn.failed",
-        outcome: input.result.outcome,
-        sessionId,
-        subagentName: input.result.subagentName,
-      },
-      url: input.url,
-    });
-    return;
-  }
-
-  await postCallbackPayload({
-    payload: {
-      callId: input.result.callId,
-      kind: "turn.completed",
-      outcome: input.result.outcome,
-      output: input.result.output,
-      sessionId,
-      subagentName: input.result.subagentName,
-    },
-    url: input.url,
-  });
+  const failed = input.result.isError === true;
+  const payload: Record<string, unknown> = {
+    callId: input.result.callId,
+    kind: failed ? "turn.failed" : "turn.completed",
+    outcome: input.result.outcome,
+    sessionId: input.sessionId,
+    subagentName: input.result.subagentName,
+  };
+  if (failed) payload.error = input.result.output;
+  else payload.output = input.result.output;
+  if (input.applicationData !== undefined) payload.applicationData = input.applicationData;
+  await postCallbackPayload({ payload, url: input.url });
 }
 
 /**

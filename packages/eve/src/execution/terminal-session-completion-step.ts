@@ -9,6 +9,7 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 /** Emits a terminal `session.ended` outside a turn. */
 export async function emitTerminalSessionCompletionStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly deferStreamClose?: boolean;
   readonly serializedContext: Record<string, unknown>;
   /** The session's last turn, reported to channel handlers as `ctx.session.turn`. */
   readonly turn?: HarnessTurnRef;

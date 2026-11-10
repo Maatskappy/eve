@@ -57,6 +57,21 @@ async function records(response: Response): Promise<unknown[]> {
 }
 
 describe("createSessionStreamResponse", () => {
+  it("answers a HEAD cursor read without opening the line stream", async () => {
+    const { session, starts, tailLookups } = sessionOf([line("a"), line("b")], { open: true });
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?includeTailIndex=1", {
+        method: "HEAD",
+      }),
+      session,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("1");
+    expect(response.body).toBeNull();
+    expect(tailLookups()).toBe(1);
+    expect(starts).toEqual([]);
+  });
+
   it("bounds a historical read at the durable tail and asks for it without following", async () => {
     const { follows, session } = sessionOf([line("a"), line("b")], { open: true });
     const response = await createSessionStreamResponse(

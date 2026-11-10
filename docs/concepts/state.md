@@ -122,3 +122,19 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 - The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api)
 - Tenant-scoped long-term memory with any provider → [Multi-tenant memory](../patterns/multi-tenant-memory)
 - First-class recall, capture, and provider tools → [Memory](../memory)
+
+## Preserve external-effect facts on cancellation
+
+Cancellation restores ordinary state to the last completed model-call checkpoint.
+For facts that already happened outside the agent, such as a provider dispatch or
+charged usage, opt in to retaining that slot:
+
+```ts
+const spend = defineState("my-agent.spend", () => ({ dispatched: false }), {
+  onCancel: "preserve",
+});
+```
+
+The cancellation hook sees the interrupted call's latest value. Other state and
+conversation history still roll back. This applies when cooperative cancellation
+settles; it does not commit updates during an abrupt process failure.

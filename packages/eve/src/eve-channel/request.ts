@@ -359,6 +359,14 @@ export async function createSessionStreamResponse(
   const includeTailIndex = !follow || parseIncludeTailIndex(request);
 
   try {
+    if (request.method === "HEAD") {
+      // A metadata read reports the cursor without opening a line stream. Resolving the tail
+      // also surfaces an unknown or expired session as the same status a GET would answer.
+      const tailIndex = await internalSession(session).getStreamTailIndex();
+      return new Response(null, {
+        headers: sessionStreamHeaders(session, includeTailIndex ? tailIndex : undefined),
+      });
+    }
     // An unknown or unreachable session would otherwise answer 200 and then fail mid-body, so it
     // must fail before any bytes are committed. A following read checks the session as it opens
     // and a historical read always reports the tail, so only a response that reports the tail, or
@@ -401,18 +409,9 @@ export async function createSessionStreamResponse(
     } else {
       lines = await (early ?? internalSession(session).getLineStream({ follow, startIndex: from }));
     }
-    const headers = new Headers({
-      "cache-control": "no-store, no-transform",
-      "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
-      "x-accel-buffering": "no",
-      [EVE_SESSION_ID_HEADER]: session.id,
-      [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
-      [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+    return new Response(serializeLines(lines, request.signal, lineLimit), {
+      headers: sessionStreamHeaders(session, includeTailIndex ? tailIndex : undefined),
     });
-    if (includeTailIndex && tailIndex !== undefined) {
-      headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
-    }
-    return new Response(serializeLines(lines, request.signal, lineLimit), { headers });
   } catch (error) {
     const stranded = sessionCommandErrorResponse(error);
     if (stranded !== undefined) return stranded;
@@ -428,6 +427,19 @@ export async function createSessionStreamResponse(
       { status: notFound ? 404 : 503 },
     );
   }
+}
+
+function sessionStreamHeaders(session: Session, tailIndex: number | undefined): Headers {
+  const headers = new Headers({
+    "cache-control": "no-store, no-transform",
+    "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
+    "x-accel-buffering": "no",
+    [EVE_SESSION_ID_HEADER]: session.id,
+    [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
+    [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+  });
+  if (tailIndex !== undefined) headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
+  return headers;
 }
 
 /**

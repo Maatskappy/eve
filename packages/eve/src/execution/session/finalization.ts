@@ -132,14 +132,14 @@ export async function finalizeSession(
     };
     if (settled.isError) notification.isError = true;
     try {
-      await notifyTurnCallerStep({
+      const notificationOutcome = await notifyTurnCallerStep({
         caller: context.caller,
         lifecycle: "terminal",
         sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
         settled: notification,
         ...callbackDataProperties(serializedContext, context.caller.callId),
       });
-      if (holdsStream) {
+      if (holdsStream && notificationOutcome === "acknowledged") {
         await emitTerminalCallbackDeliveredStep({
           callId: context.caller.callId,
           sessionWritable: context.sessionWritable,

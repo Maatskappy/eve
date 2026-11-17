@@ -503,6 +503,12 @@ lifecycle hook, and hooks do not run for it.
 
 For a session that goes on, the receipt is an ordinary committed line. For a
 session that ended with the turn, the stream stays open after `session.ended`
-until the callback is acknowledged, and the receipt is the last line before the
-stream ends. That last line is written best effort: a reader that reaches the end
+until the callback attempt finishes. An acknowledged callback adds its receipt
+as the last line before the stream ends. That last line is written best effort: a reader that reaches the end
 of the stream without it should read the callback's own record.
+
+A receiver that keeps answering `CALLBACK_NOT_PENDING` may have consumed the
+result earlier or stopped waiting. Once those retries end, eve leaves the
+session alive but emits no delivery receipt. That response does not prove an
+acknowledgement. Read the callback receiver's record to resolve its outcome.
+Only the transport receipt may follow `session.ended`; new work remains invalid.

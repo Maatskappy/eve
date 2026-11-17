@@ -490,15 +490,15 @@ async function runSessionLoop(
             sessionId: boot.sessionId,
             ...callbackDataProperties(cursor.serializedContext, caller.callId),
           };
-          await notifyCancelledTaskCallerStep(
+          const notificationOutcome = await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
-          await publishCallbackReceipt(caller);
+          if (notificationOutcome === "acknowledged") await publishCallbackReceipt(caller);
         }
       } else if (action.settled !== undefined) {
         const caller = progress.caller;
         if (caller !== undefined) {
-          await notifyTurnCallerStep({
+          const notificationOutcome = await notifyTurnCallerStep({
             caller,
             lifecycle: "parked",
             sessionId: boot.sessionId,
@@ -507,7 +507,7 @@ async function runSessionLoop(
           });
           // Answered: a failure publishing the receipt must not answer the caller again.
           progress.caller = undefined;
-          await publishCallbackReceipt(caller);
+          if (notificationOutcome === "acknowledged") await publishCallbackReceipt(caller);
         }
         progress.caller = undefined;
       }

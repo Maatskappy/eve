@@ -30,6 +30,9 @@ import {
 
 const log = createLogger("execution.delegated-parent-notification");
 
+type CallbackDeliveryOutcome = "acknowledged" | "not-pending";
+type TurnCallerNotificationOutcome = CallbackDeliveryOutcome | "not-callback";
+
 /** Error code for a delegated agent whose execution threw. */
 const SUBAGENT_EXECUTION_FAILED = "SUBAGENT_EXECUTION_FAILED";
 
@@ -64,11 +67,11 @@ export async function notifyTurnCallerStep(input: {
   readonly settled: SettledTurnNotification;
   /** Authored data the turn committed for this call; see `setCallbackData`. */
   readonly applicationData?: JsonValue;
-}): Promise<void> {
+}): Promise<TurnCallerNotificationOutcome> {
   "use step";
 
   if (input.caller === undefined) {
-    return;
+    return "not-callback";
   }
 
   const result = createSettledTurnResult({
@@ -79,16 +82,16 @@ export async function notifyTurnCallerStep(input: {
   });
 
   if (input.caller.replyTo.kind === "callback") {
-    await postSettledTurnCallback({
+    return await postSettledTurnCallback({
       applicationData: input.applicationData,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
     });
-    return;
   }
 
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  return "not-callback";
 }
 
 /** Settles a workflow-owned caller after the child turn is cooperatively cancelled. */
@@ -97,7 +100,7 @@ export async function notifyCancelledTaskCallerStep(input: {
   readonly sessionId: string;
   readonly usage?: TokenUsage;
   readonly applicationData?: JsonValue;
-}): Promise<void> {
+}): Promise<TurnCallerNotificationOutcome> {
   "use step";
 
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
@@ -120,15 +123,15 @@ export async function notifyCancelledTaskCallerStep(input: {
   };
   const result = input.usage === undefined ? base : { ...base, usage: input.usage };
   if (input.caller.replyTo.kind === "callback") {
-    await postSettledTurnCallback({
+    return await postSettledTurnCallback({
       applicationData: input.applicationData,
       result,
       sessionId: input.sessionId,
       url: input.caller.replyTo.url,
     });
-    return;
   }
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
+  return "not-callback";
 }
 
 function createSettledTurnResult(input: {
@@ -285,7 +288,7 @@ async function postSettledTurnCallback(input: {
   readonly sessionId: string;
   readonly url: string;
   readonly applicationData?: JsonValue;
-}): Promise<void> {
+}): Promise<CallbackDeliveryOutcome> {
   const failed = input.result.isError === true;
   const payload: Record<string, unknown> = {
     callId: input.result.callId,
@@ -297,7 +300,7 @@ async function postSettledTurnCallback(input: {
   if (failed) payload.error = input.result.output;
   else payload.output = input.result.output;
   if (input.applicationData !== undefined) payload.applicationData = input.applicationData;
-  await postCallbackPayload({ payload, url: input.url });
+  return await postCallbackPayload({ payload, url: input.url });
 }
 
 /**
@@ -309,13 +312,13 @@ export const NOT_PENDING_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 2
 async function postCallbackPayload(input: {
   readonly payload: unknown;
   readonly url: string;
-}): Promise<void> {
+}): Promise<CallbackDeliveryOutcome> {
   for (let attempt = 0; ; attempt += 1) {
     const response = await postSessionCallbackRequest({
       body: input.payload,
       url: input.url,
     });
-    if (response.ok) return;
+    if (response.ok) return "acknowledged";
     if (!(await isCallbackNotPending(response))) {
       throw new Error(`Turn callback failed with HTTP ${response.status}.`);
     }
@@ -327,7 +330,7 @@ async function postCallbackPayload(input: {
       log.warn("turn caller no longer waits for this result", {
         kind: Reflect.get(input.payload as object, "kind"),
       });
-      return;
+      return "not-pending";
     }
     await new Promise((resolve) => setTimeout(resolve, delay));
   }

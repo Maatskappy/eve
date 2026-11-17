@@ -159,7 +159,8 @@ export function createStreamChecker(
             fail("schema", invalid);
             return;
           }
-          if (view.session.status === "ended") {
+          // Finalization can acknowledge transport after the session ends; no new work may follow.
+          if (view.session.status === "ended" && fact.type !== "callback.delivered") {
             fail("after-session-end", `${fact.type} follows session.ended.`);
             return;
           }

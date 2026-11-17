@@ -83,7 +83,7 @@ describe("turn caller notification", () => {
         sessionId: "root-session",
         settled: { output: "root answer" },
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("not-callback");
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(resumeHookMock).not.toHaveBeenCalled();
@@ -348,7 +348,7 @@ describe("turn caller notification", () => {
         .mockResolvedValueOnce(new Response(null, { status: 202 }));
       const notified = notify();
       await vi.runAllTimersAsync();
-      await expect(notified).resolves.toBeUndefined();
+      await expect(notified).resolves.toBe("acknowledged");
       expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
@@ -357,7 +357,7 @@ describe("turn caller notification", () => {
       fetchMock.mockImplementation(async () => notPending());
       const notified = notify();
       await vi.runAllTimersAsync();
-      await expect(notified).resolves.toBeUndefined();
+      await expect(notified).resolves.toBe("not-pending");
       expect(fetchMock).toHaveBeenCalledTimes(NOT_PENDING_RETRY_DELAYS_MS.length + 1);
     });
 
@@ -367,7 +367,7 @@ describe("turn caller notification", () => {
       );
       const notified = notify();
       await vi.runAllTimersAsync();
-      await expect(notified).resolves.toBeUndefined();
+      await expect(notified).resolves.toBe("not-pending");
     });
 
     it("still fails a callback that can't be delivered, so its step retries", async () => {
@@ -399,7 +399,7 @@ describe("turn caller notification", () => {
           sessionId: "child-session",
           settled: { output: "late answer" },
         }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe("not-callback");
 
       expect(warnSpy).toHaveBeenCalledWith(
         "[eve:execution.delegated-parent-notification] turn caller hook no longer exists",

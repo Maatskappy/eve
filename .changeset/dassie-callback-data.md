@@ -9,3 +9,5 @@ Add `setCallbackData` so a `turn.settled` hook can commit a JSON report that the
 `getRunStreams` from `eve/workflow/api` returns a run's durable streams for routes and steps that keep an append-only log beside a run.
 
 Delivery receipts require an acknowledged callback response. A receiver that keeps reporting nothing pending produces no receipt. Terminal receipts remain valid transport facts after the session ends.
+
+Transport receipts do not invoke authored handlers, including wildcard hooks.

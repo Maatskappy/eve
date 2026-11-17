@@ -48,6 +48,7 @@ it("delivers a turn's committed callback data across a transport retry, then its
   );
   const steps = defineState("callback-data.steps", () => 0);
   let modelRuns = 0;
+  const hookEvents: string[] = [];
   let callerlessError: unknown;
 
   const runtime = await createTestRuntime({
@@ -58,6 +59,9 @@ it("delivers a turn's committed callback data across a transport retry, then its
         loadNamespace: async () => ({
           default: defineHook({
             events: {
+              "*"(event) {
+                hookEvents.push(event.type);
+              },
               "model.settled"() {
                 modelRuns += 1;
                 steps.update((count) => count + 1);
@@ -105,6 +109,8 @@ it("delivers a turn's committed callback data across a transport retry, then its
       await acknowledged.promise;
       const receipt = await stream.nextUntil((event) => event.type === "callback.delivered");
       expect(receipt.at(-1)?.data).toEqual({ callId: callback.callId });
+      expect(hookEvents).toContain("turn.settled");
+      expect(hookEvents).not.toContain("callback.delivered");
 
       expect(bodies).toHaveLength(2);
       expect(bodies[1]).toEqual(bodies[0]);

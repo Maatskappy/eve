@@ -7,7 +7,7 @@ on:
   pull_request:
     branches: [dassie/1.0]
   push:
-    tags: ["v*+dassie.*"]
+    tags: ['v*\+dassie.*']
 
 permissions:
   contents: write

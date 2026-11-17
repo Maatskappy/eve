@@ -9,5 +9,7 @@
   "SessionSchedule",
   "SessionTurn",
   "StateHandle",
-  "defineState"
+  "StateOptions",
+  "defineState",
+  "setCallbackData"
 ]

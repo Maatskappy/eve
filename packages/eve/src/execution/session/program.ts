@@ -11,6 +11,8 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
+import { callbackDataProperties } from "#context/callback-data.js";
+import { emitCallbackDeliveredStep } from "#execution/callback-delivered-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { turnCoordinates } from "#protocol/session-projection.js";
@@ -383,6 +385,11 @@ async function runSessionLoop(
     progress.caller = undefined;
     return settled;
   };
+  /** Tells readers of the stream that the caller's callback acknowledged the turn's result. */
+  const publishCallbackReceipt = async (caller: TurnCaller): Promise<void> => {
+    if (caller.replyTo.kind !== "callback") return;
+    await cursor.advance((state) => emitCallbackDeliveredStep({ ...state, callId: caller.callId }));
+  };
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
       const next = await nextParkedActivity();
@@ -478,19 +485,29 @@ async function runSessionLoop(
         const { caller } = progress;
         const settled = await settleCancelledTurn(caller !== undefined, action.cancelledBy);
         if (caller !== undefined) {
-          const notification = { caller, sessionId: boot.sessionId };
-          await notifyCancelledTaskCallerStep(
+          const notification = {
+            caller,
+            sessionId: boot.sessionId,
+            ...callbackDataProperties(cursor.serializedContext, caller.callId),
+          };
+          const notificationOutcome = await notifyCancelledTaskCallerStep(
             settled.usage === undefined ? notification : { ...notification, usage: settled.usage },
           );
+          if (notificationOutcome === "acknowledged") await publishCallbackReceipt(caller);
         }
       } else if (action.settled !== undefined) {
-        if (progress.caller !== undefined) {
-          await notifyTurnCallerStep({
-            caller: progress.caller,
+        const caller = progress.caller;
+        if (caller !== undefined) {
+          const notificationOutcome = await notifyTurnCallerStep({
+            caller,
             lifecycle: "parked",
             sessionId: boot.sessionId,
             settled: action.settled,
+            ...callbackDataProperties(cursor.serializedContext, caller.callId),
           });
+          // Answered: a failure publishing the receipt must not answer the caller again.
+          progress.caller = undefined;
+          if (notificationOutcome === "acknowledged") await publishCallbackReceipt(caller);
         }
         progress.caller = undefined;
       }

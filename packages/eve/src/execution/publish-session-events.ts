@@ -701,7 +701,10 @@ export async function publishTerminalSessionEvent(input: {
   readonly turnId?: string;
   /** The session's last checkpointed projection: what's open, and the next line's position. */
   readonly projection?: SessionProjection;
+  /** Leave the stream open for a receipt the caller writes; the caller then closes it. */
+  readonly deferStreamClose?: boolean;
 }): Promise<void> {
+  const closeStream = input.deferStreamClose !== true;
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";
   const fields = { errorId: input.errorId, sessionId };
   const type = "session.ended";
@@ -735,6 +738,7 @@ export async function publishTerminalSessionEvent(input: {
     log.error(`failed to restore context for terminal ${type} event`, { ...fields, error });
     // Folding needs no provider or authority; a broken context must not hide orphaned facts.
     if (projection.view.session.status === "ended") {
+      if (!closeStream) return;
       try {
         await openSessionEventWriter(input.sessionWritable).close();
       } catch {
@@ -743,15 +747,16 @@ export async function publishTerminalSessionEvent(input: {
       return;
     }
     const ended = endSession(projection, input.ending);
-    await writeUnroutedSessionEvent(input.sessionWritable, projection, ended).catch((writeError) =>
-      log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
+    await writeUnroutedSessionEvent(input.sessionWritable, projection, ended, closeStream).catch(
+      (writeError) =>
+        log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
     );
     return;
   }
 
   if (projection.view.session.status === "ended") {
     try {
-      await publisher.writer.close();
+      if (closeStream) await publisher.writer.close();
     } catch {
       // The terminal fact survived an earlier attempt that already closed the stream.
     } finally {
@@ -775,7 +780,7 @@ export async function publishTerminalSessionEvent(input: {
   // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
     await publisher.emit(event);
-    await publisher.writer.close();
+    if (closeStream) await publisher.writer.close();
   };
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
@@ -810,6 +815,7 @@ async function writeUnroutedSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
   projection: SessionProjection,
   commit: Commit,
+  closeStream = true,
 ): Promise<void> {
   const lines = (await createLineCommitter()).commit(
     projection.view,
@@ -819,7 +825,7 @@ async function writeUnroutedSessionEvent(
   const writer = openSessionEventWriter(sessionWritable);
   try {
     for (const { bytes } of lines) await writer.write(bytes);
-    await writer.close();
+    if (closeStream) await writer.close();
   } finally {
     writer.release();
   }

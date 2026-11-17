@@ -16,6 +16,7 @@ import { principalOf } from "#execution/session/principal.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { MessageContent } from "#shared/message-content.js";
 import type { SessionView as SessionTables } from "#protocol/session-projection/tables.js";
+import { authoringEventTypes } from "#protocol/session-events/authoring.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TurnSettledData } from "#protocol/session-events/families/turn.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
@@ -42,6 +43,8 @@ import {
 } from "#definitions/state.js";
 import type { CommitInput, Definition, Effect } from "./definition.js";
 
+const AUTHORING_EVENT_TYPES = new Set<string>(authoringEventTypes);
+
 /**
  * An authored hook: after every commit, its handlers run once for each fact of their type, typed
  * handler first, then `*`. Its occurrence identifies the fact for external services that support
@@ -54,6 +57,8 @@ export function hookDefinition(hook: ResolvedHookDefinition): Definition {
     contribute: (ctx) => ({
       effects: () =>
         (ctx.commit?.written ?? []).flatMap(({ event: written, position, progress, view }) => {
+          // Transport records are committed without invoking authored handlers, including `*`.
+          if (!AUTHORING_EVENT_TYPES.has(written.type)) return [];
           const { meta, ...event } = written;
           // Streamed progress reaches a handler that names it, and never `*`.
           return (progress ? [event.type] : [event.type, "*"]).flatMap((key): Effect[] => {

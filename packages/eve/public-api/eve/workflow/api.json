@@ -1,1 +1,10 @@
-["WorkflowRun", "WorkflowRunStatus", "getRun", "resumeHook", "start"]
+[
+  "WorkflowRun",
+  "WorkflowRunReadable",
+  "WorkflowRunStatus",
+  "WorkflowRunStreams",
+  "getRun",
+  "getRunStreams",
+  "resumeHook",
+  "start"
+]

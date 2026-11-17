@@ -36,6 +36,8 @@ export interface TurnStepInput {
   readonly abortSignal?: AbortSignal;
   /** The delegated caller to bind into the context before the step runs; sent on a turn's first step. */
   readonly caller?: TurnCaller;
+  /** Set on the first step of each run of a turn, which binds `caller`, present or not. */
+  readonly bindsCaller?: boolean;
   readonly steeringSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;

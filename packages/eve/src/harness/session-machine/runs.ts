@@ -100,3 +100,13 @@ export function lateTaskSpend(view: SessionView, spend: Usage | undefined): Tran
     turn: view.turn,
   });
 }
+
+/** The receiver of a delegated call's completion callback acknowledged it. */
+export function callbackDelivered(view: SessionView, callId: string): Transition {
+  return transition({ events: [fact("callback.delivered", { callId })], turn: view.turn });
+}
+
+/** The receipt as the one line written after a session's end, when its tables are closed. */
+export function callbackDeliveredAfterEnd(callId: string): SessionEvent {
+  return fact("callback.delivered", { callId });
+}

@@ -194,11 +194,14 @@ export class SessionExecution {
     // replied to at its own address (`TurnOutcome.caller`) and is bound by the
     // next turn, so this turn's forwarding keeps its original caller.
     let bindCaller = turn.caller;
+    let bindsCaller = true;
 
     while (true) {
       const { cursor } = this.input;
       const caller = bindCaller;
       bindCaller = undefined;
+      const firstStep = bindsCaller;
+      bindsCaller = false;
       const observation = this.input.inbox.handoverObservation;
       const handover =
         observation?.attemptKey === this.observedHandoverAttemptKey ? undefined : observation;
@@ -212,6 +215,7 @@ export class SessionExecution {
             handover,
             abortSignal: turn.signal,
             caller,
+            bindsCaller: firstStep,
             input: nextStepInput,
             recover,
             steeringSignal: turn.steeringSignal,
